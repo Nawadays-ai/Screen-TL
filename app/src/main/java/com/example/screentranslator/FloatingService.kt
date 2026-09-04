@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
@@ -35,20 +36,51 @@ class FloatingService : Service() {
     private var isRealtimeActive = false
     private var isSubMenuVisible = false
 
+    private var screenCaptureManager: ScreenCaptureManager? = null
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
+
         startForegroundServiceNotification()
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        
-        // Membungkus Service dengan tema Material agar FloatingActionButton tidak crash
-     val themedContext = ContextThemeWrapper(
-    this,
-    R.style.ScreenTranslatorOverlayTheme
-)
-        floatingView = LayoutInflater.from(themedContext).inflate(R.layout.layout_floating_widget, null)
+
+        val resultCode = intentResultCode()
+        val projectionData = intentProjectionData()
+
+        if (resultCode != null && projectionData != null) {
+            screenCaptureManager = ScreenCaptureManager(
+                this,
+                resultCode,
+                projectionData
+            )
+
+            val started = screenCaptureManager?.start() == true
+
+            if (!started) {
+                Toast.makeText(
+                    this,
+                    "Screen Capture gagal dimulai",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        } else {
+            Toast.makeText(
+                this,
+                "Data Rekam Layar tidak ditemukan",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+
+        val themedContext = ContextThemeWrapper(
+            this,
+            R.style.ScreenTranslatorOverlayTheme
+        )
+
+        floatingView = LayoutInflater.from(themedContext)
+            .inflate(R.layout.layout_floating_widget, null)
 
         fabMain = floatingView.findViewById(R.id.fabMain)
         layoutSubMenu = floatingView.findViewById(R.id.layoutSubMenu)
@@ -63,12 +95,35 @@ class FloatingService : Service() {
         windowManager.addView(floatingView, params)
     }
 
-    private fun setupWindowManagerParams() {
-        val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+    private fun intentResultCode(): Int? {
+        return if (intent.hasExtra("EXTRA_RESULT_CODE")) {
+            intent.getIntExtra("EXTRA_RESULT_CODE", -1)
+                .takeIf { it != -1 }
         } else {
-            WindowManager.LayoutParams.TYPE_PHONE
+            null
         }
+    }
+
+    private fun intentProjectionData(): Intent? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(
+                "EXTRA_DATA",
+                Intent::class.java
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra("EXTRA_DATA")
+        }
+    }
+
+    private fun setupWindowManagerParams() {
+
+        val layoutFlag =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            } else {
+                WindowManager.LayoutParams.TYPE_PHONE
+            }
 
         params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -84,15 +139,22 @@ class FloatingService : Service() {
     }
 
     private fun setupTouchAndDragListener() {
+
         fabMain.setOnTouchListener(object : View.OnTouchListener {
+
             private var initialX = 0
             private var initialY = 0
             private var initialTouchX = 0f
             private var initialTouchY = 0f
             private var isClick = true
 
-            override fun onTouch(v: View, event: MotionEvent): Boolean {
+            override fun onTouch(
+                v: View,
+                event: MotionEvent
+            ): Boolean {
+
                 when (event.action) {
+
                     MotionEvent.ACTION_DOWN -> {
                         initialX = params!!.x
                         initialY = params!!.y
@@ -101,17 +163,31 @@ class FloatingService : Service() {
                         isClick = true
                         return true
                     }
+
                     MotionEvent.ACTION_MOVE -> {
-                        val dx = (event.rawX - initialTouchX).toInt()
-                        val dy = (event.rawY - initialTouchY).toInt()
-                        if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+                        val dx =
+                            (event.rawX - initialTouchX).toInt()
+
+                        val dy =
+                            (event.rawY - initialTouchY).toInt()
+
+                        if (kotlin.math.abs(dx) > 10 ||
+                            kotlin.math.abs(dy) > 10
+                        ) {
                             isClick = false
                         }
+
                         params!!.x = initialX + dx
                         params!!.y = initialY + dy
-                        windowManager.updateViewLayout(floatingView, params)
+
+                        windowManager.updateViewLayout(
+                            floatingView,
+                            params
+                        )
+
                         return true
                     }
+
                     MotionEvent.ACTION_UP -> {
                         if (isClick) {
                             onFloatingButtonClicked()
@@ -119,28 +195,42 @@ class FloatingService : Service() {
                         return true
                     }
                 }
+
                 return false
             }
         })
     }
 
     private fun onFloatingButtonClicked() {
+
         if (isRealtimeActive) {
+
             stopRealtimeTranslation()
+
         } else {
+
             isSubMenuVisible = !isSubMenuVisible
-            layoutSubMenu.visibility = if (isSubMenuVisible) View.VISIBLE else View.GONE
+
+            layoutSubMenu.visibility =
+                if (isSubMenuVisible) {
+                    View.VISIBLE
+                } else {
+                    View.GONE
+                }
         }
     }
 
     private fun setupClickListeners() {
+
         btnRealtime.setOnClickListener {
             startRealtimeTranslation()
         }
 
         btnManual.setOnClickListener {
+
             layoutSubMenu.visibility = View.GONE
             isSubMenuVisible = false
+
             triggerManualTranslation()
         }
 
@@ -150,53 +240,145 @@ class FloatingService : Service() {
     }
 
     private fun startRealtimeTranslation() {
+
         isRealtimeActive = true
+
         layoutSubMenu.visibility = View.GONE
         isSubMenuVisible = false
-        fabMain.setImageResource(android.R.drawable.ic_media_pause)
-        Toast.makeText(this, "Real-Time Translator Aktif", Toast.LENGTH_SHORT).show()
+
+        fabMain.setImageResource(
+            android.R.drawable.ic_media_pause
+        )
+
+        Toast.makeText(
+            this,
+            "Real-Time Translator Aktif",
+            Toast.LENGTH_SHORT
+        ).show()
     }
 
     private fun stopRealtimeTranslation() {
+
         isRealtimeActive = false
-        fabMain.setImageResource(android.R.drawable.ic_menu_compass)
-        Toast.makeText(this, "Real-Time Translator Diberhentikan", Toast.LENGTH_SHORT).show()
+
+        fabMain.setImageResource(
+            android.R.drawable.ic_menu_compass
+        )
+
+        Toast.makeText(
+            this,
+            "Real-Time Translator Diberhentikan",
+            Toast.LENGTH_SHORT
+        ).show()
     }
 
     private fun triggerManualTranslation() {
-        Toast.makeText(this, "Memproses Terjemahan Layar...", Toast.LENGTH_SHORT).show()
+
+        Toast.makeText(
+            this,
+            "Mengambil gambar layar...",
+            Toast.LENGTH_SHORT
+        ).show()
+
+        val manager = screenCaptureManager
+
+        if (manager == null) {
+
+            Toast.makeText(
+                this,
+                "Screen Capture belum siap",
+                Toast.LENGTH_LONG
+            ).show()
+
+            return
+        }
+
+        val requested = manager.captureOnce { bitmap ->
+
+            runOnMainThread {
+
+                Toast.makeText(
+                    this,
+                    "Screenshot berhasil: ${bitmap.width} x ${bitmap.height}",
+                    Toast.LENGTH_SHORT
+                ).show()
+
+                bitmap.recycle()
+            }
+        }
+
+        if (!requested) {
+
+            Toast.makeText(
+                this,
+                "Gagal mengambil screenshot",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    private fun runOnMainThread(action: () -> Unit) {
+        android.os.Handler(mainLooper).post(action)
     }
 
     private fun startForegroundServiceNotification() {
+
         val channelId = "screen_translator_channel"
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+
             val channel = NotificationChannel(
                 channelId,
                 "Screen Translator Service",
                 NotificationManager.IMPORTANCE_LOW
             )
-            val manager = getSystemService(NotificationManager::class.java)
+
+            val manager =
+                getSystemService(NotificationManager::class.java)
+
             manager.createNotificationChannel(channel)
         }
 
-        val notification: Notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("Screen Translator Running")
-            .setContentText("Tombol melayang siap digunakan.")
-            .setSmallIcon(android.R.drawable.ic_menu_compass)
-            .build()
+        val notification: Notification =
+            NotificationCompat.Builder(
+                this,
+                channelId
+            )
+                .setContentTitle("Screen Translator Running")
+                .setContentText(
+                    "Tombol melayang siap digunakan."
+                )
+                .setSmallIcon(
+                    android.R.drawable.ic_menu_compass
+                )
+                .build()
 
-        // Penanganan Foreground Service Type untuk Android 10+ dan Android 14+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+
+            startForeground(
+                1,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            )
+
         } else {
-            startForeground(1, notification)
+
+            startForeground(
+                1,
+                notification
+            )
         }
     }
 
     override fun onDestroy() {
-        super.onDestroy()
+
+        screenCaptureManager?.release()
+        screenCaptureManager = null
+
         if (::floatingView.isInitialized) {
             windowManager.removeView(floatingView)
         }
+
+        super.onDestroy()
     }
 }
