@@ -106,11 +106,6 @@ class FloatingService : Service() {
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
-       val themedContext = ContextThemeWrapper(
-    this,
-    R.style.ScreenTranslatorOverlayTheme
-)
-
         val themedContext = ContextThemeWrapper(
             this,
             R.style.ScreenTranslatorOverlayTheme
