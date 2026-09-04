@@ -5,9 +5,11 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
+import android.view.ContextThemeWrapper
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MotionEvent
@@ -40,7 +42,10 @@ class FloatingService : Service() {
         startForegroundServiceNotification()
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        floatingView = LayoutInflater.from(this).inflate(R.layout.layout_floating_widget, null)
+        
+        // Membungkus Service dengan tema Material agar FloatingActionButton tidak crash
+        val themedContext = ContextThemeWrapper(this, R.style.Theme_Material3_DayNight_NoActionBar)
+        floatingView = LayoutInflater.from(themedContext).inflate(R.layout.layout_floating_widget, null)
 
         fabMain = floatingView.findViewById(R.id.fabMain)
         layoutSubMenu = floatingView.findViewById(R.id.layoutSubMenu)
@@ -118,10 +123,8 @@ class FloatingService : Service() {
 
     private fun onFloatingButtonClicked() {
         if (isRealtimeActive) {
-            // Jika Real-Time sedang berjalan, klik tombol akan langsung menghentikan Real-Time
             stopRealtimeTranslation()
         } else {
-            // Toggle ekspansi Sub-Menu
             isSubMenuVisible = !isSubMenuVisible
             layoutSubMenu.visibility = if (isSubMenuVisible) View.VISIBLE else View.GONE
         }
@@ -159,7 +162,6 @@ class FloatingService : Service() {
 
     private fun triggerManualTranslation() {
         Toast.makeText(this, "Memproses Terjemahan Layar...", Toast.LENGTH_SHORT).show()
-        // Logika OCR & Overlay Teks Terjemahan akan dihubungkan di sini
     }
 
     private fun startForegroundServiceNotification() {
@@ -180,7 +182,12 @@ class FloatingService : Service() {
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .build()
 
-        startForeground(1, notification)
+        // Penanganan Foreground Service Type untuk Android 10+ dan Android 14+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+        } else {
+            startForeground(1, notification)
+        }
     }
 
     override fun onDestroy() {
