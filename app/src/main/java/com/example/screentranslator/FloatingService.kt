@@ -40,6 +40,65 @@ class FloatingService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onStartCommand(
+    intent: Intent?,
+    flags: Int,
+    startId: Int
+): Int {
+
+    if (screenCaptureManager == null && intent != null) {
+
+        val resultCode = intent.getIntExtra(
+            "EXTRA_RESULT_CODE",
+            -1
+        )
+
+        val projectionData =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+
+                intent.getParcelableExtra(
+                    "EXTRA_DATA",
+                    Intent::class.java
+                )
+
+            } else {
+
+                @Suppress("DEPRECATION")
+                intent.getParcelableExtra("EXTRA_DATA")
+            }
+
+        if (resultCode != -1 && projectionData != null) {
+
+            screenCaptureManager = ScreenCaptureManager(
+                this,
+                resultCode,
+                projectionData
+            )
+
+            val started =
+                screenCaptureManager?.start() == true
+
+            if (!started) {
+
+                Toast.makeText(
+                    this,
+                    "Screen Capture gagal dimulai",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+
+        } else {
+
+            Toast.makeText(
+                this,
+                "Data Rekam Layar tidak ditemukan",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    return START_NOT_STICKY
+}
     override fun onCreate() {
         super.onCreate()
 
@@ -47,32 +106,10 @@ class FloatingService : Service() {
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
-        val resultCode = intentResultCode()
-        val projectionData = intentProjectionData()
-
-        if (resultCode != null && projectionData != null) {
-            screenCaptureManager = ScreenCaptureManager(
-                this,
-                resultCode,
-                projectionData
-            )
-
-            val started = screenCaptureManager?.start() == true
-
-            if (!started) {
-                Toast.makeText(
-                    this,
-                    "Screen Capture gagal dimulai",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-        } else {
-            Toast.makeText(
-                this,
-                "Data Rekam Layar tidak ditemukan",
-                Toast.LENGTH_LONG
-            ).show()
-        }
+       val themedContext = ContextThemeWrapper(
+    this,
+    R.style.ScreenTranslatorOverlayTheme
+)
 
         val themedContext = ContextThemeWrapper(
             this,
@@ -93,27 +130,6 @@ class FloatingService : Service() {
         setupClickListeners()
 
         windowManager.addView(floatingView, params)
-    }
-
-    private fun intentResultCode(): Int? {
-        return if (intent.hasExtra("EXTRA_RESULT_CODE")) {
-            intent.getIntExtra("EXTRA_RESULT_CODE", -1)
-                .takeIf { it != -1 }
-        } else {
-            null
-        }
-    }
-
-    private fun intentProjectionData(): Intent? {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            intent.getParcelableExtra(
-                "EXTRA_DATA",
-                Intent::class.java
-            )
-        } else {
-            @Suppress("DEPRECATION")
-            intent.getParcelableExtra("EXTRA_DATA")
-        }
     }
 
     private fun setupWindowManagerParams() {
