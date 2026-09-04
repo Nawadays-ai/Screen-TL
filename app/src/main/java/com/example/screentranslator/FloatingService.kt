@@ -53,20 +53,32 @@ class FloatingService : Service() {
             -1
         )
 
-        val projectionData =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+       val projectionData: Intent? = try {
 
-                intent.getParcelableExtra(
-                    "EXTRA_DATA",
-                    Intent::class.java
-                )
+    @Suppress("DEPRECATION")
+    intent.getParcelableExtra("EXTRA_DATA")
 
-            } else {
+} catch (e: Exception) {
 
-                @Suppress("DEPRECATION")
-                intent.getParcelableExtra("EXTRA_DATA")
-            }
+    e.printStackTrace()
+    null
+}
+if (resultCode == -1) {
 
+    Toast.makeText(
+        this,
+        "DEBUG: resultCode tidak ditemukan",
+        Toast.LENGTH_LONG
+    ).show()
+
+} else if (projectionData == null) {
+
+    Toast.makeText(
+        this,
+        "DEBUG: data MediaProjection null",
+        Toast.LENGTH_LONG
+    ).show()
+}
         if (resultCode != -1 && projectionData != null) {
 
             screenCaptureManager = ScreenCaptureManager(
