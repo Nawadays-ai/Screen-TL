@@ -44,9 +44,9 @@ class FloatingService : Service() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         
         // Membungkus Service dengan tema Material agar FloatingActionButton tidak crash
-       val themedContext = ContextThemeWrapper(
+     val themedContext = ContextThemeWrapper(
     this,
-    com.google.android.material.com.google.android.material.R.style.Theme_Material3_DayNight_NoActionBar
+    R.style.ScreenTranslatorOverlayTheme
 )
         floatingView = LayoutInflater.from(themedContext).inflate(R.layout.layout_floating_widget, null)
 
