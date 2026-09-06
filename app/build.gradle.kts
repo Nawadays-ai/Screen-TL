@@ -39,9 +39,13 @@ dependencies {
     implementation("com.google.android.material:material:1.11.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
 
-    // ML Kit untuk OCR (Pembaca Teks Layar) & Penerjemah Lokal
-    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.0")
-    implementation("com.google.mlkit:translate:17.0.2")
+   // ML Kit OCR
+implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.0")
+implementation("com.google.android.gms:play-services-mlkit-text-recognition-chinese:16.0.1")
+implementation("com.google.android.gms:play-services-mlkit-text-recognition-japanese:16.0.1")
+
+// ML Kit Translation
+implementation("com.google.mlkit:translate:17.0.2")
 
     // OkHttp untuk API DeepL & Gemini
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
