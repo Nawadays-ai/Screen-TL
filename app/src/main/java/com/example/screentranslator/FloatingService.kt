@@ -243,19 +243,21 @@ class FloatingService : Service() {
         }
 
         manualTranslationPending = true
-        clearTranslationOverlay()
 
-        // Keep the floating button visible until a real frame arrives. This
-        // prevents a stalled ImageReader request from making the service look dead.
+        // The overlay is a separate full-screen WindowManager surface. Remove it
+        // completely before capture so the previous translation can never become
+        // part of the next screenshot/OCR input.
+        removeTranslationOverlay()
+
+        // Keep the floating UI visible during capture. This matches the last
+        // known working pipeline and avoids changing the window tree immediately
+        // before ImageReader delivers the frame.
         val requested = manager.captureOnce { bitmap ->
             cancelManualCaptureTimeout()
-            floatingView.visibility = View.INVISIBLE
             Log.i(TAG, "Capture callback received: ${bitmap.width}x${bitmap.height}")
             showToast("Screenshot didapat. Memproses OCR...")
 
-            // From this point the capture watchdog is no longer useful. Use a
-            // separate processing watchdog so the button is restored if OCR or
-            // translation never calls back.
+            // Capture is finished; use a separate watchdog for OCR/model/translation.
             startManualProcessTimeout(manager)
 
             try {
@@ -308,7 +310,6 @@ class FloatingService : Service() {
         Log.i(TAG, "captureOnce returned=$requested")
         if (!requested) {
             manualTranslationPending = false
-            floatingView.visibility = View.VISIBLE
             showToast("Gagal mengambil screenshot")
             return
         }
@@ -318,7 +319,6 @@ class FloatingService : Service() {
                 Log.e(TAG, "Manual capture timed out after ${MANUAL_CAPTURE_TIMEOUT_MS}ms")
                 manager.cancelPendingCapture()
                 manualTranslationPending = false
-                floatingView.visibility = View.VISIBLE
                 showToast("Screenshot tidak masuk dalam 3 detik. Coba Manual TL lagi.")
             }
         }
@@ -332,8 +332,12 @@ class FloatingService : Service() {
                 Log.e(TAG, "Manual OCR/translation processing timed out after ${MANUAL_PROCESS_TIMEOUT_MS}ms")
                 manager.cancelPendingCapture()
                 manualTranslationPending = false
-                floatingView.visibility = View.VISIBLE
-                showToast("Proses terjemahan terlalu lama. Coba Manual TL lagi.")
+                runOnMainThread {
+                    if (::floatingView.isInitialized) {
+                        floatingView.visibility = View.VISIBLE
+                    }
+                    showToast("Proses terjemahan terlalu lama. Coba Manual TL lagi.")
+                }
             }
         }
         mainHandler.postDelayed(manualProcessTimeout!!, MANUAL_PROCESS_TIMEOUT_MS)
@@ -484,12 +488,6 @@ class FloatingService : Service() {
         }
     }
 
-    private fun clearTranslationOverlay() {
-        runOnMainThread {
-            overlayView?.clearTranslations()
-        }
-    }
-
     private fun removeTranslationOverlay() {
         runOnMainThread {
             overlayView?.let {
@@ -510,7 +508,7 @@ class FloatingService : Service() {
     }
 
     private fun runOnMainThread(action: () -> Unit) {
-        Handler(mainLooper).post(action)
+        android.os.Handler(mainLooper).post(action)
     }
 
     private fun startForegroundServiceNotification() {
