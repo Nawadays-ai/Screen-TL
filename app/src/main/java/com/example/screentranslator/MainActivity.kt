@@ -126,3 +126,4 @@ class MainActivity : AppCompatActivity() {
 
     moveTaskToBack(true)
 }
+}
