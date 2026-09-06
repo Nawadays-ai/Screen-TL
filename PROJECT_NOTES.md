@@ -11,7 +11,7 @@ Screen-TL adalah aplikasi Android untuk menerjemahkan teks yang terlihat di laya
 - Google ML Kit Translation: pipeline Manual TL sudah berjalan sampai History dan overlay pada pengujian perangkat terbaru.
 - Translation History: diinisialisasi dari `FloatingService` dan menggunakan penyimpanan sinkron untuk diagnosis yang dapat dipercaya.
 - Translation overlay: sudah bekerja pada Manual TL; perapian visual dan verifikasi lintas perangkat ditunda.
-- Realtime TL: engine tahap pertama sudah diimplementasikan, tetapi belum diverifikasi pada perangkat.
+- Realtime TL: engine tahap pertama sudah diimplementasikan dan **sudah terbukti berjalan pada perangkat**, tetapi overlay berkedip dan perlu diperbaiki.
 
 ## Masalah Aktif
 
@@ -35,71 +35,59 @@ Implementasi ada di `TranslationOverlayView.kt` dan `FloatingService.kt`:
 - Koordinat bounding box asli dibawa bersama hasil translation.
 - Overlay full-screen menggunakan `TYPE_APPLICATION_OVERLAY`.
 - Overlay memakai `FLAG_NOT_TOUCHABLE` agar tidak mengambil alih sentuhan pengguna.
-- Overlay lama dilepas sebelum capture berikutnya agar hasil overlay tidak menjadi input OCR.
+- Overlay lama dilepas sebelum Manual TL capture berikutnya agar hasil overlay tidak menjadi input OCR.
 
 Yang belum terbukti:
 - kecocokan koordinat bitmap dengan koordinat overlay pada berbagai resolusi/orientasi;
 - ukuran teks overlay agar terbaca tanpa menutupi terlalu banyak layar;
 - hasil overlay pada berbagai aplikasi/game nyata.
 
-## Real-Time TL — Implementasi Tahap Pertama
+Perapian UI sengaja ditunda sampai fungsi inti stabil.
 
-`FloatingService.kt` sekarang memiliki loop dasar:
+## Real-Time TL — Implementasi Tahap Pertama
+`FloatingService.kt` memiliki loop:
 
 `Real-Time aktif → capture frame → OCR → translate setiap baris → update overlay → tunggu → capture lagi`
 
-Karakteristik implementasi:
+Karakteristik implementasi saat ini:
 - interval dasar antar-frame sekitar 1,2 detik;
 - hanya satu frame diproses pada satu waktu;
 - model translation dipersiapkan saat Real-Time mulai;
-- callback sesi lama dilindungi dengan `realtimeGeneration` agar tidak menghidupkan kembali loop setelah Real-Time dihentikan;
+- callback sesi lama dilindungi dengan `realtimeGeneration`;
 - saat Real-Time dihentikan, pending capture dibatalkan dan overlay dihapus, tetapi foreground service tetap hidup;
 - hasil Real-Time tidak masuk History pada tahap ini;
 - change detection dan cache translation belum dibuat.
 
-Alasan belum membuat change detection/cache sekarang: fungsi dasar harus diverifikasi dulu pada perangkat sebelum optimasi ditambahkan.
+### Bug Real-Time yang ditemukan pada pengujian perangkat
+Pengguna sudah mengonfirmasi Real-Time **berhasil menerjemahkan**, tetapi hasil overlay berkedip:
+- overlay muncul sekitar 2 detik;
+- overlay kemudian hilang;
+- beberapa detik kemudian muncul lagi;
+- kadang jeda tanpa overlay mencapai sekitar 4 detik.
+
+Dari inspeksi kode, penyebab paling mungkin adalah `scheduleRealtimeCapture()` memanggil `removeTranslationOverlay()` sebelum setiap frame. Artinya WindowManager memang kehilangan overlay selama capture + OCR + translation berlangsung.
+
+### Keputusan perbaikan berikutnya
+Perbaikan yang direncanakan:
+- jangan `removeView()` overlay setiap siklus Real-Time;
+- pertahankan satu instance/window overlay;
+- saat frame baru diambil, buat isi overlay tidak terlihat sementara tanpa menghapus window, agar hasil overlay lama tidak masuk input OCR;
+- setelah frame diterima, kembalikan overlay lalu perbarui isinya ketika translation selesai.
+
+**Status:** belum diterapkan pada repository pada sesi ini. Jadi belum boleh dianggap teruji.
 
 ## Perubahan Terbaru — 2026-09-07
 
-### Implementasi Real-Time TL tahap pertama
-`FloatingService.kt`:
-- mengubah tombol Real-Time dari sekadar status menjadi loop capture/OCR/translation nyata;
-- mempersiapkan model translation ketika Real-Time dimulai;
-- mengambil frame layar berkala dengan `ScreenCaptureManager.captureOnce()`;
-- menjalankan OCR pada frame terbaru;
-- menerjemahkan hasil OCR secara berurutan;
-- memperbarui translation overlay dari frame terbaru;
-- mencegah overlap proses dengan flag `isRealtimeBusy`;
-- menggunakan `realtimeGeneration` agar callback dari sesi sebelumnya diabaikan setelah Real-Time dihentikan;
-- membatalkan pending capture dan menghapus overlay saat Real-Time dimatikan;
-- tidak menulis setiap frame ke History untuk mencegah duplikasi.
+### Verifikasi Real-Time oleh pengguna
+- Pengguna menjalankan Real-Time TL pada perangkat dan menyatakan berhasil.
+- Capture → OCR → translation → overlay berjalan berulang.
+- Masalah yang ditemukan adalah kedipan/hilangnya overlay antar-siklus.
 
-### Verifikasi
-- Kode sudah ditulis ke branch `main` pada commit `2f446e40fac1b5094f4a71ba72570ba7afb03060`.
-- Build/device test untuk perubahan ini belum dilakukan.
-- GitHub tooling yang tersedia di sesi ini tidak menyediakan aksi untuk memulai `workflow_dispatch`, sehingga jangan mengklaim APK baru sudah dibuild.
-
-## Testing Real-Time Tahap Pertama
-
-1. Install APK yang berisi commit Real-Time terbaru.
-2. Jalankan Screen-TL dan izinkan MediaProjection.
-3. Buka aplikasi lain dengan teks besar dan jelas.
-4. Tekan floating button → Real-Time.
-5. Tunggu beberapa detik.
-6. Pastikan OCR/translation berjalan berulang dan overlay muncul/berubah mengikuti frame.
-7. Ubah/scroll halaman target dan lihat apakah hasil overlay ikut berubah pada frame berikutnya.
-8. Tekan floating button saat Real-Time aktif untuk menghentikannya.
-9. Pastikan overlay hilang dan floating service tetap aktif.
-10. Jalankan Manual TL setelah Real-Time dihentikan untuk memastikan pipeline Manual TL tetap bekerja.
-
-### Log yang diharapkan
-- `Realtime translation started`
-- `Realtime translation model ready`
-- `Realtime captureOnce returned=true`
-- `Realtime frame captured`
-- `Realtime OCR completed: N lines`
-- `Realtime overlay updated: N items`
-- Saat dihentikan: `Realtime translation stopped`
+### Catatan penting untuk AI berikutnya
+- Jangan menganggap masalah kedipan sudah selesai.
+- Jangan melakukan perubahan UI visual dulu.
+- Prioritas pertama adalah mempertahankan overlay window selama loop Real-Time dan menghilangkan periode kosong antar-frame.
+- Setelah patch kedipan dibuat, statusnya harus `[~]` / belum teruji sampai pengguna mencoba APK baru.
 
 ## Roadmap
 
@@ -109,17 +97,18 @@ Alasan belum membuat change detection/cache sekarang: fungsi dasar harus diverif
 - [x] MediaProjection dapat membuat screenshot.
 - [x] OCR manager dengan bounding box.
 - [x] ML Kit Translation manager.
-- [~] Pastikan frame yang diberikan ke OCR benar-benar berasal dari aplikasi yang sedang terlihat.
+- [~] Verifikasi bahwa frame yang diberikan ke OCR benar-benar berasal dari aplikasi yang sedang terlihat.
 - [x] Manual TL capture → OCR → translation → History → overlay berhasil pada pengujian perangkat terbaru.
 - [ ] Filter status bar/floating button/teks Screen-TL yang tidak relevan.
+- [x] Manual TL memiliki timeout capture 3 detik dan watchdog pemrosesan 30 detik.
 
 ### Milestone 2 — Translation Overlay
 
-- [x] Buat overlay berdasarkan `DetectedText.boundingBox`.
-- [x] Tampilkan terjemahan di posisi teks asli.
-- [x] Jangan mengganggu interaksi aplikasi target.
-- [ ] Verifikasi koordinat dan ukuran overlay pada berbagai perangkat/orientasi.
-- [ ] Tambahkan hide/clear overlay yang mudah digunakan.
+- [x] Implementasi overlay teks berdasarkan `DetectedText.boundingBox`.
+- [x] Tampilkan hasil terjemahan pada area teks yang terdeteksi.
+- [x] Overlay dibuat `NOT_TOUCHABLE` agar tidak mengganggu interaksi aplikasi target.
+- [ ] Verifikasi posisi overlay terhadap koordinat layar pada berbagai perangkat/orientasi.
+- [ ] Sediakan hide/clear overlay yang mudah digunakan.
 - [ ] Rapikan visual overlay setelah fungsi inti stabil.
 
 ### Milestone 3 — Real-Time Translation
@@ -128,8 +117,9 @@ Alasan belum membuat change detection/cache sekarang: fungsi dasar harus diverif
 - [x] OCR dan translation loop dasar.
 - [x] Update overlay dari hasil frame terbaru.
 - [x] Stop Real-Time tanpa menghentikan service.
-- [ ] Verifikasi kestabilan Real-Time pada perangkat.
-- [ ] Deteksi perubahan layar.
+- [~] Hilangkan kedipan overlay pada loop Real-Time.
+- [ ] Verifikasi kestabilan Real-Time setelah perbaikan kedipan.
+- [ ] Deteksi perubahan layar agar frame yang tidak berubah tidak diproses ulang.
 - [ ] Cache translation agar teks yang sama tidak diterjemahkan berulang.
 - [ ] Optimalkan interval dan beban CPU/baterai berdasarkan hasil device test.
 - [ ] Update overlay hanya untuk teks baru/berubah.
@@ -139,12 +129,14 @@ Alasan belum membuat change detection/cache sekarang: fungsi dasar harus diverif
 - [x] Google ML Kit on-device sebagai baseline.
 - [ ] DeepL API.
 - [ ] Gemini AI.
-- [ ] Hubungkan pemilihan engine ke pipeline nyata.
+- [ ] Pemilihan engine yang benar-benar terhubung ke pipeline Manual/Realtime.
 
-## Prinsip Pengembangan
-- Ubah sedikit bagian setiap tahap.
-- Jangan merusak Screen Capture/OCR yang sudah terbukti bekerja.
-- Bedakan implementasi dengan verifikasi nyata.
-- Setiap perubahan penting wajib dicatat.
-- Setiap roadmap harus menunjukkan status sebenarnya.
-- Pemilik proyek harus selalu diberi ringkasan file yang berubah, alasan, hasil verifikasi, dan langkah testing berikutnya.
+## Testing Real-Time berikutnya
+
+1. Gunakan APK yang berisi patch khusus kedipan.
+2. Aktifkan Real-Time pada aplikasi target dengan beberapa baris teks jelas.
+3. Amati minimal 15–30 detik tanpa mengubah layar terlebih dahulu.
+4. Pastikan overlay tidak hilang di antara siklus translation.
+5. Scroll/ubah layar target dan pastikan overlay ikut diperbarui.
+6. Matikan Real-Time dan pastikan overlay hilang serta floating service tetap hidup.
+7. Jalankan Manual TL setelahnya untuk memastikan pipeline Manual TL tidak rusak.
