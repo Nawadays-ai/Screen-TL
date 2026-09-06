@@ -32,6 +32,8 @@ class FloatingService : Service() {
         private const val TAG = "ScreenTL-Service"
         private const val MANUAL_CAPTURE_TIMEOUT_MS = 3_000L
         private const val MANUAL_PROCESS_TIMEOUT_MS = 30_000L
+        private const val REALTIME_INTERVAL_MS = 1_200L
+        private const val REALTIME_CAPTURE_DELAY_MS = 150L
     }
 
     private lateinit var windowManager: WindowManager
@@ -45,11 +47,15 @@ class FloatingService : Service() {
     private var params: WindowManager.LayoutParams? = null
     private var overlayView: TranslationOverlayView? = null
     private var isRealtimeActive = false
+    private var isRealtimeBusy = false
+    private var isRealtimePreparing = false
+    private var realtimeGeneration = 0
     private var isSubMenuVisible = false
     private var manualTranslationPending = false
     private val mainHandler = Handler()
     private var manualCaptureTimeout: Runnable? = null
     private var manualProcessTimeout: Runnable? = null
+    private var realtimeLoop: Runnable? = null
 
     private var screenCaptureManager: ScreenCaptureManager? = null
     private var ocrManager: OcrManager? = null
@@ -199,17 +205,260 @@ class FloatingService : Service() {
     }
 
     private fun startRealtimeTranslation() {
+        if (manualTranslationPending) {
+            showToast("Manual TL masih diproses")
+            return
+        }
+
+        val manager = screenCaptureManager
+        val ocr = ocrManager
+        val translator = translationManager
+
+        if (manager == null || ocr == null || translator == null) {
+            Log.e(TAG, "Realtime start aborted: manager not ready")
+            showToast("Real-Time belum siap")
+            return
+        }
+
+        if (isRealtimeActive) return
+
         isRealtimeActive = true
+        isRealtimeBusy = false
+        isRealtimePreparing = true
+        realtimeGeneration++
+        val generation = realtimeGeneration
+
         layoutSubMenu.visibility = View.GONE
         isSubMenuVisible = false
         fabMain.setImageResource(android.R.drawable.ic_media_pause)
+        removeTranslationOverlay()
         showToast("Real-Time Translator Aktif")
+        Log.i(TAG, "Realtime translation started: generation=$generation")
+
+        try {
+            translator.prepare(
+                onReady = {
+                    if (!isRealtimeActive || generation != realtimeGeneration) return@prepare
+                    isRealtimePreparing = false
+                    Log.i(TAG, "Realtime translation model ready")
+                    scheduleRealtimeCapture(generation, 0L)
+                },
+                onFailure = { exception ->
+                    Log.e(TAG, "Realtime translation model preparation failed", exception)
+                    if (generation == realtimeGeneration) {
+                        stopRealtimeTranslation("Model terjemahan gagal")
+                    }
+                }
+            )
+        } catch (exception: Exception) {
+            Log.e(TAG, "Realtime translation preparation threw an exception", exception)
+            stopRealtimeTranslation("Gagal menyiapkan Real-Time")
+        }
     }
 
-    private fun stopRealtimeTranslation() {
+    private fun scheduleRealtimeCapture(generation: Int, delayMs: Long) {
+        realtimeLoop?.let(mainHandler::removeCallbacks)
+        realtimeLoop = Runnable {
+            if (!isRealtimeActive || generation != realtimeGeneration) return@Runnable
+            if (manualTranslationPending || isRealtimePreparing || isRealtimeBusy) {
+                scheduleRealtimeCapture(generation, REALTIME_INTERVAL_MS)
+                return@Runnable
+            }
+
+            removeTranslationOverlay()
+            mainHandler.postDelayed({
+                if (!isRealtimeActive || generation != realtimeGeneration) return@postDelayed
+                requestRealtimeCapture(generation)
+            }, REALTIME_CAPTURE_DELAY_MS)
+        }
+        mainHandler.postDelayed(realtimeLoop!!, delayMs)
+    }
+
+    private fun requestRealtimeCapture(generation: Int) {
+        val manager = screenCaptureManager ?: run {
+            Log.e(TAG, "Realtime capture aborted: capture manager is null")
+            stopRealtimeTranslation("Screen Capture tidak siap")
+            return
+        }
+
+        if (!isRealtimeActive || generation != realtimeGeneration) return
+
+        isRealtimeBusy = true
+        val requested = manager.captureOnce { bitmap ->
+            if (!isRealtimeActive || generation != realtimeGeneration) {
+                bitmap.recycle()
+                isRealtimeBusy = false
+                return@captureOnce
+            }
+
+            Log.i(TAG, "Realtime frame captured: ${bitmap.width}x${bitmap.height}")
+            val ocr = ocrManager
+            val translator = translationManager
+
+            if (ocr == null || translator == null) {
+                bitmap.recycle()
+                isRealtimeBusy = false
+                scheduleRealtimeCapture(generation, REALTIME_INTERVAL_MS)
+                return@captureOnce
+            }
+
+            try {
+                ocr.recognize(
+                    bitmap = bitmap,
+                    onSuccess = { detectedTexts ->
+                        if (!isRealtimeActive || generation != realtimeGeneration) {
+                            bitmap.recycle()
+                            isRealtimeBusy = false
+                            return@recognize
+                        }
+
+                        Log.i(TAG, "Realtime OCR completed: ${detectedTexts.size} lines")
+                        if (detectedTexts.isEmpty()) {
+                            bitmap.recycle()
+                            isRealtimeBusy = false
+                            scheduleRealtimeCapture(generation, REALTIME_INTERVAL_MS)
+                            return@recognize
+                        }
+
+                        translateRealtimeTexts(
+                            translator = translator,
+                            texts = detectedTexts,
+                            index = 0,
+                            overlayResults = mutableListOf(),
+                            sourceWidth = bitmap.width,
+                            sourceHeight = bitmap.height,
+                            generation = generation,
+                            onComplete = {
+                                bitmap.recycle()
+                                isRealtimeBusy = false
+                                if (isRealtimeActive && generation == realtimeGeneration) {
+                                    scheduleRealtimeCapture(generation, REALTIME_INTERVAL_MS)
+                                }
+                            }
+                        )
+                    },
+                    onFailure = { exception ->
+                        Log.e(TAG, "Realtime OCR failed", exception)
+                        bitmap.recycle()
+                        isRealtimeBusy = false
+                        if (isRealtimeActive && generation == realtimeGeneration) {
+                            scheduleRealtimeCapture(generation, REALTIME_INTERVAL_MS)
+                        }
+                    }
+                )
+            } catch (exception: Exception) {
+                Log.e(TAG, "Realtime OCR invocation threw an exception", exception)
+                bitmap.recycle()
+                isRealtimeBusy = false
+                if (isRealtimeActive && generation == realtimeGeneration) {
+                    scheduleRealtimeCapture(generation, REALTIME_INTERVAL_MS)
+                }
+            }
+        }
+
+        Log.i(TAG, "Realtime captureOnce returned=$requested")
+        if (!requested) {
+            isRealtimeBusy = false
+            if (isRealtimeActive && generation == realtimeGeneration) {
+                scheduleRealtimeCapture(generation, REALTIME_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun translateRealtimeTexts(
+        translator: TranslationManager,
+        texts: List<DetectedText>,
+        index: Int,
+        overlayResults: MutableList<TranslationOverlayItem>,
+        sourceWidth: Int,
+        sourceHeight: Int,
+        generation: Int,
+        onComplete: () -> Unit
+    ) {
+        if (!isRealtimeActive || generation != realtimeGeneration) {
+            onComplete()
+            return
+        }
+
+        if (index >= texts.size) {
+            if (overlayResults.isNotEmpty()) {
+                showTranslationOverlay(overlayResults, sourceWidth, sourceHeight)
+                Log.i(TAG, "Realtime overlay updated: ${overlayResults.size} items")
+            }
+            onComplete()
+            return
+        }
+
+        val currentText = texts[index]
+        try {
+            translator.translate(
+                currentText.text,
+                onSuccess = { translatedText ->
+                    if (isRealtimeActive && generation == realtimeGeneration) {
+                        overlayResults.add(
+                            TranslationOverlayItem(
+                                translatedText = translatedText,
+                                left = currentText.left,
+                                top = currentText.top,
+                                right = currentText.right,
+                                bottom = currentText.bottom
+                            )
+                        )
+                    }
+                    translateRealtimeTexts(
+                        translator,
+                        texts,
+                        index + 1,
+                        overlayResults,
+                        sourceWidth,
+                        sourceHeight,
+                        generation,
+                        onComplete
+                    )
+                },
+                onFailure = { exception ->
+                    Log.e(TAG, "Realtime translation failed for '${currentText.text}'", exception)
+                    translateRealtimeTexts(
+                        translator,
+                        texts,
+                        index + 1,
+                        overlayResults,
+                        sourceWidth,
+                        sourceHeight,
+                        generation,
+                        onComplete
+                    )
+                }
+            )
+        } catch (exception: Exception) {
+            Log.e(TAG, "Realtime translation invocation threw an exception", exception)
+            translateRealtimeTexts(
+                translator,
+                texts,
+                index + 1,
+                overlayResults,
+                sourceWidth,
+                sourceHeight,
+                generation,
+                onComplete
+            )
+        }
+    }
+
+    private fun stopRealtimeTranslation(message: String = "Real-Time Translator Diberhentikan") {
+        if (!isRealtimeActive && realtimeLoop == null) return
+
         isRealtimeActive = false
+        isRealtimePreparing = false
+        isRealtimeBusy = false
+        realtimeGeneration++
+        realtimeLoop?.let(mainHandler::removeCallbacks)
+        realtimeLoop = null
+        screenCaptureManager?.cancelPendingCapture()
+        removeTranslationOverlay()
         fabMain.setImageResource(android.R.drawable.ic_menu_compass)
-        showToast("Real-Time Translator Diberhentikan")
+        showToast(message)
+        Log.i(TAG, "Realtime translation stopped")
     }
 
     private fun triggerManualTranslation() {
@@ -243,21 +492,12 @@ class FloatingService : Service() {
         }
 
         manualTranslationPending = true
-
-        // The overlay is a separate full-screen WindowManager surface. Remove it
-        // completely before capture so the previous translation can never become
-        // part of the next screenshot/OCR input.
         removeTranslationOverlay()
 
-        // Keep the floating UI visible during capture. This matches the last
-        // known working pipeline and avoids changing the window tree immediately
-        // before ImageReader delivers the frame.
         val requested = manager.captureOnce { bitmap ->
             cancelManualCaptureTimeout()
             Log.i(TAG, "Capture callback received: ${bitmap.width}x${bitmap.height}")
             showToast("Screenshot didapat. Memproses OCR...")
-
-            // Capture is finished; use a separate watchdog for OCR/model/translation.
             startManualProcessTimeout(manager)
 
             try {
@@ -508,45 +748,53 @@ class FloatingService : Service() {
     }
 
     private fun runOnMainThread(action: () -> Unit) {
-        android.os.Handler(mainLooper).post(action)
+        Handler(mainLooper).post(action)
     }
 
     private fun startForegroundServiceNotification() {
         val channelId = "screen_translator_channel"
+        val channelName = "Screen Translator"
+
+        val notificationManager =
+            getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                channelId,
-                "Screen Translator Service",
-                NotificationManager.IMPORTANCE_LOW
+            notificationManager.createNotificationChannel(
+                NotificationChannel(
+                    channelId,
+                    channelName,
+                    NotificationManager.IMPORTANCE_LOW
+                )
             )
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
         }
 
-        val notification: Notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("Screen Translator Running")
-            .setContentText("Tombol melayang siap digunakan.")
-            .setSmallIcon(android.R.drawable.ic_menu_compass)
+        val notification = NotificationCompat.Builder(this, channelId)
+            .setContentTitle("Screen Translator")
+            .setContentText("Translator aktif")
+            .setSmallIcon(android.R.drawable.ic_menu_search)
+            .setOngoing(true)
             .build()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+            startForeground(
+                1,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            )
         } else {
             startForeground(1, notification)
         }
     }
 
     override fun onDestroy() {
+        stopRealtimeTranslation()
         cancelManualCaptureTimeout()
         cancelManualProcessTimeout()
         screenCaptureManager?.cancelPendingCapture()
         removeTranslationOverlay()
         translationManager?.close()
-        translationManager = null
-        ocrManager?.close()
-        ocrManager = null
         screenCaptureManager?.release()
-        screenCaptureManager = null
+
         if (::floatingView.isInitialized) {
             try {
                 windowManager.removeView(floatingView)
