@@ -8,21 +8,21 @@ Android screen translator yang dirancang untuk menerjemahkan teks dari aplikasi 
 |---|---|---|
 | Floating button | ✅ | Tampil dan dapat digeser di atas aplikasi lain |
 | Overlay permission | ✅ | Berjalan |
-| MediaProjection | ⚠️ | Screenshot berhasil dibuat; sekarang diarahkan ke full display pada Android 14+ agar aplikasi target dapat ikut tertangkap |
-| OCR | ⚠️ | Pengujian terbaru sudah menghasilkan teks ke History (`23:04`, `Status`, `Succese`), tetapi perlu memastikan semua teks aplikasi target terbaca |
-| Translation | ⚠️ | Pipeline sudah berjalan sampai History; pengujian terbaru menghasilkan beberapa pasangan teks → hasil |
-| Translation History | ⚠️ | Persisten; service melakukan inisialisasi sendiri dan write menggunakan `commit()` |
-| Translation overlay | ❌ | Belum dibuat |
+| MediaProjection | ⚠️ | Screenshot berhasil dibuat; Android 14+ diarahkan ke full display agar aplikasi target dapat ikut tertangkap |
+| OCR | ⚠️ | Pengujian sudah menghasilkan teks ke History; cakupan seluruh aplikasi target masih perlu diverifikasi |
+| Translation | ⚠️ | Pipeline manual sampai History sudah berjalan |
+| Translation History | ⚠️ | Persisten; service-safe dan write menggunakan `commit()` |
+| Translation overlay | 🧪 | Implementasi pertama sudah dibuat; perlu diuji di perangkat |
 | Real-Time Translation | ❌ | Belum ada engine realtime |
 
 ## Masalah Aktif
 
-1. Pengujian terbaru membuktikan pipeline manual sampai History menghasilkan teks, tetapi hasil yang terlihat hanya tiga baris. Kode sebelumnya memang membatasi terjemahan dengan `detectedTexts.take(3)`, sehingga pembatas ini menjadi penyebab langsung jumlah hasil maksimal tiga baris.
-2. Pembatas tiga baris sudah dihapus. Pengujian berikutnya harus memastikan seluruh baris OCR dari aplikasi target diproses.
-3. Masih perlu memastikan frame MediaProjection benar-benar berasal dari aplikasi target dan bukan UI Screen-TL/status bar.
+1. Pembatas tiga baris sudah dihapus. Manual TL sekarang memproses seluruh hasil OCR yang dikembalikan.
+2. Masih perlu memastikan frame MediaProjection benar-benar berasal dari aplikasi target dan bukan UI Screen-TL/status bar.
+3. Overlay terjemahan sekarang dibuat berdasarkan bounding box OCR, tetapi posisi, ukuran teks, dan kecocokan dengan layar nyata belum diverifikasi di perangkat.
 4. History sekarang berjalan lebih defensif dengan inisialisasi langsung dari `FloatingService`, logging, dan penyimpanan sinkron.
 5. Toast hanya merupakan pesan status aplikasi/service; Toast bukan mekanisme untuk menampilkan terjemahan di atas aplikasi lain.
-6. Tujuan produk adalah hasil terjemahan muncul sebagai overlay di atas aplikasi lain, bukan hanya di Screen-TL.
+6. Realtime belum dikerjakan; jangan menganggap tombol Real-Time sebagai fitur yang sudah aktif hanya karena UI tombolnya ada.
 
 ## Roadmap
 
@@ -38,10 +38,11 @@ Android screen translator yang dirancang untuk menerjemahkan teks dari aplikasi 
 
 ### Milestone 2 — Translation Overlay
 
-- [ ] Buat overlay teks berdasarkan `DetectedText.boundingBox`.
-- [ ] Tampilkan terjemahan di posisi yang sesuai dengan teks asli.
-- [ ] Pastikan overlay tidak mengganggu interaksi dengan aplikasi target.
-- [ ] Sediakan hide/refresh/clear overlay.
+- [x] Implementasi overlay teks berdasarkan `DetectedText.boundingBox`.
+- [x] Tampilkan hasil terjemahan pada area teks yang terdeteksi.
+- [x] Overlay dibuat `NOT_TOUCHABLE` agar tidak mengganggu interaksi aplikasi target.
+- [ ] Verifikasi posisi overlay terhadap koordinat layar pada perangkat nyata.
+- [ ] Sediakan hide/refresh/clear overlay yang mudah digunakan.
 
 ### Milestone 3 — Real-Time Translation
 
@@ -61,6 +62,14 @@ Android screen translator yang dirancang untuk menerjemahkan teks dari aplikasi 
 ## Catatan Perubahan
 
 Setiap perubahan kode yang bermakna wajib dicatat di sini atau pada `PROJECT_NOTES.md`, termasuk tanggal, file, perubahan, alasan, hasil build/test, dan masalah yang masih tersisa.
+
+### 2026-09-06 — Implementasi translation overlay pertama
+
+- Menambahkan `TranslationOverlayView.kt` untuk menggambar hasil terjemahan di atas layar berdasarkan bounding box hasil OCR.
+- Mengubah `FloatingService.kt` agar setiap hasil translation menyimpan teks terjemahan + koordinat OCR.
+- Overlay menggunakan `TYPE_APPLICATION_OVERLAY` dan `FLAG_NOT_TOUCHABLE`, sehingga hasil dapat berada di atas aplikasi target tanpa mengambil alih sentuhan pengguna.
+- Floating UI Screen-TL disembunyikan dan overlay lama dibersihkan sebelum capture berikutnya agar UI Screen-TL tidak ikut menjadi sumber OCR.
+- Implementasi belum diuji dengan APK pada perangkat; status overlay masih 🧪.
 
 ### 2026-09-06 — Diagnosis pipeline dan perbaikan batas OCR
 
