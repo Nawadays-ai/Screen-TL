@@ -37,9 +37,12 @@ class FloatingService : Service() {
     private var isSubMenuVisible = false
 
     private var screenCaptureManager: ScreenCaptureManager? = null
-    private var ocrManager: OcrManager? = null
-    private var sourceLanguage: String = "Jepang"
+private var ocrManager: OcrManager? = null
 
+private var sourceLanguage: String = "Jepang"
+private var targetLanguage: String = "Indonesia"
+
+private var translationManager: TranslationManager? = null
     override fun onBind(intent: Intent?): IBinder? = null
 
   override fun onStartCommand(
@@ -52,6 +55,16 @@ class FloatingService : Service() {
 
 if (ocrManager == null) {
     ocrManager = OcrManager(sourceLanguage)
+}
+targetLanguage =
+    intent?.getStringExtra("EXTRA_TARGET_LANG") ?: "Indonesia"
+
+if (translationManager == null) {
+
+    translationManager = TranslationManager(
+        sourceLanguage,
+        targetLanguage
+    )
 }
 
     if (screenCaptureManager == null) {
@@ -275,7 +288,7 @@ if (ocrManager == null) {
         ).show()
     }
 
-   private fun triggerManualTranslation() {
+private fun triggerManualTranslation() {
 
     Toast.makeText(
         this,
@@ -309,6 +322,19 @@ if (ocrManager == null) {
         return
     }
 
+    val translator = translationManager
+
+    if (translator == null) {
+
+        Toast.makeText(
+            this,
+            "Translator belum siap",
+            Toast.LENGTH_LONG
+        ).show()
+
+        return
+    }
+
     val requested = manager.captureOnce { bitmap ->
 
         ocr.recognize(
@@ -316,38 +342,58 @@ if (ocrManager == null) {
 
             onSuccess = { detectedTexts ->
 
-                runOnMainThread {
+                if (detectedTexts.isEmpty()) {
 
-                    if (detectedTexts.isEmpty()) {
-
+                    runOnMainThread {
                         Toast.makeText(
                             this,
                             "OCR tidak menemukan teks",
                             Toast.LENGTH_LONG
                         ).show()
-
-                    } else {
-
-                        val previewText =
-                            detectedTexts
-                                .take(3)
-                                .joinToString(" | ") {
-                                    it.text
-                                }
-
-                        Toast.makeText(
-                            this,
-                            "OCR: ${detectedTexts.size} teks\n$previewText",
-                            Toast.LENGTH_LONG
-                        ).show()
                     }
+
+                    return@recognize
                 }
+
+                runOnMainThread {
+                    Toast.makeText(
+                        this,
+                        "Menyiapkan model terjemahan...",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+
+                translator.prepare(
+
+                    onReady = {
+
+                        val textsToTranslate =
+                            detectedTexts.take(3)
+
+                        translateTexts(
+                            translator,
+                            textsToTranslate,
+                            0,
+                            mutableListOf()
+                        )
+                    },
+
+                    onFailure = { exception ->
+
+                        runOnMainThread {
+                            Toast.makeText(
+                                this,
+                                "Model terjemahan gagal: ${exception.message}",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
+                )
             },
 
             onFailure = { exception ->
 
                 runOnMainThread {
-
                     Toast.makeText(
                         this,
                         "OCR gagal: ${exception.message}",
@@ -366,7 +412,69 @@ if (ocrManager == null) {
             Toast.LENGTH_LONG
         ).show()
     }
-}    private fun runOnMainThread(action: () -> Unit) {
+}
+
+private fun translateTexts(
+    translator: TranslationManager,
+    texts: List<DetectedText>,
+    index: Int,
+    results: MutableList<String>
+) {
+
+    if (index >= texts.size) {
+
+        runOnMainThread {
+
+            val resultText =
+                results.joinToString("\n\n")
+
+            Toast.makeText(
+                this,
+                resultText,
+                Toast.LENGTH_LONG
+            ).show()
+        }
+
+        return
+    }
+
+    val currentText = texts[index]
+
+    translator.translate(
+
+        currentText.text,
+
+        onSuccess = { translatedText ->
+
+            results.add(
+                "${currentText.text}\n→ $translatedText"
+            )
+
+            translateTexts(
+                translator,
+                texts,
+                index + 1,
+                results
+            )
+        },
+
+        onFailure = {
+
+            results.add(
+                "${currentText.text}\n→ [Gagal diterjemahkan]"
+            )
+
+            translateTexts(
+                translator,
+                texts,
+                index + 1,
+                results
+            )
+        }
+    )
+}
+    
+private fun runOnMainThread(action: () -> Unit) {
         android.os.Handler(mainLooper).post(action)
     }
 
@@ -420,6 +528,9 @@ if (ocrManager == null) {
     }
 
     override fun onDestroy() {
+
+        translationManager?.close()
+        translationManager = null
 
         ocrManager?.close()
         ocrManager = null
