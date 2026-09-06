@@ -30,7 +30,8 @@ class FloatingService : Service() {
 
     companion object {
         private const val TAG = "ScreenTL-Service"
-        private const val MANUAL_CAPTURE_TIMEOUT_MS = 10_000L
+        private const val MANUAL_CAPTURE_TIMEOUT_MS = 3_000L
+        private const val MANUAL_PROCESS_TIMEOUT_MS = 30_000L
     }
 
     private lateinit var windowManager: WindowManager
@@ -48,6 +49,7 @@ class FloatingService : Service() {
     private var manualTranslationPending = false
     private val mainHandler = Handler()
     private var manualCaptureTimeout: Runnable? = null
+    private var manualProcessTimeout: Runnable? = null
 
     private var screenCaptureManager: ScreenCaptureManager? = null
     private var ocrManager: OcrManager? = null
@@ -243,14 +245,18 @@ class FloatingService : Service() {
         manualTranslationPending = true
         clearTranslationOverlay()
 
-        // Do not hide the floating button before capture. On some devices the
-        // display can stop producing a fresh ImageReader frame after the view
-        // changes visibility, leaving the service apparently stuck forever.
-        // The button is hidden only after a real frame has arrived.
+        // Keep the floating button visible until a real frame arrives. This
+        // prevents a stalled ImageReader request from making the service look dead.
         val requested = manager.captureOnce { bitmap ->
             cancelManualCaptureTimeout()
             floatingView.visibility = View.INVISIBLE
             Log.i(TAG, "Capture callback received: ${bitmap.width}x${bitmap.height}")
+            showToast("Screenshot didapat. Memproses OCR...")
+
+            // From this point the capture watchdog is no longer useful. Use a
+            // separate processing watchdog so the button is restored if OCR or
+            // translation never calls back.
+            startManualProcessTimeout(manager)
 
             try {
                 ocr.recognize(
@@ -263,6 +269,7 @@ class FloatingService : Service() {
                         }
 
                         try {
+                            Log.i(TAG, "Preparing translation model")
                             translator.prepare(
                                 onReady = {
                                     val textsToTranslate = detectedTexts
@@ -312,10 +319,24 @@ class FloatingService : Service() {
                 manager.cancelPendingCapture()
                 manualTranslationPending = false
                 floatingView.visibility = View.VISIBLE
-                showToast("Screenshot tidak masuk. Coba Manual TL lagi.")
+                showToast("Screenshot tidak masuk dalam 3 detik. Coba Manual TL lagi.")
             }
         }
         mainHandler.postDelayed(manualCaptureTimeout!!, MANUAL_CAPTURE_TIMEOUT_MS)
+    }
+
+    private fun startManualProcessTimeout(manager: ScreenCaptureManager) {
+        cancelManualProcessTimeout()
+        manualProcessTimeout = Runnable {
+            if (manualTranslationPending) {
+                Log.e(TAG, "Manual OCR/translation processing timed out after ${MANUAL_PROCESS_TIMEOUT_MS}ms")
+                manager.cancelPendingCapture()
+                manualTranslationPending = false
+                floatingView.visibility = View.VISIBLE
+                showToast("Proses terjemahan terlalu lama. Coba Manual TL lagi.")
+            }
+        }
+        mainHandler.postDelayed(manualProcessTimeout!!, MANUAL_PROCESS_TIMEOUT_MS)
     }
 
     private fun translateTexts(
@@ -407,6 +428,7 @@ class FloatingService : Service() {
 
     private fun finishManualTranslation(message: String) {
         cancelManualCaptureTimeout()
+        cancelManualProcessTimeout()
         manualTranslationPending = false
         runOnMainThread {
             if (::floatingView.isInitialized) {
@@ -419,6 +441,11 @@ class FloatingService : Service() {
     private fun cancelManualCaptureTimeout() {
         manualCaptureTimeout?.let(mainHandler::removeCallbacks)
         manualCaptureTimeout = null
+    }
+
+    private fun cancelManualProcessTimeout() {
+        manualProcessTimeout?.let(mainHandler::removeCallbacks)
+        manualProcessTimeout = null
     }
 
     private fun showTranslationOverlay(
@@ -513,6 +540,7 @@ class FloatingService : Service() {
 
     override fun onDestroy() {
         cancelManualCaptureTimeout()
+        cancelManualProcessTimeout()
         screenCaptureManager?.cancelPendingCapture()
         removeTranslationOverlay()
         translationManager?.close()
