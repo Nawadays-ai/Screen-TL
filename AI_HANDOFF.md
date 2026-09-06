@@ -39,13 +39,14 @@ Important files:
 ### Manual TL currently being stabilized
 The first overlay build introduced a regression observed on the user's device: after pressing Manual TL, ML Kit translation downloaded its model, then no result appeared, History stayed unchanged, and the floating button disappeared. Launching the app again did not restore the floating button until the app was force-stopped.
 
-The latest fix changes the lifecycle:
+The latest code now separates the two failure windows:
 - the floating button is no longer hidden before `captureOnce` receives a frame;
 - `ScreenCaptureManager` can cancel a pending capture;
-- Manual TL has a 10-second capture timeout that restores the floating button;
+- Manual TL capture timeout is 3 seconds;
+- after a frame arrives, a separate 30-second processing watchdog covers OCR/translation callbacks;
 - duplicate Manual TL requests are blocked while one is pending;
 - OCR/translation/save/display calls have defensive exception handling;
-- the floating button is restored on failure and completion.
+- the floating button is restored on timeout, failure, and completion.
 
 This is not device-verified yet. Do not mark Manual TL stable until a fresh APK has been tested.
 
@@ -83,7 +84,9 @@ Main verification risks:
 The realtime button only changes UI state. The actual realtime capture/OCR/translation/cache loop does not exist yet.
 
 ### APK update/install
-`app/build.gradle.kts` now uses `versionCode = 2` and `versionName = "1.1"`. The previous APK used `versionCode = 1`. This version bump is required so Android treats the new APK as a newer update rather than rejecting it because the installed package has an equal/newer version code.
+`app/build.gradle.kts` now uses `versionCode = 2` and `versionName = "1.1"`. The previous APK used `versionCode = 1`.
+
+The user still reports an update conflict after the version bump. Therefore the remaining likely cause is APK signing identity: a debug APK built on GitHub Actions can be signed with a CI-generated debug keystore that differs from the key used by the already-installed APK. A higher `versionCode` cannot fix a signature mismatch. Do not claim the update problem is solved until an APK built with the same signing key can install over the existing package.
 
 ## Diagnostic Logging
 Use Logcat tags:
@@ -107,7 +110,7 @@ Expected Manual TL sequence:
 → `History add: saved=true ...`
 → `Translation overlay updated: N items`
 
-If the sequence stops, diagnose the first missing stage. A 10-second timeout should now explicitly report a missing capture instead of leaving the floating button hidden.
+If the sequence stops, diagnose the first missing stage. Capture timeout is now 3 seconds; processing has a separate 30-second watchdog.
 
 ## Important Current Flow
 `MainActivity`:
@@ -134,10 +137,17 @@ If the sequence stops, diagnose the first missing stage. A 10-second timeout sho
 
 ## Latest Changes — 2026-09-06
 
+### Manual TL watchdog refinement
+- `FloatingService.kt`: reduced the capture timeout from 10 seconds to 3 seconds.
+- `FloatingService.kt`: added a separate 30-second processing watchdog after a frame is received.
+- `FloatingService.kt`: added a visible status message after capture succeeds: `Screenshot didapat. Memproses OCR...`.
+- `FloatingService.kt`: processing watchdog restores the floating button if OCR/translation never calls back.
+- This distinction is intentional: a slow translation-model download must not be mistaken for a capture timeout.
+
 ### Fixed Manual TL capture lifecycle
 - Added `ScreenCaptureManager.cancelPendingCapture()`.
 - Changed `FloatingService` so the floating UI is not hidden before a frame is received.
-- Added a 10-second pending-capture timeout with automatic UI recovery.
+- Added pending-capture timeout with automatic UI recovery.
 - Added duplicate-request protection for Manual TL.
 - Added defensive exception handling around OCR, translation preparation/invocation, and result saving/display.
 - Ensured the floating button is restored on success and failure.
@@ -145,7 +155,7 @@ If the sequence stops, diagnose the first missing stage. A 10-second timeout sho
 
 ### Fixed APK update versioning
 - Changed `app/build.gradle.kts` from `versionCode = 1`, `versionName = "1.0"` to `versionCode = 2`, `versionName = "1.1"`.
-- Reason: Android requires a higher version code for an APK update over the installed build.
+- The user still reports a conflict when updating, so signing-key consistency is now the next APK-install investigation.
 
 ### Removed three-line limit
 - Removed `detectedTexts.take(3)` from `FloatingService.kt`.
@@ -171,7 +181,7 @@ If the sequence stops, diagnose the first missing stage. A 10-second timeout sho
 
 ## Next Recommended Milestone
 1. Build the latest commit and verify the APK artifact.
-2. Install it over the existing Screen-TL installation; version code is now higher.
+2. Investigate signing identity so the new APK can update the existing installation without a signature conflict.
 3. Test Manual TL on another app with many obvious text lines.
 4. Confirm the floating button remains available if capture stalls and returns after any failure.
 5. Confirm History contains all detected translations, not an artificial three-line cap.
