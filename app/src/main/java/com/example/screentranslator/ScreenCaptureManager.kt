@@ -181,10 +181,21 @@ class ScreenCaptureManager(
             return false
         }
 
+        if (captureRequested) {
+            Log.w(TAG, "captureOnce rejected: another capture is already pending")
+            return false
+        }
+
         onImageCaptured = callback
         captureRequested = true
         Log.i(TAG, "captureOnce requested; waiting for next ImageReader frame")
         return true
+    }
+
+    fun cancelPendingCapture() {
+        captureRequested = false
+        onImageCaptured = null
+        Log.i(TAG, "Pending capture cancelled")
     }
 
     fun stop() {
