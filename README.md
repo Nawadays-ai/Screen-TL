@@ -9,18 +9,18 @@ Android screen translator yang dirancang untuk menerjemahkan teks dari aplikasi 
 | Floating button | ✅ | Tampil dan dapat digeser di atas aplikasi lain |
 | Overlay permission | ✅ | Berjalan |
 | MediaProjection | ⚠️ | Screenshot berhasil dibuat; Android 14+ diarahkan ke full display agar aplikasi target dapat ikut tertangkap |
-| OCR | ⚠️ | Pengujian sudah menghasilkan teks ke History; cakupan seluruh aplikasi target masih perlu diverifikasi |
-| Translation | ⚠️ | Pipeline manual sampai History sudah berjalan |
+| OCR | ⚠️ | Pengujian sebelumnya menghasilkan teks ke History; cakupan seluruh aplikasi target masih perlu diverifikasi |
+| Translation | ⚠️ | Pipeline manual sampai History pernah berjalan, tetapi ada bug terbaru setelah perubahan overlay yang sedang diperbaiki |
 | Translation History | ⚠️ | Persisten; service-safe dan write menggunakan `commit()` |
-| Translation overlay | 🧪 | Implementasi pertama sudah dibuat; perlu diuji di perangkat |
+| Translation overlay | 🧪 | Implementasi pertama ada, tetapi belum berhasil diverifikasi stabil di perangkat |
 | Real-Time Translation | ❌ | Belum ada engine realtime |
 
 ## Masalah Aktif
 
-1. Pembatas tiga baris sudah dihapus. Manual TL sekarang memproses seluruh hasil OCR yang dikembalikan.
-2. Masih perlu memastikan frame MediaProjection benar-benar berasal dari aplikasi target dan bukan UI Screen-TL/status bar.
-3. Overlay terjemahan sekarang dibuat berdasarkan bounding box OCR, tetapi posisi, ukuran teks, dan kecocokan dengan layar nyata belum diverifikasi di perangkat.
-4. History sekarang berjalan lebih defensif dengan inisialisasi langsung dari `FloatingService`, logging, dan penyimpanan sinkron.
+1. Setelah menekan Manual TL pada build overlay pertama, perangkat dapat berhenti menampilkan floating button setelah model translation selesai diunduh dan tidak menghasilkan History. Ini mengindikasikan alur capture/service perlu dibuat lebih tahan terhadap frame yang tidak datang atau callback yang gagal.
+2. Perbaikan terbaru tidak lagi menyembunyikan floating button sebelum `captureOnce` menerima frame. Jika frame tidak datang dalam 10 detik, pending capture dibatalkan dan floating button dipulihkan.
+3. Masih perlu memastikan frame MediaProjection benar-benar berasal dari aplikasi target dan bukan UI Screen-TL/status bar.
+4. Overlay terjemahan masih perlu verifikasi posisi, ukuran teks, dan kecocokan koordinat dengan layar nyata.
 5. Toast hanya merupakan pesan status aplikasi/service; Toast bukan mekanisme untuk menampilkan terjemahan di atas aplikasi lain.
 6. Realtime belum dikerjakan; jangan menganggap tombol Real-Time sebagai fitur yang sudah aktif hanya karena UI tombolnya ada.
 
@@ -35,6 +35,7 @@ Android screen translator yang dirancang untuk menerjemahkan teks dari aplikasi 
 - [~] Verifikasi bahwa frame yang diberikan ke OCR benar-benar berasal dari aplikasi yang sedang terlihat.
 - [~] Pastikan seluruh hasil OCR dan translation masuk History secara konsisten.
 - [ ] Tambahkan filtering untuk status bar, floating button, dan teks UI Screen-TL yang tidak relevan.
+- [ ] Pastikan Manual TL tidak kehilangan floating button/service ketika menunggu frame atau model translation.
 
 ### Milestone 2 — Translation Overlay
 
@@ -43,6 +44,7 @@ Android screen translator yang dirancang untuk menerjemahkan teks dari aplikasi 
 - [x] Overlay dibuat `NOT_TOUCHABLE` agar tidak mengganggu interaksi aplikasi target.
 - [ ] Verifikasi posisi overlay terhadap koordinat layar pada perangkat nyata.
 - [ ] Sediakan hide/refresh/clear overlay yang mudah digunakan.
+- [ ] Verifikasi overlay tidak membuat service berhenti pada perangkat target.
 
 ### Milestone 3 — Real-Time Translation
 
@@ -62,6 +64,22 @@ Android screen translator yang dirancang untuk menerjemahkan teks dari aplikasi 
 ## Catatan Perubahan
 
 Setiap perubahan kode yang bermakna wajib dicatat di sini atau pada `PROJECT_NOTES.md`, termasuk tanggal, file, perubahan, alasan, hasil build/test, dan masalah yang masih tersisa.
+
+### 2026-09-06 — Perbaikan Manual TL yang macet setelah download model
+
+- `FloatingService.kt`: floating button tidak lagi disembunyikan sebelum frame capture diterima.
+- `ScreenCaptureManager.kt`: menambahkan pembatalan pending capture agar request yang menggantung dapat dihentikan dengan aman.
+- `FloatingService.kt`: menambahkan timeout 10 detik untuk capture; jika tidak ada frame, floating button dipulihkan dan pengguna mendapat pesan untuk mencoba lagi.
+- `FloatingService.kt`: menambahkan guard agar Manual TL kedua tidak berjalan ketika proses pertama masih pending.
+- `FloatingService.kt`: menambahkan penanganan exception di sekitar OCR, translation preparation, translation invocation, dan penyimpanan/display hasil agar kegagalan tidak diam-diam meninggalkan service dalam keadaan macet.
+- `FloatingService.kt`: floating button dipulihkan pada jalur gagal maupun setelah proses selesai.
+- Perubahan ini belum diverifikasi di perangkat; hasil build dan test perangkat harus dicatat setelah APK baru tersedia.
+
+### 2026-09-06 — Perbaikan versi APK untuk update
+
+- `app/build.gradle.kts`: `versionCode` dinaikkan dari `1` menjadi `2`.
+- `versionName` dinaikkan dari `1.0` menjadi `1.1`.
+- Tujuan: APK baru harus dapat dipasang sebagai update di atas instalasi Screen-TL yang sudah ada, bukan ditolak sebagai konflik versi lama.
 
 ### 2026-09-06 — Implementasi translation overlay pertama
 
