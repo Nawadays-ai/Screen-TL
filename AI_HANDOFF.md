@@ -1,15 +1,15 @@
 # Screen-TL — AI Handoff / Context
 
 ## Read This First
-This file is the handoff context for any AI assistant continuing development of Screen-TL. Read it before changing code. The repository is the source of truth; inspect current files before assuming the code still matches this document.
+This file is the handoff context for any AI assistant continuing development of Screen-TL. Read `README.md`, `PROJECT_NOTES.md`, and this file before changing code. The repository is the source of truth; inspect current files before assuming the code still matches this document.
 
 ## Project Goal
 Build an Android screen translator with:
 - floating button over other apps;
-- Manual TL: capture one screen → OCR → translate → eventually show translated text as overlay at OCR bounding boxes;
+- Manual TL: capture one screen → OCR → translate → show translated text as an overlay at OCR bounding boxes;
 - Real-Time TL: monitor/capture the screen, detect changed text, OCR only when useful, translate changed/new text, cache results, and display overlays;
 - selectable source/target languages;
-- selectable translation engines, with Google ML Kit on-device translation currently working and DeepL/Gemini planned.
+- selectable translation engines, with Google ML Kit on-device translation as the baseline and DeepL/Gemini planned.
 
 ## Current Architecture
 Package: `com.example.screentranslator`
@@ -18,28 +18,58 @@ Important files:
 - `MainActivity.kt`: permissions, language/API selectors, starts foreground service, displays Translation History.
 - `FloatingService.kt`: floating UI, MediaProjection capture manager lifecycle, OCR/translation orchestration, Manual TL.
 - `ScreenCaptureSession.kt`: holds MediaProjection result code and Intent data in memory.
-- `ScreenCaptureManager.kt`: screen capture implementation; inspect current repository version before editing.
-- `OcrManager.kt`: Google ML Kit OCR; returns `DetectedText(text, left, top, right, bottom)`.
-- `TranslationManager.kt`: Google ML Kit on-device translation; maps Indonesian/Japanese/Mandarin/English and downloads model when needed.
-- `TranslationHistory.kt`: persistent history using SharedPreferences, max 50 entries.
-- `layout_floating_widget.xml`: floating button/submenu UI.
-- `activity_main.xml`: main settings screen plus Translation History.
+- `ScreenCaptureManager.kt`: screen capture implementation plus diagnostic logging.
+- `OcrManager.kt`: Google ML Kit OCR; returns `DetectedText(text, left, top, right, bottom)` plus diagnostic logging.
+- `TranslationManager.kt`: Google ML Kit on-device translation.
+- `TranslationHistory.kt`: persistent history using SharedPreferences, max 50 entries, service-safe initialization.
 
 ## Known Working Behavior
 - Overlay permission works.
 - MediaProjection permission works.
 - Floating button works and can be dragged.
-- Manual screenshot capture works and has been verified with actual screen dimensions.
-- OCR works, including Japanese/Chinese/Latin recognizers.
-- Translation has successfully produced a result.
+- A screenshot/Bitmap can be produced.
+- OCR engine is configured for Japanese, Chinese, and Latin.
+- Translation manager is configured for Indonesian/Japanese/Chinese/English.
 
-## Known Limitations / Bugs To Address
-- Toast messages are not reliable for testing over other apps and are unsuitable for multi-line translation output. Do not use Toast as the primary result channel.
-- The previous test showed only the current time visibly because Toast output was truncated/obscured. Translation results should go to History or a future overlay.
-- Translation History was initially RAM-only and did not receive results. It has now been changed to persistent SharedPreferences and `FloatingService` writes completed translation batches into it.
-- Current Manual TL intentionally translates only `detectedTexts.take(3)` for early testing. This should eventually become configurable or process all useful detections with filtering/cache.
-- Realtime button currently only toggles its UI state; actual realtime capture/OCR/translation loop is not implemented yet.
-- Overlay translation UI is not implemented yet.
+## Current Bugs / Unverified Behavior
+
+### Capture/OCR
+The latest device test reports that OCR sees only the phone's current time/status-bar text rather than the text in the other application. This means the next AI must first prove what bitmap is reaching OCR before changing recognizers or language handling.
+
+### History
+History was previously empty. The service now explicitly calls `TranslationHistory.initialize(applicationContext)`, and writes use `commit()` with `ScreenTL-History` diagnostics. This change is intended to distinguish a persistence problem from a pipeline problem.
+
+### Toast
+Toast is only a short status/error channel. It is not the product output. Do not try to solve cross-app translation by making Toast larger or longer.
+
+### Overlay
+Translation overlay over the target application is not implemented yet.
+
+### Realtime
+The realtime button only changes UI state. The actual realtime capture/OCR/translation/cache loop does not exist yet.
+
+## Diagnostic Logging
+Use Logcat tags:
+- `ScreenTL-Capture`
+- `ScreenTL-OCR`
+- `ScreenTL-Service`
+- `ScreenTL-History`
+
+Expected Manual TL sequence:
+
+`Manual translation requested`
+→ `captureOnce requested`
+→ `Fresh screen frame captured successfully`
+→ `Capture callback received`
+→ `OCR started`
+→ `OCR completed: N lines detected`
+→ `Translation model ready`
+→ `Translating ...`
+→ `Translation success ...`
+→ `Translation completed; saving history entry ...`
+→ `History add: saved=true ...`
+
+If the sequence stops, diagnose the first missing stage.
 
 ## Important Current Flow
 `MainActivity`:
@@ -51,47 +81,32 @@ Important files:
 6. `FloatingService` starts.
 
 `FloatingService`:
-1. initializes `OcrManager(sourceLanguage)`;
-2. initializes `TranslationManager(sourceLanguage, targetLanguage)`;
+1. initializes `TranslationHistory` from the service context;
+2. initializes `OcrManager` and `TranslationManager`;
 3. initializes `ScreenCaptureManager` from `ScreenCaptureSession`;
 4. Manual TL calls `captureOnce`;
 5. OCR returns `DetectedText` items with bounding boxes;
 6. translation model is prepared;
 7. up to three detected lines are translated sequentially;
-8. completed results are written to `TranslationHistory` with timestamp and language pair.
-
-## History Contract
-`TranslationHistory.initialize(applicationContext)` must be called before `add/getAll/clear`.
-History entries are strings. Current format:
-
-```text
-[HH:mm:ss]
-SOURCE → TARGET
-
-original text
-→ translated text
-```
-
-History keeps at most 50 entries and persists across app restarts.
-
-## Memory / Screenshot Policy
-Manual screenshots are held as Bitmaps for OCR and are recycled by `OcrManager` on completion. Do not add permanent screenshot files unless there is a clear product requirement. The desired behavior is that screenshots do not accumulate in storage.
+8. completed results are written to persistent History.
 
 ## Development Rules
-- Inspect the actual current repository before modifying code.
+- Inspect the actual repository before modifying code.
 - Prefer small, testable changes.
-- Preserve working Screen Capture and OCR while adding new features.
-- Do not blindly overwrite files based only on this handoff document; code may have advanced.
-- After each meaningful change, explain what changed and what the user should test.
-- The user's GitHub Actions setup automatically builds an APK after changes, so a build result is an important validation signal.
-- Avoid introducing dependencies unless necessary.
-- Keep the app functional before polishing UI.
+- Preserve working capture/OCR while diagnosing the pipeline.
+- Do not mark a feature `[x]` until it is verified.
+- After every meaningful code change, update the change log and roadmap.
+- Keep `AI_README.md` as the operational rules for future AI sessions.
+- Update this handoff when architecture, bugs, or priorities change.
+- Always tell the owner what changed, why, what was verified, and what must be tested next.
 
 ## Next Recommended Milestone
-1. Verify the current History implementation builds and works after Manual TL in another app.
-2. If History works, implement the first translation overlay using `DetectedText` bounding boxes and translated strings.
-3. Keep History as a debug/testing feature while overlay is developed.
-4. Then implement real-time change detection and translation caching.
-
-## Communication Context
-The project owner prefers step-by-step changes when manually editing code, but has authorized the AI with repository access to make changes directly. When making direct repository changes, always summarize the files changed, the purpose, and the expected test result.
+1. Build the latest commit.
+2. Test Manual TL on another app with obvious text.
+3. Inspect the four `ScreenTL-*` Logcat tags.
+4. Determine whether the captured bitmap contains the target app or only system/status-bar content.
+5. Fix capture source/timing/dimensions/orientation if the frame is wrong.
+6. If the frame is correct, diagnose OCR and filtering.
+7. Confirm History receives a completed translation.
+8. Implement the first overlay using OCR bounding boxes.
+9. Only after Manual TL + overlay are stable, implement realtime capture/change detection/cache.
