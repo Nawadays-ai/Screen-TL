@@ -107,23 +107,22 @@ class MainActivity : AppCompatActivity() {
         mediaProjectionLauncher.launch(projectionManager.createScreenCaptureIntent())
     }
 
-    private fun startFloatingService(resultCode: Int, data: Intent) {
-        val intent = Intent(this, FloatingService::class.java).apply {
-            putExtra("EXTRA_RESULT_CODE", resultCode)
-            putExtra("EXTRA_DATA", data)
-            putExtra("EXTRA_SOURCE_LANG", spinnerSourceLang.selectedItem.toString())
-            putExtra("EXTRA_TARGET_LANG", spinnerTargetLang.selectedItem.toString())
-            putExtra("EXTRA_REALTIME_API", spinnerRealtimeApi.selectedItem.toString())
-            putExtra("EXTRA_MANUAL_API", spinnerManualApi.selectedItem.toString())
-        }
+  private fun startFloatingService(resultCode: Int, data: Intent) {
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
-        }
+    ScreenCaptureSession.save(resultCode, data)
 
-        // Minimalkan aplikasi agar langsung masuk ke game
-        moveTaskToBack(true)
+    val intent = Intent(this, FloatingService::class.java).apply {
+        putExtra("EXTRA_SOURCE_LANG", spinnerSourceLang.selectedItem.toString())
+        putExtra("EXTRA_TARGET_LANG", spinnerTargetLang.selectedItem.toString())
+        putExtra("EXTRA_REALTIME_API", spinnerRealtimeApi.selectedItem.toString())
+        putExtra("EXTRA_MANUAL_API", spinnerManualApi.selectedItem.toString())
     }
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        startForegroundService(intent)
+    } else {
+        startService(intent)
+    }
+
+    moveTaskToBack(true)
 }
