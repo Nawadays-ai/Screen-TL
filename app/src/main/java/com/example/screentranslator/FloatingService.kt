@@ -51,7 +51,7 @@ class FloatingService : Service() {
         val resultCode = ScreenCaptureSession.resultCode
         val projectionData = ScreenCaptureSession.data
 
-        if (resultCode != -1 && projectionData != null) {
+        if (projectionData != null) {
 
             screenCaptureManager = ScreenCaptureManager(
                 this,
