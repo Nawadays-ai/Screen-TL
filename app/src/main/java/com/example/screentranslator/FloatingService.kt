@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
 import android.util.Log
 import android.view.ContextThemeWrapper
@@ -29,6 +30,7 @@ class FloatingService : Service() {
 
     companion object {
         private const val TAG = "ScreenTL-Service"
+        private const val MANUAL_CAPTURE_TIMEOUT_MS = 10_000L
     }
 
     private lateinit var windowManager: WindowManager
@@ -43,6 +45,9 @@ class FloatingService : Service() {
     private var overlayView: TranslationOverlayView? = null
     private var isRealtimeActive = false
     private var isSubMenuVisible = false
+    private var manualTranslationPending = false
+    private val mainHandler = Handler()
+    private var manualCaptureTimeout: Runnable? = null
 
     private var screenCaptureManager: ScreenCaptureManager? = null
     private var ocrManager: OcrManager? = null
@@ -206,6 +211,11 @@ class FloatingService : Service() {
     }
 
     private fun triggerManualTranslation() {
+        if (manualTranslationPending) {
+            showToast("Terjemahan manual masih diproses")
+            return
+        }
+
         Log.i(TAG, "Manual translation requested")
         showToast("Mengambil gambar layar...")
 
@@ -230,55 +240,82 @@ class FloatingService : Service() {
             return
         }
 
-        // Hide Screen-TL's own floating UI before the next frame is captured.
-        // Otherwise the floating button/menu could be fed back into OCR and overlay.
-        floatingView.visibility = View.INVISIBLE
+        manualTranslationPending = true
         clearTranslationOverlay()
 
+        // Do not hide the floating button before capture. On some devices the
+        // display can stop producing a fresh ImageReader frame after the view
+        // changes visibility, leaving the service apparently stuck forever.
+        // The button is hidden only after a real frame has arrived.
         val requested = manager.captureOnce { bitmap ->
-            floatingView.visibility = View.VISIBLE
+            cancelManualCaptureTimeout()
+            floatingView.visibility = View.INVISIBLE
             Log.i(TAG, "Capture callback received: ${bitmap.width}x${bitmap.height}")
-            ocr.recognize(
-                bitmap = bitmap,
-                onSuccess = { detectedTexts ->
-                    Log.i(TAG, "OCR callback: ${detectedTexts.size} lines")
-                    if (detectedTexts.isEmpty()) {
-                        showToast("OCR tidak menemukan teks")
-                        return@recognize
-                    }
 
-                    translator.prepare(
-                        onReady = {
-                            val textsToTranslate = detectedTexts
-                            Log.i(TAG, "Translation model ready; translating ${textsToTranslate.size} lines")
-                            translateTexts(
-                                translator = translator,
-                                texts = textsToTranslate,
-                                index = 0,
-                                results = mutableListOf(),
-                                overlayResults = mutableListOf(),
-                                sourceWidth = bitmap.width,
-                                sourceHeight = bitmap.height
-                            )
-                        },
-                        onFailure = { exception ->
-                            Log.e(TAG, "Translation model preparation failed", exception)
-                            showToast("Model terjemahan gagal: ${exception.message}")
+            try {
+                ocr.recognize(
+                    bitmap = bitmap,
+                    onSuccess = { detectedTexts ->
+                        Log.i(TAG, "OCR callback: ${detectedTexts.size} lines")
+                        if (detectedTexts.isEmpty()) {
+                            finishManualTranslation("OCR tidak menemukan teks")
+                            return@recognize
                         }
-                    )
-                },
-                onFailure = { exception ->
-                    Log.e(TAG, "OCR callback failed", exception)
-                    showToast("OCR gagal: ${exception.message}")
-                }
-            )
+
+                        try {
+                            translator.prepare(
+                                onReady = {
+                                    val textsToTranslate = detectedTexts
+                                    Log.i(TAG, "Translation model ready; translating ${textsToTranslate.size} lines")
+                                    translateTexts(
+                                        translator = translator,
+                                        texts = textsToTranslate,
+                                        index = 0,
+                                        results = mutableListOf(),
+                                        overlayResults = mutableListOf(),
+                                        sourceWidth = bitmap.width,
+                                        sourceHeight = bitmap.height
+                                    )
+                                },
+                                onFailure = { exception ->
+                                    Log.e(TAG, "Translation model preparation failed", exception)
+                                    finishManualTranslation("Model terjemahan gagal: ${exception.message ?: "Unknown error"}")
+                                }
+                            )
+                        } catch (exception: Exception) {
+                            Log.e(TAG, "Translation preparation threw an exception", exception)
+                            finishManualTranslation("Gagal menyiapkan translator: ${exception.message ?: "Unknown error"}")
+                        }
+                    },
+                    onFailure = { exception ->
+                        Log.e(TAG, "OCR callback failed", exception)
+                        finishManualTranslation("OCR gagal: ${exception.message ?: "Unknown error"}")
+                    }
+                )
+            } catch (exception: Exception) {
+                Log.e(TAG, "OCR invocation threw an exception", exception)
+                finishManualTranslation("Proses OCR gagal: ${exception.message ?: "Unknown error"}")
+            }
         }
 
         Log.i(TAG, "captureOnce returned=$requested")
         if (!requested) {
+            manualTranslationPending = false
             floatingView.visibility = View.VISIBLE
             showToast("Gagal mengambil screenshot")
+            return
         }
+
+        manualCaptureTimeout = Runnable {
+            if (manualTranslationPending) {
+                Log.e(TAG, "Manual capture timed out after ${MANUAL_CAPTURE_TIMEOUT_MS}ms")
+                manager.cancelPendingCapture()
+                manualTranslationPending = false
+                floatingView.visibility = View.VISIBLE
+                showToast("Screenshot tidak masuk. Coba Manual TL lagi.")
+            }
+        }
+        mainHandler.postDelayed(manualCaptureTimeout!!, MANUAL_CAPTURE_TIMEOUT_MS)
     }
 
     private fun translateTexts(
@@ -300,53 +337,88 @@ class FloatingService : Service() {
             }
 
             Log.i(TAG, "Translation completed; saving history entry with ${results.size} results")
-            TranslationHistory.add(historyEntry)
-            showTranslationOverlay(overlayResults, sourceWidth, sourceHeight)
-            showToast("Terjemahan selesai: ${results.size} baris. Overlay ditampilkan.")
+            try {
+                TranslationHistory.add(historyEntry)
+                showTranslationOverlay(overlayResults, sourceWidth, sourceHeight)
+                finishManualTranslation("Terjemahan selesai: ${results.size} baris. Overlay ditampilkan.")
+            } catch (exception: Exception) {
+                Log.e(TAG, "Failed to save/display translation result", exception)
+                finishManualTranslation("Terjemahan selesai tetapi hasil gagal ditampilkan: ${exception.message ?: "Unknown error"}")
+            }
             return
         }
 
         val currentText = texts[index]
         Log.i(TAG, "Translating [${index + 1}/${texts.size}]: '${currentText.text}'")
 
-        translator.translate(
-            currentText.text,
-            onSuccess = { translatedText ->
-                Log.i(TAG, "Translation success: '${currentText.text}' -> '$translatedText'")
-                results.add("${currentText.text}\n→ $translatedText")
-                overlayResults.add(
-                    TranslationOverlayItem(
-                        translatedText = translatedText,
-                        left = currentText.left,
-                        top = currentText.top,
-                        right = currentText.right,
-                        bottom = currentText.bottom
+        try {
+            translator.translate(
+                currentText.text,
+                onSuccess = { translatedText ->
+                    Log.i(TAG, "Translation success: '${currentText.text}' -> '$translatedText'")
+                    results.add("${currentText.text}\n→ $translatedText")
+                    overlayResults.add(
+                        TranslationOverlayItem(
+                            translatedText = translatedText,
+                            left = currentText.left,
+                            top = currentText.top,
+                            right = currentText.right,
+                            bottom = currentText.bottom
+                        )
                     )
-                )
-                translateTexts(
-                    translator,
-                    texts,
-                    index + 1,
-                    results,
-                    overlayResults,
-                    sourceWidth,
-                    sourceHeight
-                )
-            },
-            onFailure = { exception ->
-                Log.e(TAG, "Translation failed for '${currentText.text}'", exception)
-                results.add("${currentText.text}\n→ [Gagal diterjemahkan: ${exception.message ?: "Unknown error"}]")
-                translateTexts(
-                    translator,
-                    texts,
-                    index + 1,
-                    results,
-                    overlayResults,
-                    sourceWidth,
-                    sourceHeight
-                )
+                    translateTexts(
+                        translator,
+                        texts,
+                        index + 1,
+                        results,
+                        overlayResults,
+                        sourceWidth,
+                        sourceHeight
+                    )
+                },
+                onFailure = { exception ->
+                    Log.e(TAG, "Translation failed for '${currentText.text}'", exception)
+                    results.add("${currentText.text}\n→ [Gagal diterjemahkan: ${exception.message ?: "Unknown error"}]")
+                    translateTexts(
+                        translator,
+                        texts,
+                        index + 1,
+                        results,
+                        overlayResults,
+                        sourceWidth,
+                        sourceHeight
+                    )
+                }
+            )
+        } catch (exception: Exception) {
+            Log.e(TAG, "Translation invocation threw an exception", exception)
+            results.add("${currentText.text}\n→ [Gagal diterjemahkan: ${exception.message ?: "Unknown error"}]")
+            translateTexts(
+                translator,
+                texts,
+                index + 1,
+                results,
+                overlayResults,
+                sourceWidth,
+                sourceHeight
+            )
+        }
+    }
+
+    private fun finishManualTranslation(message: String) {
+        cancelManualCaptureTimeout()
+        manualTranslationPending = false
+        runOnMainThread {
+            if (::floatingView.isInitialized) {
+                floatingView.visibility = View.VISIBLE
             }
-        )
+            showToast(message)
+        }
+    }
+
+    private fun cancelManualCaptureTimeout() {
+        manualCaptureTimeout?.let(mainHandler::removeCallbacks)
+        manualCaptureTimeout = null
     }
 
     private fun showTranslationOverlay(
@@ -411,7 +483,7 @@ class FloatingService : Service() {
     }
 
     private fun runOnMainThread(action: () -> Unit) {
-        android.os.Handler(mainLooper).post(action)
+        Handler(mainLooper).post(action)
     }
 
     private fun startForegroundServiceNotification() {
@@ -440,6 +512,8 @@ class FloatingService : Service() {
     }
 
     override fun onDestroy() {
+        cancelManualCaptureTimeout()
+        screenCaptureManager?.cancelPendingCapture()
         removeTranslationOverlay()
         translationManager?.close()
         translationManager = null
@@ -447,7 +521,13 @@ class FloatingService : Service() {
         ocrManager = null
         screenCaptureManager?.release()
         screenCaptureManager = null
-        if (::floatingView.isInitialized) windowManager.removeView(floatingView)
+        if (::floatingView.isInitialized) {
+            try {
+                windowManager.removeView(floatingView)
+            } catch (_: IllegalArgumentException) {
+                // Already removed.
+            }
+        }
         super.onDestroy()
     }
 }
