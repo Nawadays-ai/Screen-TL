@@ -37,6 +37,8 @@ class FloatingService : Service() {
     private var isSubMenuVisible = false
 
     private var screenCaptureManager: ScreenCaptureManager? = null
+    private var ocrManager: OcrManager? = null
+    private var sourceLanguage: String = "Jepang"
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -45,6 +47,12 @@ class FloatingService : Service() {
     flags: Int,
     startId: Int
 ): Int {
+      sourceLanguage =
+    intent?.getStringExtra("EXTRA_SOURCE_LANG") ?: "Jepang"
+
+if (ocrManager == null) {
+    ocrManager = OcrManager(sourceLanguage)
+}
 
     if (screenCaptureManager == null) {
 
@@ -267,52 +275,98 @@ class FloatingService : Service() {
         ).show()
     }
 
-    private fun triggerManualTranslation() {
+   private fun triggerManualTranslation() {
+
+    Toast.makeText(
+        this,
+        "Mengambil gambar layar...",
+        Toast.LENGTH_SHORT
+    ).show()
+
+    val manager = screenCaptureManager
+
+    if (manager == null) {
 
         Toast.makeText(
             this,
-            "Mengambil gambar layar...",
-            Toast.LENGTH_SHORT
+            "Screen Capture belum siap",
+            Toast.LENGTH_LONG
         ).show()
 
-        val manager = screenCaptureManager
-
-        if (manager == null) {
-
-            Toast.makeText(
-                this,
-                "Screen Capture belum siap",
-                Toast.LENGTH_LONG
-            ).show()
-
-            return
-        }
-
-        val requested = manager.captureOnce { bitmap ->
-
-            runOnMainThread {
-
-                Toast.makeText(
-                    this,
-                    "Screenshot berhasil: ${bitmap.width} x ${bitmap.height}",
-                    Toast.LENGTH_SHORT
-                ).show()
-
-                bitmap.recycle()
-            }
-        }
-
-        if (!requested) {
-
-            Toast.makeText(
-                this,
-                "Gagal mengambil screenshot",
-                Toast.LENGTH_LONG
-            ).show()
-        }
+        return
     }
 
-    private fun runOnMainThread(action: () -> Unit) {
+    val ocr = ocrManager
+
+    if (ocr == null) {
+
+        Toast.makeText(
+            this,
+            "OCR belum siap",
+            Toast.LENGTH_LONG
+        ).show()
+
+        return
+    }
+
+    val requested = manager.captureOnce { bitmap ->
+
+        ocr.recognize(
+            bitmap = bitmap,
+
+            onSuccess = { detectedTexts ->
+
+                runOnMainThread {
+
+                    if (detectedTexts.isEmpty()) {
+
+                        Toast.makeText(
+                            this,
+                            "OCR tidak menemukan teks",
+                            Toast.LENGTH_LONG
+                        ).show()
+
+                    } else {
+
+                        val previewText =
+                            detectedTexts
+                                .take(3)
+                                .joinToString(" | ") {
+                                    it.text
+                                }
+
+                        Toast.makeText(
+                            this,
+                            "OCR: ${detectedTexts.size} teks\n$previewText",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+            },
+
+            onFailure = { exception ->
+
+                runOnMainThread {
+
+                    Toast.makeText(
+                        this,
+                        "OCR gagal: ${exception.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        )
+    }
+
+    if (!requested) {
+
+        Toast.makeText(
+            this,
+            "Gagal mengambil screenshot",
+            Toast.LENGTH_LONG
+        ).show()
+    }
+}    private fun runOnMainThread(action: () -> Unit) {
         android.os.Handler(mainLooper).post(action)
     }
 
@@ -366,6 +420,9 @@ class FloatingService : Service() {
     }
 
     override fun onDestroy() {
+
+        ocrManager?.close()
+        ocrManager = null
 
         screenCaptureManager?.release()
         screenCaptureManager = null
