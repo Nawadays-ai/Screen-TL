@@ -1,10 +1,12 @@
 package com.example.screentranslator
 
 import android.content.Context
+import android.util.Log
 import org.json.JSONArray
 
 object TranslationHistory {
 
+    private const val TAG = "ScreenTL-History"
     private const val PREFS_NAME = "screen_tl_history"
     private const val KEY_ENTRIES = "entries"
     private const val MAX_ENTRIES = 50
@@ -13,6 +15,7 @@ object TranslationHistory {
     private lateinit var preferences: android.content.SharedPreferences
     private var listener: (() -> Unit)? = null
 
+    @Synchronized
     fun initialize(context: Context) {
         if (!initialized) {
             preferences = context.applicationContext.getSharedPreferences(
@@ -20,9 +23,11 @@ object TranslationHistory {
                 Context.MODE_PRIVATE
             )
             initialized = true
+            Log.i(TAG, "History initialized")
         }
     }
 
+    @Synchronized
     fun add(entry: String) {
         ensureInitialized()
 
@@ -33,10 +38,12 @@ object TranslationHistory {
             entries.removeAt(entries.lastIndex)
         }
 
-        save(entries)
+        val saved = save(entries)
+        Log.i(TAG, "History add: saved=$saved, entries=${entries.size}")
         listener?.invoke()
     }
 
+    @Synchronized
     fun getAll(): List<String> {
         ensureInitialized()
 
@@ -49,14 +56,17 @@ object TranslationHistory {
                     add(json.getString(index))
                 }
             }
-        } catch (_: Exception) {
+        } catch (exception: Exception) {
+            Log.e(TAG, "Failed to read history", exception)
             emptyList()
         }
     }
 
+    @Synchronized
     fun clear() {
         ensureInitialized()
-        preferences.edit().remove(KEY_ENTRIES).apply()
+        val cleared = preferences.edit().remove(KEY_ENTRIES).commit()
+        Log.i(TAG, "History cleared: $cleared")
         listener?.invoke()
     }
 
@@ -64,13 +74,13 @@ object TranslationHistory {
         this.listener = listener
     }
 
-    private fun save(entries: List<String>) {
+    private fun save(entries: List<String>): Boolean {
         val json = JSONArray()
         entries.forEach { json.put(it) }
 
-        preferences.edit()
+        return preferences.edit()
             .putString(KEY_ENTRIES, json.toString())
-            .apply()
+            .commit()
     }
 
     private fun ensureInitialized() {
