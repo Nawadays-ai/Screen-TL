@@ -4,19 +4,19 @@
 Screen-TL adalah aplikasi Android untuk menerjemahkan teks yang terlihat di layar menggunakan floating button. Target akhirnya adalah Manual Translation dan Real-Time Translation dengan hasil terjemahan sebagai overlay di atas teks asli aplikasi lain.
 
 ## Status Saat Ini
-- Screen Capture: berhasil membuat screenshot, tetapi sumber frame yang diberikan ke OCR masih harus diverifikasi.
+- Screen Capture: berhasil membuat screenshot; cakupan frame terhadap aplikasi target masih perlu diverifikasi lebih luas.
 - Floating button: berhasil tampil, dapat digeser, dan tombol bekerja.
 - Permission overlay dan MediaProjection: berhasil.
-- OCR: engine terpasang dan sudah menghasilkan teks ke History; cakupan seluruh aplikasi target masih perlu diverifikasi.
-- Google ML Kit Translation: pipeline Manual TL sudah berjalan sampai History.
+- OCR: engine terpasang dan menghasilkan teks dengan bounding box; cakupan seluruh aplikasi target masih perlu diverifikasi.
+- Google ML Kit Translation: pipeline Manual TL sudah berjalan sampai History dan overlay pada pengujian perangkat terbaru.
 - Translation History: diinisialisasi dari `FloatingService` dan menggunakan penyimpanan sinkron untuk diagnosis yang dapat dipercaya.
-- Translation overlay: implementasi pertama sudah dibuat berdasarkan bounding box OCR, tetapi belum diuji pada perangkat.
-- Realtime TL: belum dibuat.
+- Translation overlay: sudah bekerja pada Manual TL; perapian visual dan verifikasi lintas perangkat ditunda.
+- Realtime TL: engine tahap pertama sudah diimplementasikan, tetapi belum diverifikasi pada perangkat.
 
 ## Masalah Aktif
 
 ### 1. Capture/OCR masih perlu verifikasi perangkat
-Pengujian sebelumnya menunjukkan jam/status bar dapat terbaca. Pembatas tiga baris juga sudah ditemukan dan dihapus. Sekarang prioritasnya memastikan frame full display benar-benar berisi aplikasi target dan OCR membaca teks target secara lengkap.
+Pengujian sebelumnya menunjukkan jam/status bar dapat terbaca. Pembatas tiga baris sudah dihapus. Sekarang perlu memastikan frame full display benar-benar berisi aplikasi target dan OCR membaca teks target secara lengkap.
 
 ### 2. History
 History sebelumnya kosong. Perubahan yang sudah dilakukan:
@@ -24,60 +24,82 @@ History sebelumnya kosong. Perubahan yang sudah dilakukan:
 - Penyimpanan history menggunakan `commit()` agar hasil write dapat langsung diverifikasi.
 - Logging `ScreenTL-History` mencatat hasil write.
 
+Manual TL memakai History sebagai hasil persisten. Real-Time tidak menulis setiap frame ke History agar frame berulang tidak membuat puluhan entri duplikat.
+
 ### 3. Toast hanya status aplikasi
-Toast memang hanya pesan status singkat. Toast bukan target output produk. Hasil translation sekarang memiliki jalur overlay sendiri.
+Toast hanya pesan status singkat. Hasil translation menggunakan overlay, bukan Toast.
 
 ### 4. Translation Overlay
-Implementasi pertama sudah ada di `TranslationOverlayView.kt` dan `FloatingService.kt`:
+Implementasi ada di `TranslationOverlayView.kt` dan `FloatingService.kt`:
 - Setiap `DetectedText` diterjemahkan.
 - Koordinat bounding box asli dibawa bersama hasil translation.
 - Overlay full-screen menggunakan `TYPE_APPLICATION_OVERLAY`.
 - Overlay memakai `FLAG_NOT_TOUCHABLE` agar tidak mengambil alih sentuhan pengguna.
-- Floating UI Screen-TL dan overlay lama dibersihkan sebelum capture berikutnya agar hasil overlay tidak ikut diproses OCR.
+- Overlay lama dilepas sebelum capture berikutnya agar hasil overlay tidak menjadi input OCR.
 
 Yang belum terbukti:
 - kecocokan koordinat bitmap dengan koordinat overlay pada berbagai resolusi/orientasi;
 - ukuran teks overlay agar terbaca tanpa menutupi terlalu banyak layar;
-- hasil overlay pada aplikasi/game nyata.
+- hasil overlay pada berbagai aplikasi/game nyata.
 
-## Perubahan Terbaru — 2026-09-06
+## Real-Time TL — Implementasi Tahap Pertama
 
-### `TranslationOverlayView.kt`
-- File baru.
-- Menggambar background dan teks hasil terjemahan pada area bounding box OCR.
-- Menyesuaikan koordinat bitmap ke ukuran view overlay.
-- Overlay tidak menerima touch.
+`FloatingService.kt` sekarang memiliki loop dasar:
 
-### `FloatingService.kt`
-- Menyimpan hasil translation bersama koordinat OCR.
-- Menampilkan overlay setelah semua hasil Manual TL selesai.
-- Menyembunyikan floating UI sebelum capture agar UI Screen-TL tidak ikut OCR.
-- Membersihkan overlay lama sebelum capture baru.
-- Menjaga History sebagai output debugging/persisten.
+`Real-Time aktif → capture frame → OCR → translate setiap baris → update overlay → tunggu → capture lagi`
 
-### Dokumentasi
-- `README.md` memperbarui status dan roadmap Milestone 2.
-- `AI_HANDOFF.md` perlu mencatat implementasi overlay ini sebagai fitur yang sudah dibuat tetapi belum diverifikasi perangkat.
+Karakteristik implementasi:
+- interval dasar antar-frame sekitar 1,2 detik;
+- hanya satu frame diproses pada satu waktu;
+- model translation dipersiapkan saat Real-Time mulai;
+- callback sesi lama dilindungi dengan `realtimeGeneration` agar tidak menghidupkan kembali loop setelah Real-Time dihentikan;
+- saat Real-Time dihentikan, pending capture dibatalkan dan overlay dihapus, tetapi foreground service tetap hidup;
+- hasil Real-Time tidak masuk History pada tahap ini;
+- change detection dan cache translation belum dibuat.
 
-## Testing Manual TL + Overlay
+Alasan belum membuat change detection/cache sekarang: fungsi dasar harus diverifikasi dulu pada perangkat sebelum optimasi ditambahkan.
 
-1. Build/install versi terbaru.
-2. Pilih bahasa sumber dan target.
-3. Tekan Play dan izinkan screen capture.
-4. Buka aplikasi lain yang memiliki banyak teks besar dan jelas.
-5. Tunggu aplikasi target tampil stabil.
-6. Tekan floating button → Manual TL.
-7. Tunggu sampai Toast menyatakan overlay ditampilkan.
-8. Periksa apakah teks terjemahan muncul tepat di area teks asli.
-9. Coba sentuh/scroll aplikasi target. Overlay seharusnya tidak menghalangi sentuhan.
-10. Jalankan Manual TL lagi. Overlay lama harus dibersihkan sebelum capture baru.
-11. Buka History untuk memastikan hasil tetap tersimpan.
+## Perubahan Terbaru — 2026-09-07
 
-### Interpretasi hasil
-- Jika `ScreenTL-Capture` tidak menunjukkan `Fresh screen frame captured successfully`, masalah berada di capture pipeline.
-- Jika capture sukses tetapi `ScreenTL-OCR` hanya menemukan jam/status bar, periksa bitmap/frame dan orientasi/ukuran sebelum mengubah OCR.
-- Jika OCR menemukan teks target tetapi overlay salah posisi, fokuskan diagnosis pada skala/koordinat overlay, bukan translation engine.
-- Jika overlay tepat posisi tetapi menutupi atau sulit dibaca, tuning ukuran teks/background dapat dilakukan setelah koordinat terbukti benar.
+### Implementasi Real-Time TL tahap pertama
+`FloatingService.kt`:
+- mengubah tombol Real-Time dari sekadar status menjadi loop capture/OCR/translation nyata;
+- mempersiapkan model translation ketika Real-Time dimulai;
+- mengambil frame layar berkala dengan `ScreenCaptureManager.captureOnce()`;
+- menjalankan OCR pada frame terbaru;
+- menerjemahkan hasil OCR secara berurutan;
+- memperbarui translation overlay dari frame terbaru;
+- mencegah overlap proses dengan flag `isRealtimeBusy`;
+- menggunakan `realtimeGeneration` agar callback dari sesi sebelumnya diabaikan setelah Real-Time dihentikan;
+- membatalkan pending capture dan menghapus overlay saat Real-Time dimatikan;
+- tidak menulis setiap frame ke History untuk mencegah duplikasi.
+
+### Verifikasi
+- Kode sudah ditulis ke branch `main` pada commit `2f446e40fac1b5094f4a71ba72570ba7afb03060`.
+- Build/device test untuk perubahan ini belum dilakukan.
+- GitHub tooling yang tersedia di sesi ini tidak menyediakan aksi untuk memulai `workflow_dispatch`, sehingga jangan mengklaim APK baru sudah dibuild.
+
+## Testing Real-Time Tahap Pertama
+
+1. Install APK yang berisi commit Real-Time terbaru.
+2. Jalankan Screen-TL dan izinkan MediaProjection.
+3. Buka aplikasi lain dengan teks besar dan jelas.
+4. Tekan floating button → Real-Time.
+5. Tunggu beberapa detik.
+6. Pastikan OCR/translation berjalan berulang dan overlay muncul/berubah mengikuti frame.
+7. Ubah/scroll halaman target dan lihat apakah hasil overlay ikut berubah pada frame berikutnya.
+8. Tekan floating button saat Real-Time aktif untuk menghentikannya.
+9. Pastikan overlay hilang dan floating service tetap aktif.
+10. Jalankan Manual TL setelah Real-Time dihentikan untuk memastikan pipeline Manual TL tetap bekerja.
+
+### Log yang diharapkan
+- `Realtime translation started`
+- `Realtime translation model ready`
+- `Realtime captureOnce returned=true`
+- `Realtime frame captured`
+- `Realtime OCR completed: N lines`
+- `Realtime overlay updated: N items`
+- Saat dihentikan: `Realtime translation stopped`
 
 ## Roadmap
 
@@ -88,7 +110,7 @@ Yang belum terbukti:
 - [x] OCR manager dengan bounding box.
 - [x] ML Kit Translation manager.
 - [~] Pastikan frame yang diberikan ke OCR benar-benar berasal dari aplikasi yang sedang terlihat.
-- [~] Pastikan hasil OCR dan translation masuk History secara konsisten.
+- [x] Manual TL capture → OCR → translation → History → overlay berhasil pada pengujian perangkat terbaru.
 - [ ] Filter status bar/floating button/teks Screen-TL yang tidak relevan.
 
 ### Milestone 2 — Translation Overlay
@@ -96,15 +118,20 @@ Yang belum terbukti:
 - [x] Buat overlay berdasarkan `DetectedText.boundingBox`.
 - [x] Tampilkan terjemahan di posisi teks asli.
 - [x] Jangan mengganggu interaksi aplikasi target.
-- [ ] Verifikasi koordinat dan ukuran overlay pada perangkat.
-- [ ] Tambahkan hide/refresh/clear overlay yang mudah digunakan.
+- [ ] Verifikasi koordinat dan ukuran overlay pada berbagai perangkat/orientasi.
+- [ ] Tambahkan hide/clear overlay yang mudah digunakan.
+- [ ] Rapikan visual overlay setelah fungsi inti stabil.
 
 ### Milestone 3 — Real-Time Translation
 
-- [ ] Capture frame berkala.
+- [x] Capture frame berkala tahap pertama.
+- [x] OCR dan translation loop dasar.
+- [x] Update overlay dari hasil frame terbaru.
+- [x] Stop Real-Time tanpa menghentikan service.
+- [ ] Verifikasi kestabilan Real-Time pada perangkat.
 - [ ] Deteksi perubahan layar.
-- [ ] OCR hanya saat diperlukan.
-- [ ] Cache translation.
+- [ ] Cache translation agar teks yang sama tidak diterjemahkan berulang.
+- [ ] Optimalkan interval dan beban CPU/baterai berdasarkan hasil device test.
 - [ ] Update overlay hanya untuk teks baru/berubah.
 
 ### Milestone 4 — Translation Engine
