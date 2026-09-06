@@ -30,13 +30,16 @@ Important files:
 - A screenshot/Bitmap can be produced.
 - OCR engine is configured for Japanese, Chinese, and Latin.
 - Translation manager is configured for Indonesian/Japanese/Chinese/English.
+- Manual TL results are now persisted to History; the latest device test produced `23:04`, `Status`, and `Succese` entries.
 
 ## Current Bugs / Unverified Behavior
 
 ### Capture/OCR
-The latest device test reported that OCR sees only the phone's current time/status-bar text rather than the text in the other application. A likely cause is that the MediaProjection capture configuration was not explicitly requesting the full default display on Android 14+. `MainActivity` now requests `MediaProjectionConfig.createConfigForDefaultDisplay()` on Android 14+.
+The latest device test reported OCR results containing only a few visible lines. The code previously limited manual translation to `detectedTexts.take(3)`, which directly capped the number of translated/history lines at three. That limit has now been removed.
 
-This is a hypothesis/fix to verify, not a claimed final solution.
+A separate capture-scope issue is still unverified: earlier tests suggested OCR might be seeing only phone time/status-bar content rather than the target application. `MainActivity` now requests `MediaProjectionConfig.createConfigForDefaultDisplay()` on Android 14+ so the intended capture scope is the full default display.
+
+Neither the capture-scope fix nor complete-screen OCR coverage should be marked as fully verified until another device test confirms it.
 
 ### History
 History was previously empty. The service now explicitly calls `TranslationHistory.initialize(applicationContext)`, and writes use `commit()` with `ScreenTL-History` diagnostics. This distinguishes persistence failure from an upstream pipeline failure.
@@ -89,8 +92,13 @@ If the sequence stops, diagnose the first missing stage.
 4. Manual TL calls `captureOnce`;
 5. OCR returns `DetectedText` items with bounding boxes;
 6. translation model is prepared;
-7. up to three detected lines are translated sequentially;
+7. every detected OCR line is now translated sequentially;
 8. completed results are written to persistent History.
+
+## Latest Change — 2026-09-06
+- Removed the hard three-line limit in `FloatingService.kt` (`detectedTexts.take(3)`).
+- Reason: the user's device test showed exactly three OCR/history results, and code inspection confirmed the application itself was limiting the pipeline to three lines.
+- Next test should use an app with more than three obvious text lines and confirm that History contains more than three results when OCR detects them.
 
 ## Development Rules
 - Inspect the actual repository before modifying code.
@@ -101,14 +109,15 @@ If the sequence stops, diagnose the first missing stage.
 - Keep `AI_README.md` as the operational rules for future AI sessions.
 - Update this handoff when architecture, bugs, or priorities change.
 - Always tell the owner what changed, why, what was verified, and what must be tested next.
+- APK builds are manual during debugging; do not assume every push creates a build. Run the Android build workflow manually after a logical batch of changes.
 
 ## Next Recommended Milestone
 1. Build the latest commit.
-2. Test Manual TL on another app with obvious text.
+2. Test Manual TL on another app with obvious text, preferably more than three lines.
 3. Inspect the four `ScreenTL-*` Logcat tags.
 4. Verify that the captured bitmap contains the target app, not only system/status-bar content.
 5. If the frame is still wrong, diagnose capture timing, display dimensions, orientation, and Android/device-specific MediaProjection behavior.
 6. If the frame is correct, diagnose OCR and filtering.
-7. Confirm History receives a completed translation.
+7. Confirm History receives all detected translations.
 8. Implement the first overlay using OCR bounding boxes.
 9. Only after Manual TL + overlay are stable, implement realtime capture/change detection/cache.
