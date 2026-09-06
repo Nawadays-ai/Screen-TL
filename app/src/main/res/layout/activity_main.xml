@@ -25,6 +25,7 @@
             android:layout_height="wrap_content"
             android:text="Bahasa Asal (Sumber)"
             android:textColor="#BBBBBB" />
+
         <Spinner
             android:id="@+id/spinnerSourceLang"
             android:layout_width="match_parent"
@@ -38,6 +39,7 @@
             android:layout_height="wrap_content"
             android:text="Bahasa Tujuan (Target)"
             android:textColor="#BBBBBB" />
+
         <Spinner
             android:id="@+id/spinnerTargetLang"
             android:layout_width="match_parent"
@@ -51,6 +53,7 @@
             android:layout_height="wrap_content"
             android:text="Mesin API Real-Time"
             android:textColor="#BBBBBB" />
+
         <Spinner
             android:id="@+id/spinnerRealtimeApi"
             android:layout_width="match_parent"
@@ -64,6 +67,7 @@
             android:layout_height="wrap_content"
             android:text="Mesin API Manual"
             android:textColor="#BBBBBB" />
+
         <Spinner
             android:id="@+id/spinnerManualApi"
             android:layout_width="match_parent"
@@ -82,5 +86,39 @@
             android:backgroundTint="#2196F3"
             android:textColor="#FFFFFF" />
 
+        <!-- Judul History -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Translation History"
+            android:textColor="#FFFFFF"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:layout_marginTop="32dp"
+            android:layout_marginBottom="12dp" />
+
+        <!-- Tombol Clear History -->
+        <Button
+            android:id="@+id/btnClearHistory"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="Clear History"
+            android:textAllCaps="false"
+            android:layout_marginBottom="12dp" />
+
+        <!-- Kotak History -->
+        <TextView
+            android:id="@+id/tvHistory"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="120dp"
+            android:padding="16dp"
+            android:text="Belum ada hasil terjemahan."
+            android:textColor="#FFFFFF"
+            android:textSize="15sp"
+            android:background="#2A2A2A"
+            android:textIsSelectable="true" />
+
     </LinearLayout>
+
 </ScrollView>
