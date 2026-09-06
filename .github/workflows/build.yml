@@ -1,8 +1,10 @@
 name: Build Android APK
 
+# Build dilakukan manual agar perubahan bertahap tidak membuat antrean build.
+# Jalankan dari GitHub Actions -> Build Android APK -> Run workflow.
+# Push ke main tidak lagi otomatis memulai build.
+
 on:
-  push:
-    branches: [ "main", "master" ]
   workflow_dispatch:
 
 jobs:
