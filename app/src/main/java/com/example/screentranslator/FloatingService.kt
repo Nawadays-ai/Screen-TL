@@ -40,45 +40,17 @@ class FloatingService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    override fun onStartCommand(
+  override fun onStartCommand(
     intent: Intent?,
     flags: Int,
     startId: Int
 ): Int {
 
-    if (screenCaptureManager == null && intent != null) {
+    if (screenCaptureManager == null) {
 
-        val resultCode = intent.getIntExtra(
-            "EXTRA_RESULT_CODE",
-            -1
-        )
+        val resultCode = ScreenCaptureSession.resultCode
+        val projectionData = ScreenCaptureSession.data
 
-       val projectionData: Intent? = try {
-
-    @Suppress("DEPRECATION")
-    intent.getParcelableExtra("EXTRA_DATA")
-
-} catch (e: Exception) {
-
-    e.printStackTrace()
-    null
-}
-if (resultCode == -1) {
-
-    Toast.makeText(
-        this,
-        "DEBUG: resultCode tidak ditemukan",
-        Toast.LENGTH_LONG
-    ).show()
-
-} else if (projectionData == null) {
-
-    Toast.makeText(
-        this,
-        "DEBUG: data MediaProjection null",
-        Toast.LENGTH_LONG
-    ).show()
-}
         if (resultCode != -1 && projectionData != null) {
 
             screenCaptureManager = ScreenCaptureManager(
