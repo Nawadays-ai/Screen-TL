@@ -11,10 +11,10 @@ import android.provider.Settings
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.Spinner
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import android.widget.TextView
 
 class MainActivity : AppCompatActivity() {
 
@@ -54,28 +54,29 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        TranslationHistory.initialize(applicationContext)
+
         spinnerSourceLang = findViewById(R.id.spinnerSourceLang)
         spinnerTargetLang = findViewById(R.id.spinnerTargetLang)
         spinnerRealtimeApi = findViewById(R.id.spinnerRealtimeApi)
         spinnerManualApi = findViewById(R.id.spinnerManualApi)
         btnPlay = findViewById(R.id.btnPlay)
-
         btnClearHistory = findViewById(R.id.btnClearHistory)
         tvHistory = findViewById(R.id.tvHistory)
 
-btnClearHistory.setOnClickListener {
-    TranslationHistory.clear()
-}
-
-TranslationHistory.setListener {
-    runOnUiThread {
-        updateHistoryDisplay()
-    }
-}
-
-updateHistoryDisplay()
-
         setupSpinners()
+
+        btnClearHistory.setOnClickListener {
+            TranslationHistory.clear()
+        }
+
+        TranslationHistory.setListener {
+            runOnUiThread {
+                updateHistoryDisplay()
+            }
+        }
+
+        updateHistoryDisplay()
 
         btnPlay.setOnClickListener {
             if (!checkOverlayPermission()) {
@@ -87,27 +88,25 @@ updateHistoryDisplay()
     }
 
     private fun updateHistoryDisplay() {
+        val entries = TranslationHistory.getAll()
 
-    val entries = TranslationHistory.getAll()
-
-    if (entries.isEmpty()) {
-
-        tvHistory.text = "Belum ada hasil terjemahan."
-
-        return
+        tvHistory.text = if (entries.isEmpty()) {
+            "Belum ada hasil terjemahan."
+        } else {
+            entries.joinToString("\n\n--------------------\n\n")
+        }
     }
 
-    tvHistory.text =
-        entries.joinToString(
-            separator = "\n\n--------------------\n\n"
-        )
-}
+    override fun onDestroy() {
+        TranslationHistory.setListener(null)
+        super.onDestroy()
+    }
+
     private fun setupSpinners() {
         val langAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, languages)
         spinnerSourceLang.adapter = langAdapter
         spinnerTargetLang.adapter = langAdapter
-        
-        // Default: Sumber Jepang -> Target Indonesia
+
         spinnerSourceLang.setSelection(0)
         spinnerTargetLang.setSelection(3)
 
@@ -141,23 +140,22 @@ updateHistoryDisplay()
         mediaProjectionLauncher.launch(projectionManager.createScreenCaptureIntent())
     }
 
-  private fun startFloatingService(resultCode: Int, data: Intent) {
+    private fun startFloatingService(resultCode: Int, data: Intent) {
+        ScreenCaptureSession.save(resultCode, data)
 
-    ScreenCaptureSession.save(resultCode, data)
+        val intent = Intent(this, FloatingService::class.java).apply {
+            putExtra("EXTRA_SOURCE_LANG", spinnerSourceLang.selectedItem.toString())
+            putExtra("EXTRA_TARGET_LANG", spinnerTargetLang.selectedItem.toString())
+            putExtra("EXTRA_REALTIME_API", spinnerRealtimeApi.selectedItem.toString())
+            putExtra("EXTRA_MANUAL_API", spinnerManualApi.selectedItem.toString())
+        }
 
-    val intent = Intent(this, FloatingService::class.java).apply {
-        putExtra("EXTRA_SOURCE_LANG", spinnerSourceLang.selectedItem.toString())
-        putExtra("EXTRA_TARGET_LANG", spinnerTargetLang.selectedItem.toString())
-        putExtra("EXTRA_REALTIME_API", spinnerRealtimeApi.selectedItem.toString())
-        putExtra("EXTRA_MANUAL_API", spinnerManualApi.selectedItem.toString())
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+
+        moveTaskToBack(true)
     }
-
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        startForegroundService(intent)
-    } else {
-        startService(intent)
-    }
-
-    moveTaskToBack(true)
-}
 }
