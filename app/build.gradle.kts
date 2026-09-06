@@ -45,7 +45,7 @@ implementation("com.google.android.gms:play-services-mlkit-text-recognition-chin
 implementation("com.google.android.gms:play-services-mlkit-text-recognition-japanese:16.0.1")
 
 // ML Kit Translation
-implementation("com.google.mlkit:translate:17.0.2")
+implementation("com.google.mlkit:translate:17.0.3")
 
     // OkHttp untuk API DeepL & Gemini
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
