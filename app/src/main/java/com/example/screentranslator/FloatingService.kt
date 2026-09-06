@@ -40,6 +40,7 @@ class FloatingService : Service() {
     private lateinit var btnExit: Button
 
     private var params: WindowManager.LayoutParams? = null
+    private var overlayView: TranslationOverlayView? = null
     private var isRealtimeActive = false
     private var isSubMenuVisible = false
 
@@ -229,7 +230,13 @@ class FloatingService : Service() {
             return
         }
 
+        // Hide Screen-TL's own floating UI before the next frame is captured.
+        // Otherwise the floating button/menu could be fed back into OCR and overlay.
+        floatingView.visibility = View.INVISIBLE
+        clearTranslationOverlay()
+
         val requested = manager.captureOnce { bitmap ->
+            floatingView.visibility = View.VISIBLE
             Log.i(TAG, "Capture callback received: ${bitmap.width}x${bitmap.height}")
             ocr.recognize(
                 bitmap = bitmap,
@@ -242,11 +249,17 @@ class FloatingService : Service() {
 
                     translator.prepare(
                         onReady = {
-                            // Do not cap the result to three lines. Manual translation
-                            // should process every OCR line found on the captured screen.
                             val textsToTranslate = detectedTexts
                             Log.i(TAG, "Translation model ready; translating ${textsToTranslate.size} lines")
-                            translateTexts(translator, textsToTranslate, 0, mutableListOf())
+                            translateTexts(
+                                translator = translator,
+                                texts = textsToTranslate,
+                                index = 0,
+                                results = mutableListOf(),
+                                overlayResults = mutableListOf(),
+                                sourceWidth = bitmap.width,
+                                sourceHeight = bitmap.height
+                            )
                         },
                         onFailure = { exception ->
                             Log.e(TAG, "Translation model preparation failed", exception)
@@ -262,14 +275,20 @@ class FloatingService : Service() {
         }
 
         Log.i(TAG, "captureOnce returned=$requested")
-        if (!requested) showToast("Gagal mengambil screenshot")
+        if (!requested) {
+            floatingView.visibility = View.VISIBLE
+            showToast("Gagal mengambil screenshot")
+        }
     }
 
     private fun translateTexts(
         translator: TranslationManager,
         texts: List<DetectedText>,
         index: Int,
-        results: MutableList<String>
+        results: MutableList<String>,
+        overlayResults: MutableList<TranslationOverlayItem>,
+        sourceWidth: Int,
+        sourceHeight: Int
     ) {
         if (index >= texts.size) {
             val resultText = results.joinToString("\n\n")
@@ -282,7 +301,8 @@ class FloatingService : Service() {
 
             Log.i(TAG, "Translation completed; saving history entry with ${results.size} results")
             TranslationHistory.add(historyEntry)
-            showToast("Terjemahan selesai: ${results.size} baris. Buka History untuk melihat hasil.")
+            showTranslationOverlay(overlayResults, sourceWidth, sourceHeight)
+            showToast("Terjemahan selesai: ${results.size} baris. Overlay ditampilkan.")
             return
         }
 
@@ -294,14 +314,94 @@ class FloatingService : Service() {
             onSuccess = { translatedText ->
                 Log.i(TAG, "Translation success: '${currentText.text}' -> '$translatedText'")
                 results.add("${currentText.text}\n→ $translatedText")
-                translateTexts(translator, texts, index + 1, results)
+                overlayResults.add(
+                    TranslationOverlayItem(
+                        translatedText = translatedText,
+                        left = currentText.left,
+                        top = currentText.top,
+                        right = currentText.right,
+                        bottom = currentText.bottom
+                    )
+                )
+                translateTexts(
+                    translator,
+                    texts,
+                    index + 1,
+                    results,
+                    overlayResults,
+                    sourceWidth,
+                    sourceHeight
+                )
             },
             onFailure = { exception ->
                 Log.e(TAG, "Translation failed for '${currentText.text}'", exception)
                 results.add("${currentText.text}\n→ [Gagal diterjemahkan: ${exception.message ?: "Unknown error"}]")
-                translateTexts(translator, texts, index + 1, results)
+                translateTexts(
+                    translator,
+                    texts,
+                    index + 1,
+                    results,
+                    overlayResults,
+                    sourceWidth,
+                    sourceHeight
+                )
             }
         )
+    }
+
+    private fun showTranslationOverlay(
+        items: List<TranslationOverlayItem>,
+        sourceWidth: Int,
+        sourceHeight: Int
+    ) {
+        runOnMainThread {
+            if (items.isEmpty()) return@runOnMainThread
+
+            val overlay = overlayView ?: TranslationOverlayView(this).also {
+                overlayView = it
+                val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                } else {
+                    WindowManager.LayoutParams.TYPE_PHONE
+                }
+
+                val overlayParams = WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    layoutFlag,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.TRANSLUCENT
+                ).apply {
+                    gravity = Gravity.TOP or Gravity.START
+                }
+
+                windowManager.addView(it, overlayParams)
+            }
+
+            overlay.setTranslations(items, sourceWidth, sourceHeight)
+            Log.i(TAG, "Translation overlay updated: ${items.size} items")
+        }
+    }
+
+    private fun clearTranslationOverlay() {
+        runOnMainThread {
+            overlayView?.clearTranslations()
+        }
+    }
+
+    private fun removeTranslationOverlay() {
+        runOnMainThread {
+            overlayView?.let {
+                try {
+                    windowManager.removeView(it)
+                } catch (_: IllegalArgumentException) {
+                    // Already removed.
+                }
+            }
+            overlayView = null
+        }
     }
 
     private fun showToast(message: String) {
@@ -340,6 +440,7 @@ class FloatingService : Service() {
     }
 
     override fun onDestroy() {
+        removeTranslationOverlay()
         translationManager?.close()
         translationManager = null
         ocrManager?.close()
