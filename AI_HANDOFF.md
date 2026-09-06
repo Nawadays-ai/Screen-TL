@@ -1,7 +1,7 @@
 # Screen-TL — AI Handoff / Context
 
 ## Read This First
-This file is the handoff context for any AI assistant continuing development of Screen-TL. Read `README.md`, `PROJECT_NOTES.md`, and this file before changing code. The repository is the source of truth; inspect current files before assuming the code still matches this document.
+This file is the handoff context for any AI assistant continuing development of Screen-TL. Read `README.md`, `AI_README.md`, and `PROJECT_NOTES.md` before changing code. The repository is the source of truth; inspect current files before assuming the code still matches this document.
 
 ## Project Goal
 Build an Android screen translator with:
@@ -15,7 +15,7 @@ Build an Android screen translator with:
 Package: `com.example.screentranslator`
 
 Important files:
-- `MainActivity.kt`: permissions, language/API selectors, starts foreground service, displays Translation History.
+- `MainActivity.kt`: permissions, language/API selectors, starts foreground service, requests full-display MediaProjection on Android 14+.
 - `FloatingService.kt`: floating UI, MediaProjection capture manager lifecycle, OCR/translation orchestration, Manual TL.
 - `ScreenCaptureSession.kt`: holds MediaProjection result code and Intent data in memory.
 - `ScreenCaptureManager.kt`: screen capture implementation plus diagnostic logging.
@@ -34,10 +34,12 @@ Important files:
 ## Current Bugs / Unverified Behavior
 
 ### Capture/OCR
-The latest device test reports that OCR sees only the phone's current time/status-bar text rather than the text in the other application. This means the next AI must first prove what bitmap is reaching OCR before changing recognizers or language handling.
+The latest device test reported that OCR sees only the phone's current time/status-bar text rather than the text in the other application. A likely cause is that the MediaProjection capture configuration was not explicitly requesting the full default display on Android 14+. `MainActivity` now requests `MediaProjectionConfig.createConfigForDefaultDisplay()` on Android 14+.
+
+This is a hypothesis/fix to verify, not a claimed final solution.
 
 ### History
-History was previously empty. The service now explicitly calls `TranslationHistory.initialize(applicationContext)`, and writes use `commit()` with `ScreenTL-History` diagnostics. This change is intended to distinguish a persistence problem from a pipeline problem.
+History was previously empty. The service now explicitly calls `TranslationHistory.initialize(applicationContext)`, and writes use `commit()` with `ScreenTL-History` diagnostics. This distinguishes persistence failure from an upstream pipeline failure.
 
 ### Toast
 Toast is only a short status/error channel. It is not the product output. Do not try to solve cross-app translation by making Toast larger or longer.
@@ -76,7 +78,7 @@ If the sequence stops, diagnose the first missing stage.
 1. user selects source/target language;
 2. user presses Play;
 3. overlay permission is checked/requested;
-4. MediaProjection permission is requested;
+4. MediaProjection is requested; on Android 14+ the default display configuration is requested;
 5. `ScreenCaptureSession.save(resultCode, data)`;
 6. `FloatingService` starts.
 
@@ -104,8 +106,8 @@ If the sequence stops, diagnose the first missing stage.
 1. Build the latest commit.
 2. Test Manual TL on another app with obvious text.
 3. Inspect the four `ScreenTL-*` Logcat tags.
-4. Determine whether the captured bitmap contains the target app or only system/status-bar content.
-5. Fix capture source/timing/dimensions/orientation if the frame is wrong.
+4. Verify that the captured bitmap contains the target app, not only system/status-bar content.
+5. If the frame is still wrong, diagnose capture timing, display dimensions, orientation, and Android/device-specific MediaProjection behavior.
 6. If the frame is correct, diagnose OCR and filtering.
 7. Confirm History receives a completed translation.
 8. Implement the first overlay using OCR bounding boxes.
