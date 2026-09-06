@@ -7,7 +7,7 @@ This file is the handoff context for any AI assistant continuing development of 
 Build an Android screen translator with:
 - floating button over other apps;
 - Manual TL: capture one screen → OCR → translate → show translated text as an overlay at OCR bounding boxes;
-- Real-Time TL: monitor/capture the screen, detect changed text, OCR only when useful, translate changed/new text, cache results, and display overlays;
+- Real-Time TL: repeatedly capture the screen, OCR/translate it, and refresh the overlay without blocking the target app;
 - selectable source/target languages;
 - selectable translation engines, with Google ML Kit on-device translation as the baseline and DeepL/Gemini planned.
 
@@ -16,7 +16,7 @@ Package: `com.example.screentranslator`
 
 Important files:
 - `MainActivity.kt`: permissions, language/API selectors, starts foreground service, requests full-display MediaProjection on Android 14+.
-- `FloatingService.kt`: floating UI, MediaProjection capture manager lifecycle, OCR/translation orchestration, Manual TL, and translation overlay lifecycle.
+- `FloatingService.kt`: floating UI, MediaProjection capture manager lifecycle, OCR/translation orchestration, Manual TL, Real-Time TL loop, and translation overlay lifecycle.
 - `TranslationOverlayView.kt`: full-screen non-touchable overlay that draws translated text using OCR bounding boxes.
 - `ScreenCaptureSession.kt`: holds MediaProjection result code and Intent data in memory.
 - `ScreenCaptureManager.kt`: screen capture implementation plus diagnostic logging and pending-capture cancellation.
@@ -31,62 +31,91 @@ Important files:
 - A screenshot/Bitmap can be produced.
 - OCR engine is configured for Japanese, Chinese, and Latin.
 - Translation manager is configured for Indonesian/Japanese/Chinese/English.
-- An earlier device test persisted Manual TL results to History: `23:04`, `Status`, and `Succese`.
+- Manual TL was verified by the user after commit `ff06e2882ee852f51f4deecfd94bb0dbf95da8a3`: capture → OCR → translation → History → overlay works again.
 - The hard three-line limit was removed; Manual TL now processes every OCR line returned by the OCR manager.
+- Translation overlay can be displayed and is `FLAG_NOT_TOUCHABLE`.
 
-## Current Bugs / Unverified Behavior
+## Manual TL Current Flow
+1. Manual TL is requested.
+2. Existing translation overlay is removed completely from WindowManager.
+3. Floating button remains visible while waiting for the frame.
+4. `ScreenCaptureManager.captureOnce()` requests the next ImageReader frame.
+5. Capture timeout is 3 seconds.
+6. After a frame arrives, a separate 30-second watchdog covers OCR/model/translation.
+7. OCR returns all detected lines.
+8. Translation model is prepared.
+9. Each detected line is translated sequentially.
+10. Results are written to persistent History.
+11. Translated text + OCR coordinates are displayed as an overlay.
+12. Floating button remains available.
 
-### Manual TL currently being stabilized
-The first overlay build introduced a regression observed on the user's device: after pressing Manual TL, ML Kit translation downloaded its model, then no result appeared, History stayed unchanged, and the floating button disappeared. Launching the app again did not restore the floating button until the app was force-stopped.
+The user currently considers Manual TL sufficiently good. Do not add UI polish to Manual TL unless needed for a functional fix.
 
-The latest code now separates the two failure windows:
-- the floating button is no longer hidden before `captureOnce` receives a frame;
-- `ScreenCaptureManager` can cancel a pending capture;
-- Manual TL capture timeout is 3 seconds;
-- after a frame arrives, a separate 30-second processing watchdog covers OCR/translation callbacks;
-- duplicate Manual TL requests are blocked while one is pending;
-- OCR/translation/save/display calls have defensive exception handling;
-- the floating button is restored on timeout, failure, and completion.
+## Real-Time TL Current Implementation
+Commit `2f446e40fac1b5094f4a71ba72570ba7afb03060` implements the first actual Real-Time loop in `FloatingService.kt`.
 
-This is not device-verified yet. Do not mark Manual TL stable until a fresh APK has been tested.
+Flow:
+`Real-Time aktif → prepare model → capture frame → OCR → sequential translation → overlay update → wait ~1.2s → repeat`
+
+Important implementation details:
+- `REALTIME_INTERVAL_MS = 1200L`.
+- `REALTIME_CAPTURE_DELAY_MS = 150L` is used after removing the previous overlay before requesting the next frame.
+- `isRealtimeBusy` prevents overlapping frame processing.
+- `isRealtimePreparing` blocks capture until the translation model is ready.
+- `realtimeGeneration` invalidates callbacks from an older Real-Time session after stop/restart.
+- Starting Real-Time removes the existing overlay first.
+- Stopping Real-Time cancels the pending capture, removes the overlay, resets the FAB icon, but does not stop the foreground service.
+- Real-Time does not write every frame to History. This is intentional to avoid duplicate History entries.
+- There is currently no change detection, OCR filtering, translation cache, or text-result deduplication.
+
+### Real-Time Verification Status
+**Not yet device-verified.** The code exists, but no claim should be made that Real-Time works until an APK containing this commit is installed and tested.
+
+Expected diagnostic sequence while Real-Time is active:
+`Realtime translation started`
+→ `Realtime translation model ready`
+→ `Realtime captureOnce returned=true`
+→ `Realtime frame captured`
+→ `Realtime OCR completed: N lines`
+→ `Realtime overlay updated: N items`
+
+When stopped:
+`Realtime translation stopped`
+
+## Important Capture Constraint
+The current architecture creates one `VirtualDisplay` when `ScreenCaptureManager.start()` is called and reuses that display for repeated `captureOnce()` requests. Do not change this to repeatedly call `MediaProjection.createVirtualDisplay()` for each Real-Time frame on Android 14+, because Android requires user consent for each capture session and disallows invoking `createVirtualDisplay()` multiple times on the same MediaProjection instance. Reuse the existing VirtualDisplay and ImageReader instead. citeturn0search3
+
+## Known Bugs / Unverified Behavior
 
 ### Capture/OCR
-Earlier tests suggested OCR might be seeing only phone time/status-bar content rather than the target application. `MainActivity` now requests `MediaProjectionConfig.createConfigForDefaultDisplay()` on Android 14+ so the intended capture scope is the full default display.
+Earlier tests suggested OCR might be seeing only phone time/status bar content rather than the target application. `MainActivity` now requests `MediaProjectionConfig.createConfigForDefaultDisplay()` on Android 14+ so the intended capture scope is the full default display.
 
-The previous `detectedTexts.take(3)` limit has been removed. The next device test should use an app with many obvious text lines and confirm that more than three detected/translated lines reach History.
+The previous `detectedTexts.take(3)` limit has been removed.
 
 Neither complete-screen capture nor complete-screen OCR coverage should be marked fully verified until another device test confirms it.
 
-### History
-History was previously empty. The service now explicitly calls `TranslationHistory.initialize(applicationContext)`, and writes use `commit()` with `ScreenTL-History` diagnostics. This distinguishes persistence failure from an upstream pipeline failure.
-
-### Toast
-Toast is only a short status/error channel. It is not the product output. Do not try to solve cross-app translation by making Toast larger or longer.
-
 ### Translation Overlay
-The first overlay implementation is present but **not yet device-verified as stable**.
-
 Current behavior:
-- `FloatingService` collects each translated line together with its OCR bounding box.
-- After all translations finish, `TranslationOverlayView` is added as a full-screen `TYPE_APPLICATION_OVERLAY`.
+- `FloatingService` carries each translated line together with its OCR bounding box.
+- After translation, `TranslationOverlayView` is added as a full-screen `TYPE_APPLICATION_OVERLAY`.
 - The overlay is `FLAG_NOT_TOUCHABLE`, so touches should pass to the target app.
-- Before a new Manual TL capture, the previous translation overlay is cleared.
-- The floating UI remains visible during the actual capture and is hidden only after a fresh frame is received, preventing a visibility change from causing a capture timeout. Because of this, OCR may still see the floating button in the captured frame; filtering remains a later task.
+- Before a new capture, the previous overlay is removed from WindowManager so it cannot become OCR input.
 
 Main verification risks:
 - bitmap coordinates may not map 1:1 to overlay coordinates on every device/orientation;
 - translated text may be too large/small for some OCR boxes;
 - long translations are currently shortened to fit one line;
-- system bars and unrelated UI are not yet filtered;
-- overlay window creation must be verified on the target device.
+- system bars and unrelated UI are not yet filtered.
 
-### Realtime
-The realtime button only changes UI state. The actual realtime capture/OCR/translation/cache loop does not exist yet.
+UI polish is intentionally deferred until the functional pipeline is stable.
+
+### History
+History uses `TranslationHistory.initialize(applicationContext)` from the service and `commit()` for writes. Manual TL uses History as persistent output. Real-Time currently does not add frame-by-frame entries.
 
 ### APK update/install
-`app/build.gradle.kts` now uses `versionCode = 2` and `versionName = "1.1"`. The previous APK used `versionCode = 1`.
+`app/build.gradle.kts` uses `versionCode = 2` and `versionName = "1.1"`.
 
-The user still reports an update conflict after the version bump. Therefore the remaining likely cause is APK signing identity: a debug APK built on GitHub Actions can be signed with a CI-generated debug keystore that differs from the key used by the already-installed APK. A higher `versionCode` cannot fix a signature mismatch. Do not claim the update problem is solved until an APK built with the same signing key can install over the existing package.
+The user still reports an update conflict. The remaining likely cause is APK signing identity: a debug APK built on GitHub Actions can be signed with a CI-generated debug keystore that differs from the key used by the already-installed APK. A higher `versionCode` cannot fix a signature mismatch. Do not claim the update problem is solved until an APK built with the same signing key can install over the existing package.
 
 ## Diagnostic Logging
 Use Logcat tags:
@@ -94,79 +123,6 @@ Use Logcat tags:
 - `ScreenTL-OCR`
 - `ScreenTL-Service`
 - `ScreenTL-History`
-
-Expected Manual TL sequence:
-
-`Manual translation requested`
-→ `captureOnce requested`
-→ `Fresh screen frame captured successfully`
-→ `Capture callback received`
-→ `OCR started`
-→ `OCR completed: N lines detected`
-→ `Translation model ready`
-→ `Translating ...`
-→ `Translation success ...`
-→ `Translation completed; saving history entry ...`
-→ `History add: saved=true ...`
-→ `Translation overlay updated: N items`
-
-If the sequence stops, diagnose the first missing stage. Capture timeout is now 3 seconds; processing has a separate 30-second watchdog.
-
-## Important Current Flow
-`MainActivity`:
-1. user selects source/target language;
-2. user presses Play;
-3. overlay permission is checked/requested;
-4. MediaProjection is requested; on Android 14+ the default display configuration is requested;
-5. `ScreenCaptureSession.save(resultCode, data)`;
-6. `FloatingService` starts.
-
-`FloatingService`:
-1. initializes `TranslationHistory` from the service context;
-2. initializes `OcrManager` and `TranslationManager`;
-3. initializes `ScreenCaptureManager` from `ScreenCaptureSession`;
-4. Manual TL clears the previous translation overlay;
-5. `captureOnce` gets a fresh frame while the floating button remains visible;
-6. after the frame arrives, the floating button is hidden and OCR starts;
-7. OCR returns `DetectedText` items with bounding boxes;
-8. translation model is prepared;
-9. every detected OCR line is translated sequentially;
-10. completed results are written to persistent History;
-11. translated lines are displayed at their OCR bounding boxes using `TranslationOverlayView`;
-12. the floating button is restored and the overlay remains until the next Manual TL capture or service shutdown.
-
-## Latest Changes — 2026-09-06
-
-### Manual TL watchdog refinement
-- `FloatingService.kt`: reduced the capture timeout from 10 seconds to 3 seconds.
-- `FloatingService.kt`: added a separate 30-second processing watchdog after a frame is received.
-- `FloatingService.kt`: added a visible status message after capture succeeds: `Screenshot didapat. Memproses OCR...`.
-- `FloatingService.kt`: processing watchdog restores the floating button if OCR/translation never calls back.
-- This distinction is intentional: a slow translation-model download must not be mistaken for a capture timeout.
-
-### Fixed Manual TL capture lifecycle
-- Added `ScreenCaptureManager.cancelPendingCapture()`.
-- Changed `FloatingService` so the floating UI is not hidden before a frame is received.
-- Added pending-capture timeout with automatic UI recovery.
-- Added duplicate-request protection for Manual TL.
-- Added defensive exception handling around OCR, translation preparation/invocation, and result saving/display.
-- Ensured the floating button is restored on success and failure.
-- Device verification is still required.
-
-### Fixed APK update versioning
-- Changed `app/build.gradle.kts` from `versionCode = 1`, `versionName = "1.0"` to `versionCode = 2`, `versionName = "1.1"`.
-- The user still reports a conflict when updating, so signing-key consistency is now the next APK-install investigation.
-
-### Removed three-line limit
-- Removed `detectedTexts.take(3)` from `FloatingService.kt`.
-- Reason: the user's device test showed exactly three OCR/history results, and code inspection confirmed the application itself was limiting the pipeline to three lines.
-
-### Added first translation overlay
-- Added `TranslationOverlayView.kt`.
-- `FloatingService.kt` now carries OCR coordinates through the translation pipeline and renders the translated result over the target screen.
-- The overlay is non-touchable.
-- The previous implementation hid Screen-TL's floating UI before capture; this was changed after device testing showed the Manual TL flow could become stuck with the button invisible.
-- Overlay remains device-unverified.
 
 ## Development Rules
 - Inspect the actual repository before modifying code.
@@ -177,17 +133,14 @@ If the sequence stops, diagnose the first missing stage. Capture timeout is now 
 - Keep `AI_README.md` as the operational rules for future AI sessions.
 - Update this handoff when architecture, bugs, or priorities change.
 - Always tell the owner what changed, why, what was verified, and what must be tested next.
-- The owner wants the AI to run the build workflow itself whenever a test build is needed. Do not ask the owner to manually trigger the build if the connected GitHub tooling can perform it. Never claim a build passed unless the actual workflow result was checked.
+- The owner wants the AI to run the build workflow itself whenever a test build is needed. Do not claim a build passed unless the actual workflow result was checked.
 
 ## Next Recommended Milestone
-1. Build the latest commit and verify the APK artifact.
-2. Investigate signing identity so the new APK can update the existing installation without a signature conflict.
-3. Test Manual TL on another app with many obvious text lines.
-4. Confirm the floating button remains available if capture stalls and returns after any failure.
-5. Confirm History contains all detected translations, not an artificial three-line cap.
-6. Confirm translated text appears directly over the target text.
-7. Touch and scroll the target app to confirm the overlay does not consume interaction.
-8. Run Manual TL again and confirm the old overlay is removed before capture and replaced by the new result.
-9. If anything fails, inspect the first missing stage in the `ScreenTL-*` Logcat sequence.
-10. If overlay positions are offset, diagnose display dimensions, status-bar insets, orientation, and bitmap-to-view scaling.
-11. After Manual TL + overlay are stable, implement filtering and then realtime capture/change detection/cache.
+1. Build/install the commit containing the Real-Time loop.
+2. Verify Real-Time produces repeated `Realtime frame captured` and `Realtime OCR completed` logs.
+3. Verify overlay updates while the target app content changes.
+4. Verify stopping Real-Time removes the overlay and leaves the floating service alive.
+5. Run Manual TL after stopping Real-Time and confirm Manual TL still works.
+6. If the basic loop is stable, add change detection and translation caching.
+7. Then add OCR filtering and optimize CPU/battery usage.
+8. Only after functional stability, return to overlay/UI polish.
