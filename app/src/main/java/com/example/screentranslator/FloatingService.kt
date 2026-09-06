@@ -242,7 +242,9 @@ class FloatingService : Service() {
 
                     translator.prepare(
                         onReady = {
-                            val textsToTranslate = detectedTexts.take(3)
+                            // Do not cap the result to three lines. Manual translation
+                            // should process every OCR line found on the captured screen.
+                            val textsToTranslate = detectedTexts
                             Log.i(TAG, "Translation model ready; translating ${textsToTranslate.size} lines")
                             translateTexts(translator, textsToTranslate, 0, mutableListOf())
                         },
