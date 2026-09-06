@@ -14,6 +14,7 @@ import android.widget.Spinner
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import android.widget.TextView
 
 class MainActivity : AppCompatActivity() {
 
@@ -22,6 +23,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var spinnerRealtimeApi: Spinner
     private lateinit var spinnerManualApi: Spinner
     private lateinit var btnPlay: Button
+    private lateinit var btnClearHistory: Button
+    private lateinit var tvHistory: TextView
 
     private val languages = arrayOf("Jepang", "Mandarin (China)", "Inggris", "Indonesia")
     private val realtimeApis = arrayOf("Google ML Kit (On-Device/Gratis)")
@@ -57,6 +60,21 @@ class MainActivity : AppCompatActivity() {
         spinnerManualApi = findViewById(R.id.spinnerManualApi)
         btnPlay = findViewById(R.id.btnPlay)
 
+        btnClearHistory = findViewById(R.id.btnClearHistory)
+        tvHistory = findViewById(R.id.tvHistory)
+
+btnClearHistory.setOnClickListener {
+    TranslationHistory.clear()
+}
+
+TranslationHistory.setListener {
+    runOnUiThread {
+        updateHistoryDisplay()
+    }
+}
+
+updateHistoryDisplay()
+
         setupSpinners()
 
         btnPlay.setOnClickListener {
@@ -68,6 +86,22 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun updateHistoryDisplay() {
+
+    val entries = TranslationHistory.getAll()
+
+    if (entries.isEmpty()) {
+
+        tvHistory.text = "Belum ada hasil terjemahan."
+
+        return
+    }
+
+    tvHistory.text =
+        entries.joinToString(
+            separator = "\n\n--------------------\n\n"
+        )
+}
     private fun setupSpinners() {
         val langAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, languages)
         spinnerSourceLang.adapter = langAdapter
