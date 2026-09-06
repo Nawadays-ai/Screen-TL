@@ -56,6 +56,8 @@ class FloatingService : Service() {
         flags: Int,
         startId: Int
     ): Int {
+        TranslationHistory.initialize(applicationContext)
+
         sourceLanguage = intent?.getStringExtra("EXTRA_SOURCE_LANG") ?: "Jepang"
         targetLanguage = intent?.getStringExtra("EXTRA_TARGET_LANG") ?: "Indonesia"
 
@@ -92,7 +94,6 @@ class FloatingService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-
         startForegroundServiceNotification()
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
