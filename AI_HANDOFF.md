@@ -16,7 +16,8 @@ Package: `com.example.screentranslator`
 
 Important files:
 - `MainActivity.kt`: permissions, language/API selectors, starts foreground service, requests full-display MediaProjection on Android 14+.
-- `FloatingService.kt`: floating UI, MediaProjection capture manager lifecycle, OCR/translation orchestration, Manual TL.
+- `FloatingService.kt`: floating UI, MediaProjection capture manager lifecycle, OCR/translation orchestration, Manual TL, and translation overlay lifecycle.
+- `TranslationOverlayView.kt`: full-screen non-touchable overlay that draws translated text using OCR bounding boxes.
 - `ScreenCaptureSession.kt`: holds MediaProjection result code and Intent data in memory.
 - `ScreenCaptureManager.kt`: screen capture implementation plus diagnostic logging.
 - `OcrManager.kt`: Google ML Kit OCR; returns `DetectedText(text, left, top, right, bottom)` plus diagnostic logging.
@@ -30,16 +31,17 @@ Important files:
 - A screenshot/Bitmap can be produced.
 - OCR engine is configured for Japanese, Chinese, and Latin.
 - Translation manager is configured for Indonesian/Japanese/Chinese/English.
-- Manual TL results are now persisted to History; the latest device test produced `23:04`, `Status`, and `Succese` entries.
+- Manual TL results are persisted to History; the latest device test produced `23:04`, `Status`, and `Succese` entries.
+- The hard three-line limit was removed; Manual TL now processes every OCR line returned by the OCR manager.
 
 ## Current Bugs / Unverified Behavior
 
 ### Capture/OCR
-The latest device test reported OCR results containing only a few visible lines. The code previously limited manual translation to `detectedTexts.take(3)`, which directly capped the number of translated/history lines at three. That limit has now been removed.
+Earlier tests suggested OCR might be seeing only phone time/status-bar content rather than the target application. `MainActivity` now requests `MediaProjectionConfig.createConfigForDefaultDisplay()` on Android 14+ so the intended capture scope is the full default display.
 
-A separate capture-scope issue is still unverified: earlier tests suggested OCR might be seeing only phone time/status-bar content rather than the target application. `MainActivity` now requests `MediaProjectionConfig.createConfigForDefaultDisplay()` on Android 14+ so the intended capture scope is the full default display.
+The previous `detectedTexts.take(3)` limit has been removed. The next device test should use an app with many obvious text lines and confirm that more than three detected/translated lines reach History.
 
-Neither the capture-scope fix nor complete-screen OCR coverage should be marked as fully verified until another device test confirms it.
+Neither complete-screen capture nor complete-screen OCR coverage should be marked fully verified until another device test confirms it.
 
 ### History
 History was previously empty. The service now explicitly calls `TranslationHistory.initialize(applicationContext)`, and writes use `commit()` with `ScreenTL-History` diagnostics. This distinguishes persistence failure from an upstream pipeline failure.
@@ -47,8 +49,20 @@ History was previously empty. The service now explicitly calls `TranslationHisto
 ### Toast
 Toast is only a short status/error channel. It is not the product output. Do not try to solve cross-app translation by making Toast larger or longer.
 
-### Overlay
-Translation overlay over the target application is not implemented yet.
+### Translation Overlay
+The first overlay implementation is now present but **not yet device-verified**.
+
+Current behavior:
+- `FloatingService` collects each translated line together with its OCR bounding box.
+- After all translations finish, `TranslationOverlayView` is added as a full-screen `TYPE_APPLICATION_OVERLAY`.
+- The overlay is `FLAG_NOT_TOUCHABLE`, so touches should pass to the target app.
+- Before a new Manual TL capture, the old translation overlay is cleared and Screen-TL's own floating UI is hidden so those elements do not become OCR input.
+
+Main verification risks:
+- bitmap coordinates may not map 1:1 to overlay coordinates on every device/orientation;
+- translated text may be too large/small for some OCR boxes;
+- long translations are currently shortened to fit one line;
+- system bars and unrelated UI are not yet filtered.
 
 ### Realtime
 The realtime button only changes UI state. The actual realtime capture/OCR/translation/cache loop does not exist yet.
@@ -73,6 +87,7 @@ Expected Manual TL sequence:
 → `Translation success ...`
 → `Translation completed; saving history entry ...`
 → `History add: saved=true ...`
+→ `Translation overlay updated: N items`
 
 If the sequence stops, diagnose the first missing stage.
 
@@ -89,16 +104,27 @@ If the sequence stops, diagnose the first missing stage.
 1. initializes `TranslationHistory` from the service context;
 2. initializes `OcrManager` and `TranslationManager`;
 3. initializes `ScreenCaptureManager` from `ScreenCaptureSession`;
-4. Manual TL calls `captureOnce`;
-5. OCR returns `DetectedText` items with bounding boxes;
-6. translation model is prepared;
-7. every detected OCR line is now translated sequentially;
-8. completed results are written to persistent History.
+4. Manual TL clears the previous translation overlay and hides the floating UI;
+5. `captureOnce` gets a fresh frame;
+6. OCR returns `DetectedText` items with bounding boxes;
+7. translation model is prepared;
+8. every detected OCR line is translated sequentially;
+9. completed results are written to persistent History;
+10. translated lines are displayed at their OCR bounding boxes using `TranslationOverlayView`;
+11. the overlay remains until the next Manual TL capture or service shutdown.
 
-## Latest Change — 2026-09-06
-- Removed the hard three-line limit in `FloatingService.kt` (`detectedTexts.take(3)`).
+## Latest Changes — 2026-09-06
+
+### Removed three-line limit
+- Removed `detectedTexts.take(3)` from `FloatingService.kt`.
 - Reason: the user's device test showed exactly three OCR/history results, and code inspection confirmed the application itself was limiting the pipeline to three lines.
-- Next test should use an app with more than three obvious text lines and confirm that History contains more than three results when OCR detects them.
+
+### Added first translation overlay
+- Added `TranslationOverlayView.kt`.
+- `FloatingService.kt` now carries OCR coordinates through the translation pipeline and renders the translated result over the target screen.
+- The overlay is non-touchable.
+- Screen-TL's floating UI is hidden before capture and the previous translation overlay is cleared before each Manual TL operation.
+- This implementation is code-complete for the first milestone but remains device-unverified.
 
 ## Development Rules
 - Inspect the actual repository before modifying code.
@@ -113,11 +139,11 @@ If the sequence stops, diagnose the first missing stage.
 
 ## Next Recommended Milestone
 1. Build the latest commit.
-2. Test Manual TL on another app with obvious text, preferably more than three lines.
-3. Inspect the four `ScreenTL-*` Logcat tags.
-4. Verify that the captured bitmap contains the target app, not only system/status-bar content.
-5. If the frame is still wrong, diagnose capture timing, display dimensions, orientation, and Android/device-specific MediaProjection behavior.
-6. If the frame is correct, diagnose OCR and filtering.
-7. Confirm History receives all detected translations.
-8. Implement the first overlay using OCR bounding boxes.
-9. Only after Manual TL + overlay are stable, implement realtime capture/change detection/cache.
+2. Test Manual TL on another app with many obvious text lines.
+3. Confirm History contains all detected translations, not an artificial three-line cap.
+4. Confirm translated text appears directly over the target text.
+5. Touch and scroll the target app to confirm the overlay does not consume interaction.
+6. Run Manual TL again and confirm the old overlay is removed before capture and replaced by the new result.
+7. Inspect the four `ScreenTL-*` Logcat tags if anything fails.
+8. If overlay positions are offset, diagnose display dimensions, status-bar insets, orientation, and bitmap-to-view scaling.
+9. After Manual TL + overlay are stable, implement filtering and then realtime capture/change detection/cache.
