@@ -13,15 +13,16 @@ Android screen translator yang dirancang untuk menerjemahkan teks dari aplikasi 
 | Manual Translation | ✅ | Capture → OCR → translation → History → overlay sudah berhasil pada pengujian perangkat terbaru |
 | Translation History | ✅ | Persisten; service-safe dan write menggunakan `commit()` |
 | Translation overlay | 🧪 | Sudah muncul pada pengujian Manual TL; posisi/kerapian visual masih belum diverifikasi menyeluruh |
-| Real-Time Translation | 🧪 | Loop capture → OCR → translation → overlay sudah diimplementasikan, tetapi belum diverifikasi di perangkat |
+| Real-Time Translation | ⚠️ | Loop capture → OCR → translation → overlay sudah bekerja pada perangkat, tetapi overlay masih berkedip |
 
 ## Masalah Aktif
 
 1. Frame MediaProjection masih perlu dipastikan konsisten menangkap aplikasi target dan bukan hanya jam/status bar atau UI Screen-TL.
 2. Overlay masih perlu verifikasi posisi terhadap koordinat layar, tetapi perapian UI sengaja ditunda sampai fungsi inti stabil.
-3. Real-Time tahap pertama belum memiliki change detection/cache. Saat ini loop mengambil frame secara berkala dan memproses OCR/translation secara berurutan agar tidak menumpuk pekerjaan.
-4. Real-Time tidak menulis setiap frame ke History agar History tidak dipenuhi duplikasi; History tetap menjadi output utama Manual TL.
+3. Real-Time tahap pertama memproses frame secara berkala dan berurutan. Change detection dan cache translation belum dibuat.
+4. Real-Time tidak menulis setiap frame ke History agar History tidak dipenuhi duplikasi.
 5. APK update masih bentrok setelah `versionCode` dinaikkan. Dugaan utama tetap perbedaan signing key antara APK lama dan APK GitHub Actions.
+6. **Bug Real-Time terbaru:** pengguna mengonfirmasi Real-Time berhasil menerjemahkan, tetapi overlay berkedip. Polanya: overlay muncul sekitar 2 detik, hilang, muncul lagi; kadang jeda hilang mencapai sekitar 4 detik.
 
 ## Roadmap
 
@@ -33,7 +34,7 @@ Android screen translator yang dirancang untuk menerjemahkan teks dari aplikasi 
 - [x] ML Kit Translation manager.
 - [~] Verifikasi bahwa frame yang diberikan ke OCR benar-benar berasal dari aplikasi yang sedang terlihat.
 - [x] Manual TL capture → OCR → translation → History → overlay berhasil pada pengujian perangkat terbaru.
-- [ ] Tambahkan filtering untuk status bar, floating button, dan teks UI Screen-TL yang tidak relevan.
+- [ ] Filter status bar/floating button/teks Screen-TL yang tidak relevan.
 - [x] Manual TL memiliki timeout capture 3 detik dan watchdog pemrosesan 30 detik.
 
 ### Milestone 2 — Translation Overlay
@@ -47,15 +48,16 @@ Android screen translator yang dirancang untuk menerjemahkan teks dari aplikasi 
 
 ### Milestone 3 — Real-Time Translation
 
-- [x] Capture frame secara berkala.
-- [x] OCR dijalankan pada setiap frame yang diproses secara berurutan.
-- [x] Translation dijalankan berurutan tanpa menumpuk request frame.
-- [x] Overlay diperbarui dari hasil frame terbaru.
-- [x] Real-Time dapat dihentikan tanpa menghentikan foreground service.
+- [x] Capture frame berkala tahap pertama.
+- [x] OCR dan translation loop dasar.
+- [x] Update overlay dari hasil frame terbaru.
+- [x] Stop Real-Time tanpa menghentikan service.
+- [ ] **Hilangkan kedipan overlay pada loop Real-Time.**
+- [ ] Verifikasi kestabilan Real-Time setelah perbaikan kedipan.
 - [ ] Deteksi perubahan layar agar frame yang tidak berubah tidak diproses ulang.
 - [ ] Cache translation agar teks yang sama tidak diterjemahkan berulang.
+- [ ] Optimalkan interval dan beban CPU/baterai berdasarkan hasil device test.
 - [ ] Update overlay hanya untuk teks baru/berubah.
-- [ ] Verifikasi kestabilan Real-Time pada perangkat nyata.
 
 ### Milestone 4 — Translation Engine
 
@@ -68,17 +70,14 @@ Android screen translator yang dirancang untuk menerjemahkan teks dari aplikasi 
 
 Setiap perubahan kode yang bermakna wajib dicatat di sini atau pada `PROJECT_NOTES.md`, termasuk tanggal, file, perubahan, alasan, hasil build/test, dan masalah yang masih tersisa.
 
-### 2026-09-07 — Implementasi Real-Time TL tahap pertama
+### 2026-09-07 — Verifikasi Real-Time oleh pengguna
 
-- `FloatingService.kt`: tombol Real-Time sekarang memulai loop capture layar berkala.
-- `FloatingService.kt`: setiap frame diproses melalui OCR lalu diterjemahkan secara berurutan.
-- `FloatingService.kt`: hasil translation Real-Time ditampilkan pada overlay menggunakan bounding box OCR.
-- `FloatingService.kt`: hanya satu frame diproses pada satu waktu agar OCR/translation tidak menumpuk.
-- `FloatingService.kt`: loop memiliki generation guard sehingga callback dari sesi lama tidak dapat menghidupkan kembali Real-Time setelah dimatikan.
-- `FloatingService.kt`: saat Real-Time dimatikan, pending capture dibatalkan dan overlay dihapus tanpa menghentikan service.
-- Real-Time belum menulis hasil ke History; ini disengaja untuk menghindari duplikasi dari frame berulang.
-- Change detection dan translation cache belum dibuat; keduanya menjadi tahap berikutnya setelah loop dasar berhasil diverifikasi.
-- **Build/device test:** belum diverifikasi pada perangkat setelah commit ini.
+- Pengguna berhasil menjalankan Real-Time TL pada perangkat.
+- Capture → OCR → translation → overlay terbukti berjalan berulang.
+- Masalah yang ditemukan: overlay berkedip/hilang di antara siklus. Overlay biasanya terlihat sekitar 2 detik, lalu hilang, kemudian muncul kembali; pada beberapa siklus jeda dapat sekitar 4 detik.
+- Belum ada perubahan kode untuk masalah ini pada catatan ini. Penyebab yang dicurigai adalah loop sebelumnya melepas (`removeTranslationOverlay()`) overlay sebelum setiap capture, sehingga ada periode ketika WindowManager memang tidak memiliki overlay.
+- Perbaikan berikutnya harus mempertahankan window overlay dan memperbarui isinya tanpa menghapus/re-add window setiap frame.
+- **Build/test status:** perubahan Real-Time dasar sudah diuji oleh pengguna dan berhasil secara fungsi. Perbaikan kedipan yang belum dilakukan belum diuji.
 
 ### 2026-09-06 — Perbaikan timeout Manual TL
 
@@ -111,8 +110,9 @@ Setiap perubahan kode yang bermakna wajib dicatat di sini atau pada `PROJECT_NOT
 ### 2026-09-06 — Diagnosis pipeline dan perbaikan batas OCR
 
 - Pengujian perangkat menghasilkan History dengan tiga hasil: `23:04`, `Status`, dan `Succese`.
-- Dari inspeksi kode ditemukan `detectedTexts.take(3)` di `FloatingService`, sehingga manual translation memang sengaja hanya memproses maksimal tiga baris OCR.
+- Dari inspeksi kode ditemukan `detectedTexts.take(3)` di `FloatingService`, sehingga manual translation memang sengaja hanya memproses maksimal tiga baris.
 - Menghapus pembatas tersebut agar semua baris yang ditemukan OCR diproses pada Manual TL.
+- MediaProjection Android 14+ tetap menggunakan konfigurasi default display/full display.
 
 ### 2026-09-06 — Diagnosis pipeline
 
