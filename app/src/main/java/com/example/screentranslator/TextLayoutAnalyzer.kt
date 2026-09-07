@@ -7,8 +7,8 @@ import kotlin.math.roundToInt
 
 /**
  * Converts ML Kit line geometry into rendering geometry for the Manual overlay.
- * The renderer uses this geometry to cover the source line without making the
- * translated text oversized or vertically distorted.
+ * Also prepares a small low-resolution source patch that can be enlarged again
+ * by the renderer to create a lightweight local blur behind the translation.
  */
 object TextLayoutAnalyzer {
 
@@ -18,7 +18,8 @@ object TextLayoutAnalyzer {
         val right: Int,
         val bottom: Int,
         val sourceTextSizePx: Float,
-        val backgroundColor: Int
+        val backgroundColor: Int,
+        val blurredPatch: Bitmap?
     )
 
     fun analyze(bitmap: Bitmap, line: Line): Result? {
@@ -34,14 +35,11 @@ object TextLayoutAnalyzer {
             box.height().toFloat()
         }
 
-        // OCR glyph height is the visible height of the source characters,
-        // while Paint.textSize is the font's full em size. A smaller calibration
-        // than the old 1.45x keeps the translation close to the source instead
-        // of producing the oversized/tall text seen on the device.
+        // Paint.textSize is larger than visible glyph height. 1.10x is a
+        // conservative calibration for the current device so the translation
+        // stays close to the source instead of becoming oversized.
         val sourceTextSizePx = (glyphHeight * 1.10f).coerceIn(8f, 96f)
 
-        // Give the mask a little breathing room around the source glyphs, but
-        // keep it tight enough that adjacent lines do not get covered.
         val horizontalPad = (glyphHeight * 0.20f).roundToInt().coerceIn(3, 18)
         val verticalPad = (glyphHeight * 0.18f).roundToInt().coerceIn(2, 12)
 
@@ -56,8 +54,46 @@ object TextLayoutAnalyzer {
             right = right,
             bottom = bottom,
             sourceTextSizePx = sourceTextSizePx,
-            backgroundColor = estimateBackgroundColor(bitmap, left, top, right, bottom)
+            backgroundColor = estimateBackgroundColor(bitmap, left, top, right, bottom),
+            blurredPatch = createBlurredPatch(bitmap, left, top, right, bottom)
         )
+    }
+
+    /**
+     * Fast local blur: downsample the source region heavily, then scale it
+     * back up. This removes the source glyph detail while retaining the local
+     * color/texture. It is deliberately bounded to each OCR line.
+     */
+    private fun createBlurredPatch(
+        bitmap: Bitmap,
+        left: Int,
+        top: Int,
+        right: Int,
+        bottom: Int
+    ): Bitmap? {
+        val safeLeft = left.coerceIn(0, bitmap.width - 1)
+        val safeTop = top.coerceIn(0, bitmap.height - 1)
+        val safeRight = right.coerceIn(safeLeft + 1, bitmap.width)
+        val safeBottom = bottom.coerceIn(safeTop + 1, bitmap.height)
+        val width = safeRight - safeLeft
+        val height = safeBottom - safeTop
+        if (width <= 1 || height <= 1) return null
+
+        return try {
+            val patch = Bitmap.createBitmap(bitmap, safeLeft, safeTop, width, height)
+            val small = Bitmap.createScaledBitmap(
+                patch,
+                (width / 5).coerceAtLeast(1),
+                (height / 5).coerceAtLeast(1),
+                true
+            )
+            if (small !== patch && !patch.isRecycled) patch.recycle()
+            val blurred = Bitmap.createScaledBitmap(small, width, height, true)
+            if (blurred !== small && !small.isRecycled) small.recycle()
+            blurred
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private fun estimateBackgroundColor(
@@ -79,7 +115,7 @@ object TextLayoutAnalyzer {
         }
         for (y in top until bottom step stepY) {
             if (left > 1) samples.add(bitmap.getPixel(left - 1, y.coerceIn(0, bitmap.height - 1)))
-            if (right < bitmap.width) samples.add(bitmap.getPixel(right, y.coerceIn(0, bitmap.height - 1)))
+            if (right < bitmap.width) samples.add(bitmap.getPixel(right, y.coerceIn(0, bitmap.width - 1)))
         }
 
         if (samples.isEmpty()) return Color.BLACK
