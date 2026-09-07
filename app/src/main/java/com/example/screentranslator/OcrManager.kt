@@ -53,33 +53,35 @@ class OcrManager(
             .addOnSuccessListener { visionText ->
                 val detectedTexts = mutableListOf<DetectedText>()
 
+                // ML Kit text blocks are the most useful paragraph-level unit for
+                // manual translation. Previously we translated every OCR line
+                // independently, which could change the meaning across line breaks.
                 for (block in visionText.textBlocks) {
-                    for (line in block.lines) {
-                        if (line.text.isBlank()) continue
+                    val blockText = block.text.trim()
+                    if (blockText.isBlank()) continue
 
-                        val layout = TextLayoutAnalyzer.analyze(bitmap, line)
-                        if (layout != null) {
-                            detectedTexts.add(
-                                DetectedText(
-                                    text = line.text,
-                                    left = layout.left,
-                                    top = layout.top,
-                                    right = layout.right,
-                                    bottom = layout.bottom,
-                                    sourceTextSizePx = layout.sourceTextSizePx,
-                                    backgroundColor = layout.backgroundColor,
-                                    blurredPatch = layout.blurredPatch
-                                )
+                    val layout = TextLayoutAnalyzer.analyze(bitmap, block)
+                    if (layout != null) {
+                        detectedTexts.add(
+                            DetectedText(
+                                text = blockText,
+                                left = layout.left,
+                                top = layout.top,
+                                right = layout.right,
+                                bottom = layout.bottom,
+                                sourceTextSizePx = layout.sourceTextSizePx,
+                                backgroundColor = layout.backgroundColor,
+                                blurredPatch = layout.blurredPatch
                             )
-                        }
+                        )
                     }
                 }
 
-                Log.i(TAG, "OCR completed: ${detectedTexts.size} lines detected")
+                Log.i(TAG, "OCR completed: ${detectedTexts.size} paragraphs detected")
                 detectedTexts.forEachIndexed { index, detected ->
                     Log.i(
                         TAG,
-                        "[$index] '${detected.text}' box=${detected.left},${detected.top},${detected.right},${detected.bottom} font=${detected.sourceTextSizePx}"
+                        "[$index] paragraph='${detected.text.replace("\\n", " ")}' box=${detected.left},${detected.top},${detected.right},${detected.bottom} font=${detected.sourceTextSizePx}"
                     )
                 }
 
