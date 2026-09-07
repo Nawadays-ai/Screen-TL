@@ -38,7 +38,6 @@ class SettingsActivity : AppCompatActivity() {
         btnApiDisable = findViewById(R.id.btnApiDisable)
         findViewById<Button>(R.id.btnBackSettings).setOnClickListener { finish() }
 
-        // Free/manual translation currently uses Google ML Kit only.
         val manualProviders = arrayOf(ApiSettings.PROVIDER_ML_KIT)
         spinnerManualProvider.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, manualProviders)
         spinnerManualProvider.setSelection(0)
@@ -49,10 +48,11 @@ class SettingsActivity : AppCompatActivity() {
         selectedApiProvider = preferredApi
         spinnerApiProvider.setSelection(apiProviders.indexOf(preferredApi))
         spinnerApiProvider.setOnItemSelectedListener(SimpleItemSelectedListener { position ->
-            if (position !in apiProviders.indices) return@SimpleItemSelectedListener
-            selectedApiProvider = apiProviders[position]
-            loadSelectedApiKey()
-            renderApi()
+            if (position in apiProviders.indices) {
+                selectedApiProvider = apiProviders[position]
+                loadSelectedApiKey()
+                renderApi()
+            }
         })
 
         etApiKey.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
