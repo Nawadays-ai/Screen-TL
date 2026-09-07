@@ -1,31 +1,30 @@
 package com.example.screentranslator
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.Shader
 import android.graphics.Typeface
 import android.view.View
 
 /**
- * Renders Manual TL directly over the source text region.
+ * Manual TL renderer.
  *
- * The translated line may grow wider than the source, but only up to a
- * controlled bounding-box width. Font fitting is always uniform, so glyphs
- * never get horizontally squeezed. A small blurred source patch is used to
- * hide the original text while preserving the local background.
+ * The translation starts exactly at the source line's left edge. If the
+ * translation needs more room, the box grows only to the right. The maximum
+ * width is bounded so a long translation cannot take over the screen.
+ *
+ * The background is reconstructed from colors sampled around the source text,
+ * rather than copying the raw screenshot pixels. This gives a soft blur-like
+ * replacement while preventing the original glyphs from being drawn twice.
  */
 class TranslationOverlayView(context: Context) : View(context) {
 
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-    }
-
-    private val blurBitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-        isFilterBitmap = true
     }
 
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -41,8 +40,6 @@ class TranslationOverlayView(context: Context) : View(context) {
     private val verticalPaddingRatio = 0.10f
     private val minTextSizePx = 8f
     private val maxTextSizePx = 96f
-    private val maskAlphaWithoutBlur = 235
-    private val maskTintAlphaWithBlur = 90
     private val minFontScale = 0.62f
     private val maxWidthRatio = 1.55f
 
@@ -65,22 +62,16 @@ class TranslationOverlayView(context: Context) : View(context) {
         sourceWidth: Int,
         sourceHeight: Int
     ) {
-        // Any previous RenderItem still owns the blurred Bitmap supplied by
-        // OCR. Release those patches before replacing the list.
-        releaseBlurPatches()
-
         this.sourceWidth = sourceWidth.coerceAtLeast(1)
         this.sourceHeight = sourceHeight.coerceAtLeast(1)
         renderItems = translations.mapNotNull { item ->
             buildRenderItem(item, this.sourceWidth, this.sourceHeight)
         }
-
         visibility = if (renderItems.isEmpty()) View.GONE else View.VISIBLE
         invalidate()
     }
 
     fun clearTranslations() {
-        releaseBlurPatches()
         renderItems = emptyList()
         visibility = View.GONE
         invalidate()
@@ -105,34 +96,12 @@ class TranslationOverlayView(context: Context) : View(context) {
             canvas.save()
             canvas.clipRect(box)
 
-            val blurredPatch = renderItem.item.blurredPatch
-            if (blurredPatch != null && !blurredPatch.isRecycled) {
-                canvas.drawBitmap(blurredPatch, null, box, blurBitmapPaint)
-
-                // Slight tint prevents the enlarged patch from looking washed
-                // out while still allowing the blur to show through.
-                val sampled = renderItem.item.backgroundColor
-                backgroundPaint.color = Color.argb(
-                    maskTintAlphaWithBlur,
-                    Color.red(sampled),
-                    Color.green(sampled),
-                    Color.blue(sampled)
-                )
-                canvas.drawRoundRect(box, radius, radius, backgroundPaint)
-            } else {
-                val sampled = renderItem.item.backgroundColor
-                backgroundPaint.color = Color.argb(
-                    maskAlphaWithoutBlur,
-                    Color.red(sampled),
-                    Color.green(sampled),
-                    Color.blue(sampled)
-                )
-                canvas.drawRoundRect(box, radius, radius, backgroundPaint)
-            }
+            // Draw only reconstructed colors. No screenshot bitmap is copied,
+            // so the source glyph cannot remain visible underneath.
+            drawReconstructedBlur(canvas, box, renderItem.item, radius)
 
             textPaint.textScaleX = 1f
             textPaint.textSize = renderItem.textSize * scaleY
-
             val maxTextWidth = (
                 (right - left) - renderItem.horizontalPadding * 2f * scaleX
             ).coerceAtLeast(1f)
@@ -149,12 +118,47 @@ class TranslationOverlayView(context: Context) : View(context) {
                     textPaint
                 )
             }
-
             canvas.restore()
         }
 
         textPaint.textScaleX = 1f
     }
+
+    private fun drawReconstructedBlur(
+        canvas: Canvas,
+        box: RectF,
+        item: TranslationOverlayItem,
+        radius: Float
+    ) {
+        val base = item.backgroundColor
+        val light = adjustColor(base, 1.10f)
+        val dark = adjustColor(base, 0.90f)
+
+        // A fully opaque, soft color field replaces the source. The subtle
+        // gradients imitate a blurred local background without reproducing
+        // any raw pixels or source characters.
+        backgroundPaint.shader = LinearGradient(
+            box.left,
+            box.top,
+            box.right,
+            box.bottom,
+            intArrayOf(light, base, dark),
+            floatArrayOf(0f, 0.52f, 1f),
+            Shader.TileMode.CLAMP
+        )
+        canvas.drawRoundRect(box, radius, radius, backgroundPaint)
+        backgroundPaint.shader = null
+    }
+
+    private fun adjustColor(color: Int, factor: Float): Int {
+        return Color.rgb(
+            (Color.red(color) * factor).roundToIntSafe(),
+            (Color.green(color) * factor).roundToIntSafe(),
+            (Color.blue(color) * factor).roundToIntSafe()
+        )
+    }
+
+    private fun Float.roundToIntSafe(): Int = kotlin.math.round(this).toInt().coerceIn(0, 255)
 
     private fun buildRenderItem(
         item: TranslationOverlayItem,
@@ -185,18 +189,16 @@ class TranslationOverlayView(context: Context) : View(context) {
         val measuredWidth = textPaint.measureText(normalized)
         val maxBoxWidth = minOf(
             baseWidth * maxWidthRatio,
-            (width - 8).toFloat()
-        ).coerceAtLeast(baseWidth)
+            (width - baseLeft - 4f).coerceAtLeast(baseWidth)
+        )
 
-        // This is the translation bounding box: it may exceed the source box,
-        // but never beyond 155% of the source width. The box stays centered on
-        // the original text line.
         val desiredWidth = (measuredWidth + horizontalPadding * 2f)
             .coerceAtLeast(baseWidth)
         val boxWidth = desiredWidth.coerceAtMost(maxBoxWidth)
-        val sourceCenter = (baseLeft + baseRight) / 2f
-        val left = (sourceCenter - boxWidth / 2f)
-            .coerceIn(0f, (width - boxWidth).coerceAtLeast(0f))
+
+        // IMPORTANT: keep the source LEFT edge fixed. Extra translation room
+        // is allowed only on the right; the box never shifts left of source.
+        val left = baseLeft
         val right = (left + boxWidth).coerceAtMost(width.toFloat())
 
         val maxTextWidth = (right - left - horizontalPadding * 2f).coerceAtLeast(1f)
@@ -240,17 +242,8 @@ class TranslationOverlayView(context: Context) : View(context) {
         return normalized.substring(0, end.coerceAtLeast(1)) + ellipsis
     }
 
-    private fun releaseBlurPatches() {
-        renderItems.forEach { item ->
-            item.item.blurredPatch?.let { bitmap ->
-                if (!bitmap.isRecycled) bitmap.recycle()
-            }
-            item.item.blurredPatch = null
-        }
-    }
-
     override fun onDetachedFromWindow() {
-        releaseBlurPatches()
+        renderItems = emptyList()
         super.onDetachedFromWindow()
     }
 }
@@ -263,5 +256,5 @@ data class TranslationOverlayItem(
     val bottom: Int,
     val sourceTextSizePx: Float = 0f,
     val backgroundColor: Int = Color.BLACK,
-    var blurredPatch: Bitmap? = null
+    var blurredPatch: android.graphics.Bitmap? = null
 )
