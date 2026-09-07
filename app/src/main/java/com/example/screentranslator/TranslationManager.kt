@@ -1,5 +1,8 @@
 package com.example.screentranslator
 
+import android.os.Handler
+import android.os.Looper
+
 class TranslationManager(
     private val sourceLanguage: String,
     private val targetLanguage: String,
@@ -7,13 +10,21 @@ class TranslationManager(
 ) {
 
     private val provider: TranslationProvider = createProvider(manualProvider)
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     fun prepare(onReady: () -> Unit, onFailure: (Exception) -> Unit) {
-        provider.prepare(onReady, onFailure)
+        provider.prepare(
+            onReady = { mainHandler.post(onReady) },
+            onFailure = { exception -> mainHandler.post { onFailure(exception) } }
+        )
     }
 
     fun translate(text: String, onSuccess: (String) -> Unit, onFailure: (Exception) -> Unit) {
-        provider.translate(text, onSuccess, onFailure)
+        provider.translate(
+            text = text,
+            onSuccess = { translated -> mainHandler.post { onSuccess(translated) } },
+            onFailure = { exception -> mainHandler.post { onFailure(exception) } }
+        )
     }
 
     fun getProviderName(): String = when (provider) {
@@ -36,9 +47,8 @@ class TranslationManager(
             }
         }
 
-        // DeepL must also be an active override. Previously it was only selected
-        // when the manual provider spinner happened to be set to DeepL, which
-        // meant pressing "Gunakan" could still leave ML Kit doing the work.
+        // DeepL must also be an active override. Pressing "Gunakan" makes it
+        // the actual provider regardless of the manual provider selector.
         if (ApiSettings.isDeepLEnabled()) {
             val key = ApiSettings.getDeepLKey()
             if (!key.isNullOrBlank()) {
