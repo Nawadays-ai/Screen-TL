@@ -32,6 +32,7 @@ class TranslationOverlayView(context: Context) : View(context) {
     private val minTextSizePx = 8f
     private val maxTextSizePx = 96f
     private val maskAlpha = 245
+    private val minTextScaleX = 0.72f
 
     private var items: List<TranslationOverlayItem> = emptyList()
     private var sourceWidth = 1
@@ -78,9 +79,6 @@ class TranslationOverlayView(context: Context) : View(context) {
             val maxTextWidth = (boxWidth - horizontalPadding * 2f).coerceAtLeast(1f)
             val maxTextHeight = (boxHeight - verticalPadding * 2f).coerceAtLeast(1f)
 
-            // Make the replacement mask visually solid enough to reliably hide
-            // the original glyphs. True backdrop blur is not used here because
-            // RenderEffect blurs the overlay's own content, not the app behind it.
             val sampled = item.backgroundColor
             backgroundPaint.color = Color.argb(
                 maskAlpha,
@@ -95,19 +93,24 @@ class TranslationOverlayView(context: Context) : View(context) {
                 backgroundPaint
             )
 
+            // Keep the calibrated source font size. Do not reduce textSize
+            // merely because a translation is wider than the source line.
+            // Instead, use a modest horizontal text scale so the translation
+            // keeps the same visual height as the source whenever possible.
             val sourceFontSize = if (item.sourceTextSizePx > 0f) {
                 item.sourceTextSizePx * scaleY
             } else {
                 boxHeight * 0.62f
-            }
+            }.coerceIn(minTextSizePx, maxTextSizePx)
 
-            val textSize = findTextSize(
-                item.translatedText,
-                sourceFontSize.coerceIn(minTextSizePx, maxTextSizePx),
-                maxTextWidth,
-                maxTextHeight
-            )
-            textPaint.textSize = textSize
+            textPaint.textSize = sourceFontSize
+            textPaint.textScaleX = 1f
+
+            val measuredWidth = textPaint.measureText(item.translatedText)
+            if (measuredWidth > maxTextWidth && measuredWidth > 0f) {
+                textPaint.textScaleX = (maxTextWidth / measuredWidth)
+                    .coerceIn(minTextScaleX, 1f)
+            }
 
             val fittedText = fitSingleLine(item.translatedText, maxTextWidth)
             if (fittedText.isEmpty()) return@forEach
@@ -121,30 +124,9 @@ class TranslationOverlayView(context: Context) : View(context) {
             canvas.drawText(fittedText, left + horizontalPadding, baseline, textPaint)
             canvas.restore()
         }
-    }
 
-    private fun findTextSize(
-        text: String,
-        sourceSize: Float,
-        maxWidth: Float,
-        maxHeight: Float
-    ): Float {
-        var size = sourceSize
-        textPaint.textSize = size
-
-        val width = textPaint.measureText(text)
-        if (width > maxWidth && width > 0f) {
-            size *= maxWidth / width
-        }
-
-        textPaint.textSize = size
-        val metrics = textPaint.fontMetrics
-        val height = metrics.descent - metrics.ascent
-        if (height > maxHeight && height > 0f) {
-            size *= maxHeight / height
-        }
-
-        return size.coerceIn(minTextSizePx, sourceSize)
+        // Avoid leaking a horizontal scale into future Canvas/View operations.
+        textPaint.textScaleX = 1f
     }
 
     private fun fitSingleLine(text: String, maxWidth: Float): String {
@@ -153,6 +135,10 @@ class TranslationOverlayView(context: Context) : View(context) {
 
         if (textPaint.measureText(normalized) <= maxWidth) return normalized
 
+        // The font size is intentionally never reduced here. If the translated
+        // sentence is still too long after the horizontal scale floor, truncate
+        // only as a last resort rather than making the translation vertically
+        // smaller than the source.
         val ellipsis = "…"
         var end = normalized.length
         while (end > 1 && textPaint.measureText(normalized.substring(0, end) + ellipsis) > maxWidth) {
