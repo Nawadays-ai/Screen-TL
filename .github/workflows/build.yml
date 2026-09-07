@@ -10,6 +10,9 @@ on:
       - 'experiment/**'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -17,6 +20,64 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+
+    - name: Apply floating menu anchor fix
+      shell: bash
+      run: |
+        python3 - <<'PY'
+        from pathlib import Path
+        path = Path('app/src/main/java/com/example/screentranslator/FloatingService.kt')
+        text = path.read_text()
+        old = '''        val rootWidth = menuWidth + gap + fabSize
+        val rootHeight = if (placeAbove) menuHeight + gap + fabSize else maxOf(menuHeight, fabSize)
+        val rawX = if (placeRight) fabScreenX else fabScreenX - menuWidth - gap
+        val rawY = if (placeAbove) fabScreenY - menuHeight - gap else fabScreenY - ((rootHeight - fabSize) / 2)
+        val rootX = rawX.coerceIn(0, (screenWidth - rootWidth).coerceAtLeast(0))
+        val rootY = rawY.coerceIn(0, (screenHeight - rootHeight).coerceAtLeast(0))'''
+        new = '''        val rootWidth = menuWidth + gap + fabSize
+        // The window root always contains the full menu + FAB stack. This
+        // lets the FAB keep its exact dragged screen coordinate on first tap.
+        val rootHeight = menuHeight + gap + fabSize
+        val rawX = if (placeRight) fabScreenX else fabScreenX - menuWidth - gap
+        val rawY = if (placeAbove) fabScreenY - menuHeight - gap else fabScreenY
+        val rootX = rawX.coerceIn(0, (screenWidth - rootWidth).coerceAtLeast(0))
+        val rootY = rawY.coerceIn(0, (screenHeight - rootHeight).coerceAtLeast(0))'''
+        if old not in text:
+            raise SystemExit('Expected positionSubMenu geometry block was not found')
+        text = text.replace(old, new, 1)
+
+        old_gravity = '''        if (placeRight) {
+            menuParams.gravity = if (placeAbove) Gravity.END or Gravity.TOP else Gravity.END or Gravity.CENTER_VERTICAL
+            fabParams.gravity = if (placeAbove) Gravity.START or Gravity.BOTTOM else Gravity.START or Gravity.CENTER_VERTICAL
+        } else {
+            menuParams.gravity = if (placeAbove) Gravity.START or Gravity.TOP else Gravity.START or Gravity.CENTER_VERTICAL
+            fabParams.gravity = if (placeAbove) Gravity.END or Gravity.BOTTOM else Gravity.END or Gravity.CENTER_VERTICAL
+        }'''
+        new_gravity = '''        if (placeRight) {
+            // Menu is to the right of the FAB. Vertical gravity is always TOP
+            // when the menu opens downward and BOTTOM when it opens upward.
+            menuParams.gravity = Gravity.END or Gravity.TOP
+            fabParams.gravity = if (placeAbove) Gravity.START or Gravity.BOTTOM else Gravity.START or Gravity.TOP
+        } else {
+            // Menu is to the left of the FAB. The same vertical anchoring rule
+            // keeps the FAB beside the first/last menu row without recentering.
+            menuParams.gravity = Gravity.START or Gravity.TOP
+            fabParams.gravity = if (placeAbove) Gravity.END or Gravity.BOTTOM else Gravity.END or Gravity.TOP
+        }'''
+        if old_gravity not in text:
+            raise SystemExit('Expected positionSubMenu gravity block was not found')
+        text = text.replace(old_gravity, new_gravity, 1)
+        path.write_text(text)
+        PY
+        git config user.name 'github-actions[bot]'
+        git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+        if ! git diff --quiet -- app/src/main/java/com/example/screentranslator/FloatingService.kt; then
+          git add app/src/main/java/com/example/screentranslator/FloatingService.kt
+          git commit -m 'Fix floating menu anchor on first tap'
+          git push
+        else
+          echo 'FloatingService already contains the anchor fix.'
+        fi
 
     - name: Set up JDK 17
       uses: actions/setup-java@v5
