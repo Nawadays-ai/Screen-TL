@@ -13,15 +13,14 @@ import android.view.View
 /**
  * Manual TL renderer.
  *
- * The translation starts exactly at the source line's left edge. If the
- * translation needs more room, the tolerance box grows only to the right.
- * The colored replacement area itself only covers the translated text plus
- * padding when the translation fits inside that tolerance. If the text still
- * exceeds the tolerance after fitting, the color reaches the tolerance edge.
+ * Backgrounds and text are deliberately rendered in two passes. Every
+ * replacement/background is drawn first; all translated text is drawn after
+ * that pass. Therefore one translation can never be hidden by the background
+ * of another translation when their boxes overlap.
  *
- * The background is reconstructed from colors sampled around the source text,
- * rather than copying raw screenshot pixels. This prevents the original glyphs
- * from being drawn twice.
+ * Intersecting replacement areas are also assigned one shared background
+ * color. This makes overlapping boxes visually merge instead of producing
+ * stacked, differently-colored rectangles.
  */
 class TranslationOverlayView(context: Context) : View(context) {
 
@@ -55,9 +54,13 @@ class TranslationOverlayView(context: Context) : View(context) {
         val fillRight: Float,
         val textSize: Float,
         val horizontalPadding: Float
-    )
+    ) {
+        fun fillRect() = RectF(left, top, fillRight, bottom)
+    }
 
     private var renderItems: List<RenderItem> = emptyList()
+    private var groupColors: List<Int> = emptyList()
+    private var itemGroups: List<Int> = emptyList()
     private var sourceWidth = 1
     private var sourceHeight = 1
 
@@ -71,83 +74,170 @@ class TranslationOverlayView(context: Context) : View(context) {
         renderItems = translations.mapNotNull { item ->
             buildRenderItem(item, this.sourceWidth, this.sourceHeight)
         }
+        buildOverlapGroups()
         visibility = if (renderItems.isEmpty()) View.GONE else View.VISIBLE
         invalidate()
     }
 
     fun clearTranslations() {
         renderItems = emptyList()
+        groupColors = emptyList()
+        itemGroups = emptyList()
         visibility = View.GONE
         invalidate()
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        if (renderItems.isEmpty()) return
 
         val scaleX = width.toFloat() / sourceWidth.toFloat()
         val scaleY = height.toFloat() / sourceHeight.toFloat()
 
-        renderItems.forEach { renderItem ->
+        // PASS 1: draw every replacement/background. Overlapping items that
+        // belong to the same group use exactly the same effective color.
+        renderItems.forEachIndexed { index, renderItem ->
             val left = renderItem.left * scaleX
             val top = renderItem.top * scaleY
             val right = renderItem.right * scaleX
             val bottom = renderItem.bottom * scaleY
             val fillRight = renderItem.fillRight * scaleX
-            if (right <= left || bottom <= top || fillRight <= left) return@forEach
+            if (right <= left || bottom <= top || fillRight <= left) return@forEachIndexed
 
             val box = RectF(left, top, right, bottom)
             val fillBox = RectF(left, top, fillRight.coerceAtMost(right), bottom)
             val radius = ((bottom - top) * 0.08f).coerceIn(2f, 7f)
+            val groupId = itemGroups.getOrElse(index) { index }
+            val effectiveColor = groupColors.getOrElse(groupId) {
+                darkenColor(renderItem.item.backgroundColor)
+            }
 
             canvas.save()
             canvas.clipRect(box)
-            drawReconstructedBlur(canvas, fillBox, renderItem.item, radius)
+            drawReconstructedBlur(canvas, fillBox, effectiveColor, radius)
+            canvas.restore()
+        }
+
+        // PASS 2: text is always last. This is the important anti-overlap
+        // rule: background from another OCR item can never cover this text.
+        renderItems.forEachIndexed { index, renderItem ->
+            val left = renderItem.left * scaleX
+            val top = renderItem.top * scaleY
+            val right = renderItem.right * scaleX
+            val bottom = renderItem.bottom * scaleY
+            if (right <= left || bottom <= top) return@forEachIndexed
+
+            val groupId = itemGroups.getOrElse(index) { index }
+            val effectiveColor = groupColors.getOrElse(groupId) {
+                darkenColor(renderItem.item.backgroundColor)
+            }
 
             textPaint.textScaleX = 1f
             textPaint.textSize = renderItem.textSize * scaleY
-            textPaint.color = chooseTextColor(renderItem.item.backgroundColor)
+            textPaint.color = chooseTextColor(effectiveColor)
             val maxTextWidth = (
                 (right - left) - renderItem.horizontalPadding * 2f * scaleX
             ).coerceAtLeast(1f)
             val fittedText = fitSingleLine(renderItem.item.translatedText, maxTextWidth)
+            if (fittedText.isEmpty()) return@forEachIndexed
 
-            if (fittedText.isNotEmpty()) {
-                val metrics = textPaint.fontMetrics
-                val textHeight = metrics.descent - metrics.ascent
-                val baseline = top + (bottom - top - textHeight) / 2f - metrics.ascent
-                canvas.drawText(
-                    fittedText,
-                    left + renderItem.horizontalPadding * scaleX,
-                    baseline,
-                    textPaint
-                )
-            }
-            canvas.restore()
+            val metrics = textPaint.fontMetrics
+            val textHeight = metrics.descent - metrics.ascent
+            val baseline = top + (bottom - top - textHeight) / 2f - metrics.ascent
+            canvas.drawText(
+                fittedText,
+                left + renderItem.horizontalPadding * scaleX,
+                baseline,
+                textPaint
+            )
         }
 
         textPaint.textScaleX = 1f
         textPaint.color = Color.WHITE
     }
 
+    /**
+     * Builds connected overlap groups. If A overlaps B and B overlaps C,
+     * all three share one background color, even if A and C do not directly
+     * intersect. This prevents visible seams inside a stacked text cluster.
+     */
+    private fun buildOverlapGroups() {
+        if (renderItems.isEmpty()) {
+            itemGroups = emptyList()
+            groupColors = emptyList()
+            return
+        }
+
+        val parent = IntArray(renderItems.size) { it }
+
+        fun find(value: Int): Int {
+            var x = value
+            while (parent[x] != x) {
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            }
+            return x
+        }
+
+        fun union(a: Int, b: Int) {
+            val rootA = find(a)
+            val rootB = find(b)
+            if (rootA != rootB) parent[rootB] = rootA
+        }
+
+        for (i in renderItems.indices) {
+            val a = renderItems[i].fillRect()
+            for (j in i + 1 until renderItems.size) {
+                val b = renderItems[j].fillRect()
+                if (RectF.intersects(a, b)) union(i, j)
+            }
+        }
+
+        val rootToGroup = linkedMapOf<Int, Int>()
+        val groups = IntArray(renderItems.size)
+        renderItems.indices.forEach { index ->
+            val root = find(index)
+            groups[index] = rootToGroup.getOrPut(root) { rootToGroup.size }
+        }
+        itemGroups = groups.toList()
+
+        val sums = Array(rootToGroup.size) { FloatArray(4) }
+        renderItems.forEachIndexed { index, item ->
+            val group = itemGroups[index]
+            val color = darkenColor(item.item.backgroundColor)
+            sums[group][0] += Color.red(color)
+            sums[group][1] += Color.green(color)
+            sums[group][2] += Color.blue(color)
+            sums[group][3] += 1f
+        }
+
+        groupColors = sums.map { sum ->
+            val count = sum[3].coerceAtLeast(1f)
+            Color.rgb(
+                (sum[0] / count).toInt().coerceIn(0, 255),
+                (sum[1] / count).toInt().coerceIn(0, 255),
+                (sum[2] / count).toInt().coerceIn(0, 255)
+            )
+        }
+    }
+
     private fun drawReconstructedBlur(
         canvas: Canvas,
         box: RectF,
-        item: TranslationOverlayItem,
+        baseColor: Int,
         radius: Float
     ) {
-        val base = darkenColor(item.backgroundColor)
-        // Keep the sampled color darker than the original source area while
-        // retaining a gentle multi-stop gradient for the blur-like appearance.
-        val edge = adjustColor(base, 0.94f)
-        val deep = adjustColor(base, 0.88f)
-
+        // The source patch itself is never copied. We only reconstruct a
+        // smooth local field from the sampled perimeter color.
+        val edge = adjustColor(baseColor, 0.94f)
+        val deep = adjustColor(baseColor, 0.88f)
         backgroundPaint.alpha = 255
         backgroundPaint.shader = LinearGradient(
             box.left,
             box.top,
             box.right.coerceAtLeast(box.left + 1f),
             box.bottom,
-            intArrayOf(edge, base, deep, base, deep),
+            intArrayOf(edge, baseColor, deep, baseColor, deep),
             floatArrayOf(0f, 0.28f, 0.50f, 0.72f, 1f),
             Shader.TileMode.CLAMP
         )
@@ -163,11 +253,10 @@ class TranslationOverlayView(context: Context) : View(context) {
         return adjustColor(color, 0.82f)
     }
 
-    private fun chooseTextColor(color: Int): Int {
-        val background = darkenColor(color)
-        val luminance = 0.2126f * Color.red(background) +
-                0.7152f * Color.green(background) +
-                0.0722f * Color.blue(background)
+    private fun chooseTextColor(effectiveColor: Int): Int {
+        val luminance = 0.2126f * Color.red(effectiveColor) +
+                0.7152f * Color.green(effectiveColor) +
+                0.0722f * Color.blue(effectiveColor)
         return if (luminance < 150f) Color.WHITE else Color.BLACK
     }
 
@@ -212,22 +301,18 @@ class TranslationOverlayView(context: Context) : View(context) {
             baseWidth * maxWidthRatio,
             (width - baseLeft - 4f).coerceAtLeast(baseWidth)
         )
-
-        val desiredWidth = (measuredWidth + horizontalPadding * 2f)
-            .coerceAtLeast(baseWidth)
+        val desiredWidth = (measuredWidth + horizontalPadding * 2f).coerceAtLeast(baseWidth)
         val boxWidth = desiredWidth.coerceAtMost(maxBoxWidth)
 
-        // Keep the source LEFT edge fixed. Extra translation room is allowed
-        // only on the right; the box never shifts left of the source.
+        // Source LEFT edge stays fixed. Extra room is only added to the right.
         val left = baseLeft
         val right = (left + boxWidth).coerceAtMost(width.toFloat())
-
         val maxTextWidth = (right - left - horizontalPadding * 2f).coerceAtLeast(1f)
+
         var finalTextSize = baseTextSize
         if (measuredWidth > maxTextWidth && measuredWidth > 0f) {
             val fitScale = (maxTextWidth / measuredWidth).coerceAtLeast(minFontScale)
-            finalTextSize = (baseTextSize * fitScale)
-                .coerceIn(minTextSizePx, baseTextSize)
+            finalTextSize = (baseTextSize * fitScale).coerceIn(minTextSizePx, baseTextSize)
         }
 
         textPaint.textSize = finalTextSize
@@ -235,13 +320,10 @@ class TranslationOverlayView(context: Context) : View(context) {
         val finalTextHeight = finalMetrics.descent - finalMetrics.ascent
         val availableHeight = (boxHeight - verticalPadding * 2f).coerceAtLeast(1f)
         if (finalTextHeight > availableHeight && finalTextHeight > 0f) {
-            finalTextSize = (finalTextSize * (availableHeight / finalTextHeight))
-                .coerceAtLeast(minTextSizePx)
+            finalTextSize = (finalTextSize * (availableHeight / finalTextHeight)).coerceAtLeast(minTextSizePx)
             textPaint.textSize = finalTextSize
         }
 
-        // Re-measure after any font-size adjustment. This determines how much
-        // of the tolerance box should actually receive the replacement color.
         val finalMeasuredWidth = textPaint.measureText(normalized)
         val fillWidth = (finalMeasuredWidth + horizontalPadding * 2f)
             .coerceAtLeast(baseWidth)
@@ -274,6 +356,8 @@ class TranslationOverlayView(context: Context) : View(context) {
 
     override fun onDetachedFromWindow() {
         renderItems = emptyList()
+        groupColors = emptyList()
+        itemGroups = emptyList()
         super.onDetachedFromWindow()
     }
 }
