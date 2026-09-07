@@ -233,14 +233,14 @@ class FloatingService : Service() {
         val placeRight = fabScreenX < screenWidth / 2
         val placeAbove = fabScreenY > screenHeight / 2
         val rootWidth = menuWidth + gap + fabSize
-// The root contains the complete menu + FAB stack so the FAB keeps
-// its exact dragged screen coordinate when the menu opens.
+// Keep the FAB at the exact dragged coordinate. The menu expands
+// around that anchor instead of recentering the whole window.
 val rootHeight = menuHeight + gap + fabSize
 val rawX = if (placeRight) fabScreenX else fabScreenX - menuWidth - gap
 val rawY = if (placeAbove) fabScreenY - menuHeight - gap else fabScreenY
 val rootX = rawX.coerceIn(0, (screenWidth - rootWidth).coerceAtLeast(0))
-val rootY = rawY.coerceIn(0, (screenHeight - rootHeight).coerceAtLeast(0))rawY.coerceIn(0, (screenHeight - rootHeight).coerceAtLeast(0))
-        val menuParams = layoutSubMenu.layoutParams as FrameLayout.LayoutParams
+val rootY = rawY.coerceIn(0, (screenHeight - rootHeight).coerceAtLeast(0))
+val menuParams = layoutSubMenu.layoutParams as FrameLayout.LayoutParams
         val fabParams = fabMain.layoutParams as FrameLayout.LayoutParams
         menuParams.width = menuWidth
         menuParams.height = menuHeight
@@ -257,7 +257,7 @@ val rootY = rawY.coerceIn(0, (screenHeight - rootHeight).coerceAtLeast(0))rawY.c
     menuParams.gravity = Gravity.START or Gravity.TOP
     fabParams.gravity = if (placeAbove) Gravity.END or Gravity.BOTTOM else Gravity.END or Gravity.TOP
 }
-        layoutSubMenu.layoutParams = menuParams
+layoutSubMenu.layoutParams = menuParams
         fabMain.layoutParams = fabParams
         params?.let {
             it.width = rootWidth
