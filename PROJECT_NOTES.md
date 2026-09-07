@@ -5,14 +5,14 @@ Screen-TL adalah aplikasi Android untuk menerjemahkan teks yang terlihat di laya
 
 ## Status Saat Ini
 - Screen Capture: berhasil membuat screenshot; cakupan frame terhadap aplikasi target masih perlu diverifikasi lebih luas.
-- Floating button: berhasil tampil dan dapat digeser; toggle menu baru diperbaiki dan perlu uji ulang.
-- Floating menu: root dinamis; submenu sekarang seharusnya bisa dibuka dan ditutup dengan tap ulang FAB.
+- Floating button: berhasil tampil dan dapat digeser; toggle menu perlu uji ulang.
 - Permission overlay dan MediaProjection: berhasil.
 - OCR: ML Kit menghasilkan line + bounding box; metadata layout tambahan sudah diterapkan.
 - Google ML Kit Translation: pipeline Manual TL sudah berjalan sampai History dan overlay pada pengujian sebelumnya.
 - Translation History: persisten dan service-safe.
-- Manual overlay: coordinate space diperbaiki; sizing/fitting terbaru menghindari text stretch; local blur + bounded translation box baru diimplementasikan, belum diuji ulang pengguna.
-- Hapus Overlay: tersedia di menu dan hanya ditampilkan ketika overlay Manual TL aktif; belum diuji ulang pengguna.
+- Manual overlay: coordinate space diperbaiki; sizing/fitting terbaru menghindari text stretch.
+- Eksperimen blur + bounding box sekarang berada di branch `experiment/blur-bounding-box`; belum boleh dianggap siap merge ke `main` sebelum build dan device test.
+- Hapus Overlay: tersedia di menu; perlu uji ulang pengguna.
 - Real-Time TL: dasar terbukti bekerja, flicker ditunda.
 
 ## Masalah Aktif
@@ -30,16 +30,45 @@ Perbaikan coordinate space:
 - Android P+ memakai `LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS`;
 - renderer memakai scale langsung tanpa centering/aspect compensation.
 
-Iterasi sizing terbaru berdasarkan screenshot pengguna:
-- kalibrasi font diturunkan agar tidak terlalu besar;
-- fitting memakai `textSize` uniform, bukan `textScaleX`;
-- translation bounding box boleh melebar sampai sekitar 155% lebar source;
-- box tetap berpusat terhadap source line dan dibatasi tepi layar;
-- local blur patch dari screenshot dipakai untuk menyembunyikan glyph source sambil mempertahankan tekstur background.
+### Eksperimen Branch — 2026-09-07: Left-Anchored Box + Color Blur
+Masukan pengguna terbaru:
+1. translation harus rata kiri seperti source;
+2. jika translation lebih panjang, box hanya boleh melebar ke kanan;
+3. jangan memperlebar ke kiri dan jangan menggeser titik awal translation;
+4. blur sebelumnya terlihat seperti tulisan bertumpuk karena menyalin screenshot mentah;
+5. pengguna meminta pendekatan yang mengambil warna di belakang tulisan lalu membuat efek blur-like;
+6. eksperimen harus berada di branch terpisah agar `main` tetap aman dan mudah rollback.
 
-True backdrop blur tingkat-window belum digunakan. Implementasi saat ini adalah local source-patch blur.
+Branch eksperimen:
+`experiment/blur-bounding-box`
 
-Status: **kode baru belum diverifikasi build/perangkat setelah iterasi blur + bounding box**.
+Implementasi branch:
+- `TranslationOverlayView.kt` mengunci `left = source left`;
+- lebar box minimum mengikuti source dan maksimum sekitar `1.55x` source width;
+- ruang tambahan hanya tumbuh ke kanan;
+- font tetap uniform (`textScaleX = 1.0`), lalu `textSize` diperkecil bila perlu;
+- background tidak lagi menyalin raw screenshot patch;
+- `TextLayoutAnalyzer.kt` hanya mengambil warna dari area sekitar OCR box;
+- overlay merekonstruksi field warna penuh-opaque dengan gradient lembut dari warna lokal tersebut, sehingga source glyph tidak digambar ulang;
+- pendekatan ini disebut **color-reconstructed blur-like background**, bukan true backdrop blur.
+
+Alasan pendekatan:
+- menyalin screenshot mentah di belakang translation terbukti menghasilkan source glyph yang tetap terlihat/bertumpuk;
+- hanya menggunakan warna sekitar menghilangkan glyph source sepenuhnya;
+- gradient lembut memberi transisi visual yang lebih dekat ke blur daripada kotak warna datar.
+
+### Rollback / Membatalkan Eksperimen Blur
+Jangan merge branch eksperimen ke `main` sebelum hasil perangkat dinyatakan bagus.
+
+Jika blur ingin dibatalkan:
+1. biarkan `main` pada commit sebelum eksperimen blur/bounding-box;
+2. jangan cherry-pick commit branch eksperimen;
+3. untuk kembali ke pendekatan sebelum permintaan blur, gunakan renderer mask/background-color lama dan hapus ketergantungan pada `blurredPatch` di pipeline OCR/overlay;
+4. branch `experiment/blur-bounding-box` boleh dipertahankan sebagai arsip eksperimen, sehingga kode eksperimen tidak hilang.
+
+Catatan: branch eksperimen dibuat dari head `main` setelah perbaikan build `20e1a2fc472f7d7d67d955429c6de093c7b7c14e` dan dokumentasi `7ea890445bd64d7de999b342f44647ae7e0af7a4`.
+
+Status: **eksperimen belum diverifikasi build/perangkat**.
 
 ### 3. Floating Menu / Capture Menu
 Uji sebelumnya menunjukkan submenu Screen-TL ikut masuk ke frame Manual TL.
@@ -60,106 +89,35 @@ Perbaikan:
 
 Status: **perlu uji ulang perangkat**.
 
-## Iterasi Manual TL — 2026-09-07
-
-### Masukan pengguna
-Screenshot terbaru menunjukkan ukuran translation sudah lebih dekat, tetapi masih perlu sedikit dirapikan. Pengguna meminta:
-1. blur pada area source;
-2. bounding box translation yang boleh lebih panjang dari source tetapi tidak terlalu panjang;
-3. bentuk font tidak boleh stretch/tertarik.
-
-### Implementasi
-`TextLayoutAnalyzer.kt`:
-- tetap menghitung glyph height dan source font size;
-- membuat local blurred patch dengan downsample/upscale ringan;
-- mempertahankan background sampling.
-
-`OcrManager.kt`:
-- `DetectedText` sekarang membawa `blurredPatch`;
-- patch dibuat sebelum bitmap capture utama dilepas.
-
-`TranslationOverlayView.kt`:
-- translation box minimum mengikuti source box;
-- box dapat melebar hingga ~155% source width;
-- box tetap centered pada source dan clamped ke layar;
-- font dikecilkan secara uniform bila translation lebih panjang;
-- `textScaleX` dipertahankan `1.0`;
-- local blurred patch digambar sebagai background replacement, dengan tint background tipis;
-- patch direcycle saat overlay diganti/dihapus.
-
-`FloatingService.kt`:
-- ownership patch dipindahkan dari `DetectedText` ke `TranslationOverlayItem` hanya saat translation berhasil;
-- failure path membersihkan patch yang belum ditransfer;
-- overlay tetap non-touchable dan coordinate-space fix dipertahankan.
-
-### Commit
-- `TextLayoutAnalyzer.kt`: `0478c9f26cc42d74c26ea458d829b50afc6945e9`
-- `OcrManager.kt`: `a5f01044b1c76bbb8ca315cd54c634b19f02671d`
-- `TranslationOverlayView.kt`: `5f26382a76eb919a61103a73c3eb57c1d9e8119a`
-- `FloatingService.kt`: `5973de45f8dc6a77bd6cdfe930427348e53d8915`
-
-**Status:** implementasi selesai di repository, tetapi belum boleh dianggap stabil sebelum build Actions dan device test.
-
-## Real-Time TL
-Real-Time dasar sudah terbukti pada perangkat pengguna.
-
-Bug aktif: overlay berkedip karena window dihapus sebelum setiap capture. Perbaikan flicker sengaja ditunda sampai Manual TL stabil.
-
-## Perubahan Sebelumnya — 2026-09-07
-
-### Manual Overlay Coordinate Fix
-`FloatingService.kt` membuat window overlay pada ukuran pixel frame capture dan menggunakan `FLAG_LAYOUT_IN_SCREEN`, tanpa fit-insets pada Android R+. Tujuannya agar koordinat OCR `(x,y)` dipetakan 1:1 ke layar, bukan ke area window yang lebih kecil/ber-inset.
-
-Commit: `5ebb3bfda9a6474e0de027159ce7b2c6725923a`.
-
-### Manual Overlay Mask
-`TranslationOverlayView.kt`:
-- padding mask sedikit diperbesar;
-- mask memakai warna background lokal dengan alpha 245;
-- sudut dibuat sedikit rounded.
-
-Commit: `e6b0bd2fc03a2e55e3335dc2a4121c6155bd6e98`.
-
-### Floating Menu dan Capture Timing
-`FloatingService.kt`:
-- tap ulang FAB menutup submenu;
-- drag menutup submenu setelah gerakan terdeteksi;
-- Manual TL menunggu 200 ms setelah menu ditutup sebelum `captureOnce()`.
-
-Commit yang sama: `5ebb3bfda9a6474e0de027159ce7b2c6725923a`.
-
 ## Build Verification
-Build terakhir yang benar-benar diverifikasi sukses sebelum iterasi blur adalah GitHub Actions run `34112476978` (run #88):
-- head commit: `0c0c9d4a6d1e4d27e4b0f5124c391598a19c027e`
-- `assembleDebug`: sukses
-- artifact: `ScreenTranslator-APK`
-- artifact ID: `10014932485`
-- SHA-256: `9f5d8e06f18dd1fecaa6c559594978f25c3efe7424158cbf160bb82b80df9458`
+Build blur/bounding-box sebelumnya gagal pada `FloatingService.kt:528` karena `DetectedText.blurredPatch` didefinisikan sebagai `val` tetapi ownership transfer mencoba mengosongkannya. Perbaikan dilakukan dengan mengubah property menjadi `var` pada commit `20e1a2fc472f7d7d67d955429c6de093c7b7c14e`.
 
-Artifact tersebut belum mencakup iterasi blur/bounding-box terbaru.
+Build terakhir yang benar-benar diverifikasi sukses sebelum iterasi blur adalah GitHub Actions run `34112476978` (run #88), commit `0c0c9d4a6d1e4d27e4b0f5124c391598a19c027e`.
 
-## Build Automation
-`.github/workflows/build.yml` menjalankan build otomatis setiap push ke `main` dengan Gradle 8.2 melalui `gradle/actions/setup-gradle@v6`; `workflow_dispatch` tetap tersedia.
+Commit branch eksperimen saat ini terakhir:
+- `TranslationOverlayView.kt`: `c645aa13e488ef58270918975c86c929dbdab416`
+- `TextLayoutAnalyzer.kt`: `225cf4b69235a5032cd550e40172db0ede101623`
+
+**Jangan menyatakan build eksperimen lulus sebelum GitHub Actions selesai dan device test dilakukan.**
 
 ## Prioritas Berikutnya
-1. Pastikan GitHub Actions build baru untuk commit terbaru berhasil.
-2. Uji APK pada perangkat.
-3. Pastikan koordinat overlay tidak lagi membuat layar terlihat mengecil.
-4. Pastikan source tertutup oleh blur/mask.
-5. Pastikan translation box boleh sedikit lebih panjang tetapi tidak berlebihan.
-6. Pastikan font tidak stretch.
-7. Uji background flat dan background kompleks.
-8. Pastikan menu Screen-TL tidak ikut masuk frame Manual TL.
-9. Pastikan tap kedua FAB menutup menu.
-10. Uji Hapus Overlay.
-11. Jika Manual TL stabil, lanjutkan mode Manual TL baru.
-12. Real-Time flicker tetap ditunda.
+1. Build branch `experiment/blur-bounding-box`.
+2. Jika build gagal, perbaiki branch saja; jangan ubah `main` untuk eksperimen visual.
+3. Uji APK pada perangkat.
+4. Pastikan translation dimulai tepat di kiri source.
+5. Pastikan box hanya melebar ke kanan dan tidak lebih dari batas yang ditentukan.
+6. Pastikan source glyph tidak terlihat/bertumpuk.
+7. Nilai apakah color-reconstructed blur-like background terlihat natural pada background flat dan kompleks.
+8. Jika eksperimen bagus, baru pertimbangkan merge/cherry-pick ke `main`.
+9. Jika eksperimen buruk, rollback cukup dengan tidak merge branch dan kembali memakai implementasi sebelum blur.
+10. Real-Time flicker tetap ditunda.
 
 ## Aturan untuk AI Berikutnya
 - Baca `README.md`, `AI_README.md`, dan `AI_HANDOFF.md` sebelum perubahan besar.
-- Periksa file aktual di branch `main`.
+- Periksa file aktual di branch yang sedang dikerjakan.
 - Manual TL adalah prioritas.
 - Jangan mengerjakan Real-Time flicker kecuali diminta.
-- Setiap perubahan bermakna harus dicatat.
-- Fitur yang belum diuji perangkat diberi status `[~]` / belum teruji.
+- Perubahan eksperimen visual harus dilakukan di branch terpisah bila diminta pengguna.
+- Setiap perubahan bermakna harus dicatat beserta alasan dan rollback path.
+- Fitur yang belum diuji perangkat diberi status belum teruji.
 - Jangan mengklaim build lulus tanpa hasil build nyata.
