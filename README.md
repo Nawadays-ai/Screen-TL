@@ -7,23 +7,36 @@ Android screen translator yang dirancang untuk menerjemahkan teks dari aplikasi 
 | Bagian | Status | Catatan |
 |---|---|---|
 | Floating button | ✅ | Tampil dan dapat digeser di atas aplikasi lain |
+| Floating menu | 🧪 | Menu sekarang disiapkan untuk berpindah sisi mengikuti posisi floating button; belum diuji pengguna pada build terbaru |
 | Overlay permission | ✅ | Berjalan |
 | MediaProjection | ⚠️ | Screenshot berhasil dibuat; Android 14+ diarahkan ke full display agar aplikasi target dapat ikut tertangkap |
 | OCR | ⚠️ | Sudah menghasilkan teks, tetapi cakupan seluruh aplikasi target masih perlu diverifikasi |
 | Manual Translation | ✅ | Capture → OCR → translation → History → overlay sudah berhasil pada pengujian perangkat terbaru |
 | Translation History | ✅ | Persisten; service-safe dan write menggunakan `commit()` |
-| Translation overlay | 🧪 | Visual overlay baru dirapikan; patch belum diuji pengguna |
-| Real-Time Translation | ⚠️ | Loop capture → OCR → translation → overlay sudah bekerja pada perangkat, tetapi overlay masih berkedip |
+| Translation overlay | 🧪 | Patch terbaru membuat area OCR tertutup penuh dan menyesuaikan ukuran teks; belum diuji pengguna |
+| Hapus Overlay Manual | 🧪 | Tombol tambahan muncul saat Manual TL menghasilkan overlay dan hilang setelah overlay dihapus; belum diuji pengguna |
+| Real-Time Translation | ⏸️ | Dasar sudah bekerja pada perangkat, tetapi pengembangan Real-Time ditunda sementara karena flicker |
+
+## Fokus Saat Ini
+
+Fokus sementara adalah **Manual TL**. Real-Time sengaja ditunda sampai desain/fungsi Manual TL berikutnya selesai.
+
+Target overlay Manual TL:
+- hasil terjemahan langsung menimpa area teks sumber;
+- teks sumber tidak boleh terlihat di bawah hasil terjemahan;
+- ukuran teks mengikuti ukuran bounding box teks asli;
+- jika terjemahan lebih panjang, ukuran teks disesuaikan agar tetap muat;
+- tersedia tombol `Hapus Overlay` setelah Manual TL menghasilkan overlay;
+- tombol `Hapus Overlay` hilang ketika overlay tidak ada.
 
 ## Masalah Aktif
 
 1. Frame MediaProjection masih perlu dipastikan konsisten menangkap aplikasi target dan bukan hanya jam/status bar atau UI Screen-TL.
 2. Overlay masih perlu verifikasi posisi terhadap koordinat layar pada berbagai perangkat/orientasi.
-3. Real-Time tahap pertama memproses frame secara berkala dan berurutan. Change detection dan cache translation belum dibuat.
-4. Real-Time tidak menulis setiap frame ke History agar History tidak dipenuhi duplikasi.
-5. APK update masih bentrok setelah `versionCode` dinaikkan. Dugaan utama tetap perbedaan signing key antara APK lama dan APK GitHub Actions.
-6. **Bug Real-Time terbaru:** pengguna mengonfirmasi Real-Time berhasil menerjemahkan, tetapi overlay berkedip. Polanya: overlay muncul sekitar 2 detik, hilang, muncul lagi; kadang jeda hilang mencapai sekitar 4 detik.
-7. **Patch visual overlay terbaru belum diuji pengguna.**
+3. Patch visual terbaru belum diuji pengguna.
+4. Menu floating adaptif dan tombol Hapus Overlay belum diuji pengguna pada build terbaru.
+5. Real-Time masih berkedip karena implementasi saat ini melepas overlay setiap siklus. Perbaikannya ditunda.
+6. APK update masih bentrok setelah `versionCode` dinaikkan. Dugaan utama tetap perbedaan signing key antara APK lama dan APK GitHub Actions.
 
 ## Roadmap
 
@@ -43,96 +56,74 @@ Android screen translator yang dirancang untuk menerjemahkan teks dari aplikasi 
 - [x] Implementasi overlay teks berdasarkan `DetectedText.boundingBox`.
 - [x] Tampilkan hasil terjemahan pada area teks yang terdeteksi.
 - [x] Overlay dibuat `NOT_TOUCHABLE` agar tidak mengganggu interaksi aplikasi target.
+- [x] Overlay Manual TL menutup area sumber dengan background penuh.
+- [x] Ukuran teks adaptif berdasarkan bounding box dan panjang terjemahan.
+- [x] Tombol `Hapus Overlay` disiapkan untuk hasil Manual TL.
+- [~] Verifikasi visual pada perangkat.
 - [ ] Verifikasi posisi overlay terhadap koordinat layar pada berbagai perangkat/orientasi.
-- [ ] Sediakan hide/clear overlay yang mudah digunakan.
-- [~] Rapikan visual overlay — patch sudah dibuat, belum diuji pengguna.
 
-### Milestone 3 — Real-Time Translation
+### Milestone 3 — Floating Menu
+
+- [x] Menu Real-Time / Manual TL / Keluar.
+- [x] Menu disiapkan untuk muncul di sisi yang sesuai dengan posisi floating button.
+- [x] Tombol Hapus Overlay disembunyikan ketika tidak ada overlay Manual TL.
+- [~] Verifikasi menu pada beberapa posisi floating button.
+
+### Milestone 4 — Real-Time Translation
 
 - [x] Capture frame berkala tahap pertama.
 - [x] OCR dan translation loop dasar.
 - [x] Update overlay dari hasil frame terbaru.
 - [x] Stop Real-Time tanpa menghentikan service.
-- [~] **Hilangkan kedipan overlay pada loop Real-Time.**
+- [~] Hilangkan kedipan overlay pada loop Real-Time — **ditunda**.
 - [ ] Verifikasi kestabilan Real-Time setelah perbaikan kedipan.
 - [ ] Deteksi perubahan layar agar frame yang tidak berubah tidak diproses ulang.
 - [ ] Cache translation agar teks yang sama tidak diterjemahkan berulang.
 - [ ] Optimalkan interval dan beban CPU/baterai berdasarkan hasil device test.
 - [ ] Update overlay hanya untuk teks baru/berubah.
 
-### Milestone 4 — Translation Engine
+### Milestone 5 — Translation Engine
 
 - [x] Google ML Kit on-device sebagai baseline.
 - [ ] DeepL API.
 - [ ] Gemini AI.
 - [ ] Pemilihan engine yang benar-benar terhubung ke pipeline Manual/Realtime.
 
+### Milestone 6 — Manual TL Modes
+
+- [ ] Tambahkan mode Manual TL baru setelah overlay dan floating menu saat ini stabil.
+- [ ] Dokumentasikan perilaku mode baru sebelum implementasi.
+
 ## Catatan Perubahan
 
 Setiap perubahan kode yang bermakna wajib dicatat di sini atau pada `PROJECT_NOTES.md`, termasuk tanggal, file, perubahan, alasan, hasil build/test, dan masalah yang masih tersisa.
 
-### 2026-09-07 — Perapian visual Translation Overlay
+### 2026-09-07 — Manual Overlay + Floating Menu
 
-- `TranslationOverlayView.kt` diperbarui tanpa mengubah pipeline capture/OCR/translation.
-- Background overlay dibuat lebih ringan dan sudutnya lebih halus.
-- Padding teks dibuat konsisten.
-- Ukuran teks sekarang adaptif terhadap tinggi/lebar bounding box dengan batas minimum/maksimum.
-- Translation panjang diperkecil agar lebih aman masuk ke box dan dipotong dengan ellipsis jika tetap terlalu panjang.
-- Teks dipusatkan secara vertikal dan di-clipping agar tidak meluber ke luar bounding box.
-- `FLAG_NOT_TOUCHABLE` dan perilaku overlay tetap dipertahankan.
-- **Status:** kode sudah diterapkan pada commit `55233dfe6a1d2d200bae92ed970944418d914ccd`, tetapi belum diuji pengguna.
-- UI belum dianggap final.
+- `TranslationOverlayView.kt` diperbarui agar background translation menutup penuh bounding box OCR sehingga teks sumber tidak terlihat di bawahnya.
+- Ukuran teks sekarang dimulai dari ukuran berdasarkan tinggi teks sumber dan hanya mengecil jika terjemahan terlalu lebar.
+- `layout_floating_widget.xml` menambahkan tombol `Hapus Overlay` yang default-nya tersembunyi.
+- `FloatingService.kt` diperbarui untuk menampilkan tombol Hapus Overlay setelah Manual TL berhasil dan menyembunyikannya ketika overlay dihapus.
+- Floating menu sekarang diposisikan relatif terhadap posisi floating button: sisi kiri membuka menu ke kanan, sisi kanan membuka menu ke kiri; ketika floating button berada dekat bawah layar, menu ditempatkan di atas.
+- Perubahan FloatingService mempertahankan pipeline Manual TL dan tidak memperbaiki Real-Time flicker pada tahap ini.
+- **Status:** perubahan kode belum diuji pengguna pada build terbaru.
+- Commit kode overlay: `1116dc9a2f5f197b10bdf2113ad88366c8bdb2dd`.
+- Commit layout: `7197c6b01541727a4c0b9e106b05afefb0dc16d8`.
+- Commit FloatingService: `f77d90e10a12372524e3d5e5997213ba198ea8c5`.
+- **Build:** belum diklaim berhasil; workflow build manual tidak dapat dipicu dari tool GitHub yang tersedia pada sesi ini.
 
 ### 2026-09-07 — Verifikasi Real-Time oleh pengguna
 
 - Pengguna berhasil menjalankan Real-Time TL pada perangkat.
 - Capture → OCR → translation → overlay terbukti berjalan berulang.
-- Masalah yang ditemukan: overlay berkedip/hilang di antara siklus. Overlay biasanya terlihat sekitar 2 detik, lalu hilang, kemudian muncul kembali; pada beberapa siklus jeda dapat sekitar 4 detik.
-- Penyebab yang dicurigai adalah loop sebelumnya melepas (`removeTranslationOverlay()`) overlay sebelum setiap capture, sehingga ada periode ketika WindowManager memang tidak memiliki overlay.
-- Perbaikan kedipan belum diterapkan.
-- **Build/test status:** Real-Time dasar sudah diuji pengguna dan berhasil secara fungsi; patch visual overlay terbaru belum diuji.
+- Masalah yang ditemukan: overlay berkedip/hilang di antara siklus.
+- Perbaikan flicker ditunda agar fokus kembali ke Manual TL.
 
 ### 2026-09-06 — Perbaikan timeout Manual TL
 
 - `FloatingService.kt`: timeout menunggu frame dipangkas dari 10 detik menjadi 3 detik.
 - `FloatingService.kt`: menambahkan watchdog pemrosesan terpisah selama 30 detik setelah frame berhasil diterima.
 - `FloatingService.kt`: jika OCR atau translation callback tidak kembali, floating button dipulihkan dan pending state dibersihkan.
-- `FloatingService.kt`: menambahkan status Toast setelah frame diterima agar tahap capture dan OCR dapat dibedakan saat pengujian.
-- Tujuan: timeout 3 detik hanya untuk kegagalan capture, bukan untuk download model translation yang memang dapat memerlukan waktu lebih lama.
-
-### 2026-09-06 — Perbaikan Manual TL yang macet setelah download model
-
-- `FloatingService.kt`: floating button tidak lagi disembunyikan sebelum frame capture diterima.
-- `ScreenCaptureManager.kt`: menambahkan pembatalan pending capture agar request yang menggantung dapat dihentikan dengan aman.
-- `FloatingService.kt`: menambahkan timeout capture dan guard agar Manual TL kedua tidak berjalan ketika proses pertama masih pending.
-- `FloatingService.kt`: menambahkan penanganan exception di sekitar OCR, translation preparation, translation invocation, dan penyimpanan/display hasil agar kegagalan tidak diam-diam meninggalkan service dalam keadaan macet.
-
-### 2026-09-06 — Perbaikan versi APK untuk update
-
-- `app/build.gradle.kts`: `versionCode` dinaikkan dari `1` menjadi `2`.
-- `versionName` dinaikkan dari `1.0` menjadi `1.1`.
-- Setelah pengujian terbaru masih terjadi konflik update, kemungkinan masalah sekarang adalah signing key APK lama vs APK GitHub Actions, bukan lagi `versionCode`.
-
-### 2026-09-06 — Implementasi translation overlay pertama
-
-- Menambahkan `TranslationOverlayView.kt` untuk menggambar hasil terjemahan di atas layar berdasarkan bounding box hasil OCR.
-- Mengubah `FloatingService.kt` agar setiap hasil translation menyimpan teks terjemahan + koordinat OCR.
-- Overlay menggunakan `TYPE_APPLICATION_OVERLAY` dan `FLAG_NOT_TOUCHABLE`, sehingga hasil dapat berada di atas aplikasi target tanpa mengambil alih sentuhan pengguna.
-- Setelah pengujian menemukan regresi capture, overlay lama sekarang dilepas sepenuhnya sebelum Manual TL capture berikutnya.
-
-### 2026-09-06 — Diagnosis pipeline dan perbaikan batas OCR
-
-- Pengujian perangkat menghasilkan History dengan tiga hasil: `23:04`, `Status`, dan `Succese`.
-- Dari inspeksi kode ditemukan `detectedTexts.take(3)` di `FloatingService`, sehingga manual translation memang sengaja hanya memproses maksimal tiga baris.
-- Menghapus pembatas tersebut agar semua baris yang ditemukan OCR diproses pada Manual TL.
-- MediaProjection Android 14+ tetap menggunakan konfigurasi default display/full display.
-
-### 2026-09-06 — Diagnosis pipeline
-
-- Menambahkan logging bertag pada screen capture, OCR, service, dan history.
-- Memastikan `TranslationHistory` dapat diinisialisasi langsung dari `FloatingService`.
-- Mengubah penyimpanan history menjadi `commit()` agar keberhasilan penulisan dapat diverifikasi langsung.
-- Mengubah permintaan MediaProjection pada Android 14+ untuk meminta konfigurasi default display/full display.
 
 ## Dokumen Pengembangan
 
