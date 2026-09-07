@@ -25,6 +25,7 @@ class TranslationOverlayView(context: Context) : View(context) {
 
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
+        alpha = 255
     }
 
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -95,9 +96,6 @@ class TranslationOverlayView(context: Context) : View(context) {
 
             canvas.save()
             canvas.clipRect(box)
-
-            // Draw only reconstructed colors. No screenshot bitmap is copied,
-            // so the source glyph cannot remain visible underneath.
             drawReconstructedBlur(canvas, box, renderItem.item, radius)
 
             textPaint.textScaleX = 1f
@@ -131,19 +129,19 @@ class TranslationOverlayView(context: Context) : View(context) {
         radius: Float
     ) {
         val base = item.backgroundColor
-        val light = adjustColor(base, 1.10f)
-        val dark = adjustColor(base, 0.90f)
+        // Slightly stronger tonal falloff makes the reconstructed field feel
+        // softer/deeper without copying any source pixels.
+        val light = adjustColor(base, 1.14f)
+        val dark = adjustColor(base, 0.86f)
 
-        // A fully opaque, soft color field replaces the source. The subtle
-        // gradients imitate a blurred local background without reproducing
-        // any raw pixels or source characters.
+        backgroundPaint.alpha = 255
         backgroundPaint.shader = LinearGradient(
             box.left,
             box.top,
             box.right,
             box.bottom,
-            intArrayOf(light, base, dark),
-            floatArrayOf(0f, 0.52f, 1f),
+            intArrayOf(light, base, base, base, dark),
+            floatArrayOf(0f, 0.28f, 0.50f, 0.72f, 1f),
             Shader.TileMode.CLAMP
         )
         canvas.drawRoundRect(box, radius, radius, backgroundPaint)
@@ -196,8 +194,8 @@ class TranslationOverlayView(context: Context) : View(context) {
             .coerceAtLeast(baseWidth)
         val boxWidth = desiredWidth.coerceAtMost(maxBoxWidth)
 
-        // IMPORTANT: keep the source LEFT edge fixed. Extra translation room
-        // is allowed only on the right; the box never shifts left of source.
+        // Keep the source LEFT edge fixed. Extra translation room is allowed
+        // only on the right; the box never shifts left of the source.
         val left = baseLeft
         val right = (left + boxWidth).coerceAtMost(width.toFloat())
 
