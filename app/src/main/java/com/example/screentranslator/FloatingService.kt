@@ -18,6 +18,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
@@ -34,6 +35,8 @@ class FloatingService : Service() {
         private const val MANUAL_PROCESS_TIMEOUT_MS = 30_000L
         private const val REALTIME_INTERVAL_MS = 1_200L
         private const val REALTIME_CAPTURE_DELAY_MS = 150L
+        private const val MENU_GAP_DP = 8
+        private const val FAB_SIZE_DP = 48
     }
 
     private lateinit var windowManager: WindowManager
@@ -42,6 +45,7 @@ class FloatingService : Service() {
     private lateinit var layoutSubMenu: LinearLayout
     private lateinit var btnRealtime: Button
     private lateinit var btnManual: Button
+    private lateinit var btnRemoveOverlay: Button
     private lateinit var btnExit: Button
 
     private var params: WindowManager.LayoutParams? = null
@@ -52,6 +56,9 @@ class FloatingService : Service() {
     private var realtimeGeneration = 0
     private var isSubMenuVisible = false
     private var manualTranslationPending = false
+    private var manualOverlayVisible = false
+    private var fabScreenX = 100
+    private var fabScreenY = 300
     private val mainHandler = Handler()
     private var manualCaptureTimeout: Runnable? = null
     private var manualProcessTimeout: Runnable? = null
@@ -65,22 +72,14 @@ class FloatingService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    override fun onStartCommand(
-        intent: Intent?,
-        flags: Int,
-        startId: Int
-    ): Int {
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         TranslationHistory.initialize(applicationContext)
-
         sourceLanguage = intent?.getStringExtra("EXTRA_SOURCE_LANG") ?: "Jepang"
         targetLanguage = intent?.getStringExtra("EXTRA_TARGET_LANG") ?: "Indonesia"
 
         Log.i(TAG, "Service started: $sourceLanguage -> $targetLanguage")
 
-        if (ocrManager == null) {
-            ocrManager = OcrManager(sourceLanguage)
-        }
-
+        if (ocrManager == null) ocrManager = OcrManager(sourceLanguage)
         if (translationManager == null) {
             translationManager = TranslationManager(sourceLanguage, targetLanguage)
         }
@@ -88,15 +87,11 @@ class FloatingService : Service() {
         if (screenCaptureManager == null) {
             val resultCode = ScreenCaptureSession.resultCode
             val projectionData = ScreenCaptureSession.data
-
             if (projectionData != null) {
                 screenCaptureManager = ScreenCaptureManager(this, resultCode, projectionData)
                 val started = screenCaptureManager?.start() == true
                 Log.i(TAG, "Screen capture manager start result=$started")
-
-                if (!started) {
-                    showToast("Screen Capture gagal dimulai")
-                }
+                if (!started) showToast("Screen Capture gagal dimulai")
             } else {
                 Log.e(TAG, "Screen capture data is missing")
                 showToast("Data Rekam Layar tidak ditemukan")
@@ -112,7 +107,6 @@ class FloatingService : Service() {
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         val themedContext = ContextThemeWrapper(this, R.style.ScreenTranslatorOverlayTheme)
-
         floatingView = LayoutInflater.from(themedContext)
             .inflate(R.layout.layout_floating_widget, null)
 
@@ -120,6 +114,7 @@ class FloatingService : Service() {
         layoutSubMenu = floatingView.findViewById(R.id.layoutSubMenu)
         btnRealtime = floatingView.findViewById(R.id.btnRealtime)
         btnManual = floatingView.findViewById(R.id.btnManual)
+        btnRemoveOverlay = floatingView.findViewById(R.id.btnRemoveOverlay)
         btnExit = floatingView.findViewById(R.id.btnExit)
 
         setupWindowManagerParams()
@@ -136,15 +131,15 @@ class FloatingService : Service() {
         }
 
         params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            dp(FAB_SIZE_DP),
+            dp(FAB_SIZE_DP),
             layoutFlag,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 100
-            y = 300
+            x = fabScreenX
+            y = fabScreenY
         }
     }
 
@@ -159,6 +154,7 @@ class FloatingService : Service() {
             override fun onTouch(v: View, event: MotionEvent): Boolean {
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
+                        if (isSubMenuVisible) hideSubMenu()
                         initialX = params!!.x
                         initialY = params!!.y
                         initialTouchX = event.rawX
@@ -170,8 +166,10 @@ class FloatingService : Service() {
                         val dx = (event.rawX - initialTouchX).toInt()
                         val dy = (event.rawY - initialTouchY).toInt()
                         if (kotlin.math.abs(dx) > 10 || kotlin.math.abs(dy) > 10) isClick = false
-                        params!!.x = initialX + dx
-                        params!!.y = initialY + dy
+                        params!!.x = (initialX + dx).coerceAtLeast(0)
+                        params!!.y = (initialY + dy).coerceAtLeast(0)
+                        fabScreenX = params!!.x
+                        fabScreenY = params!!.y
                         windowManager.updateViewLayout(floatingView, params)
                         return true
                     }
@@ -189,19 +187,122 @@ class FloatingService : Service() {
         if (isRealtimeActive) {
             stopRealtimeTranslation()
         } else {
-            isSubMenuVisible = !isSubMenuVisible
-            layoutSubMenu.visibility = if (isSubMenuVisible) View.VISIBLE else View.GONE
+            if (isSubMenuVisible) hideSubMenu() else showSubMenu()
         }
     }
 
     private fun setupClickListeners() {
         btnRealtime.setOnClickListener { startRealtimeTranslation() }
         btnManual.setOnClickListener {
-            layoutSubMenu.visibility = View.GONE
-            isSubMenuVisible = false
+            hideSubMenu()
             triggerManualTranslation()
         }
+        btnRemoveOverlay.setOnClickListener {
+            removeTranslationOverlay()
+            showToast("Overlay dihapus")
+        }
         btnExit.setOnClickListener { stopSelf() }
+    }
+
+    private fun showSubMenu() {
+        if (isRealtimeActive) return
+        isSubMenuVisible = true
+        layoutSubMenu.visibility = View.VISIBLE
+        positionSubMenu()
+    }
+
+    private fun hideSubMenu() {
+        isSubMenuVisible = false
+        layoutSubMenu.visibility = View.GONE
+        params?.let {
+            it.width = dp(FAB_SIZE_DP)
+            it.height = dp(FAB_SIZE_DP)
+            it.x = fabScreenX
+            it.y = fabScreenY
+            setFabLayoutGravity()
+            windowManager.updateViewLayout(floatingView, it)
+        }
+    }
+
+    private fun positionSubMenu() {
+        layoutSubMenu.post {
+            if (!isSubMenuVisible || !::floatingView.isInitialized) return@post
+
+            val menuWidth = layoutSubMenu.measuredWidth.coerceAtLeast(dp(156))
+            val menuHeight = layoutSubMenu.measuredHeight
+            val gap = dp(MENU_GAP_DP)
+            val fabSize = dp(FAB_SIZE_DP)
+            val screenWidth = resources.displayMetrics.widthPixels
+            val screenHeight = resources.displayMetrics.heightPixels
+
+            val onLeft = fabScreenX < screenWidth / 2
+            val nearBottom = fabScreenY > screenHeight / 2
+            val placeRight = onLeft
+            val placeAbove = nearBottom
+
+            val rootWidth = if (placeRight || !placeRight) {
+                menuWidth + gap + fabSize
+            } else {
+                menuWidth + gap + fabSize
+            }
+            val rootHeight = if (placeAbove) {
+                menuHeight + gap + fabSize
+            } else {
+                maxOf(menuHeight, fabSize)
+            }
+
+            val rootX = if (placeRight) {
+                fabScreenX.coerceAtLeast(0)
+            } else {
+                (fabScreenX - menuWidth - gap).coerceAtLeast(0)
+            }
+
+            val rootY = if (placeAbove) {
+                (fabScreenY - menuHeight - gap).coerceAtLeast(0)
+            } else {
+                fabScreenY.coerceAtLeast(0)
+            }
+
+            params?.let {
+                it.width = rootWidth
+                it.height = rootHeight
+                it.x = rootX
+                it.y = rootY
+                windowManager.updateViewLayout(floatingView, it)
+            }
+
+            val menuParams = layoutSubMenu.layoutParams as FrameLayout.LayoutParams
+            val fabParams = fabMain.layoutParams as FrameLayout.LayoutParams
+            menuParams.leftMargin = 0
+            menuParams.topMargin = 0
+            fabParams.leftMargin = 0
+            fabParams.topMargin = 0
+
+            menuParams.gravity = when {
+                placeAbove && placeRight -> Gravity.START or Gravity.BOTTOM
+                placeAbove && !placeRight -> Gravity.END or Gravity.BOTTOM
+                !placeAbove && placeRight -> Gravity.START or Gravity.CENTER_VERTICAL
+                else -> Gravity.END or Gravity.CENTER_VERTICAL
+            }
+
+            fabParams.gravity = when {
+                placeAbove && placeRight -> Gravity.END or Gravity.BOTTOM
+                placeAbove && !placeRight -> Gravity.END or Gravity.BOTTOM
+                !placeAbove && placeRight -> Gravity.START or Gravity.CENTER_VERTICAL
+                else -> Gravity.END or Gravity.CENTER_VERTICAL
+            }
+
+            layoutSubMenu.layoutParams = menuParams
+            fabMain.layoutParams = fabParams
+        }
+    }
+
+    private fun setFabLayoutGravity() {
+        val fabParams = fabMain.layoutParams as FrameLayout.LayoutParams
+        fabParams.gravity = Gravity.CENTER
+        fabParams.leftMargin = 0
+        fabParams.topMargin = 0
+        fabMain.layoutParams = fabParams
     }
 
     private fun startRealtimeTranslation() {
@@ -213,13 +314,11 @@ class FloatingService : Service() {
         val manager = screenCaptureManager
         val ocr = ocrManager
         val translator = translationManager
-
         if (manager == null || ocr == null || translator == null) {
             Log.e(TAG, "Realtime start aborted: manager not ready")
             showToast("Real-Time belum siap")
             return
         }
-
         if (isRealtimeActive) return
 
         isRealtimeActive = true
@@ -227,9 +326,7 @@ class FloatingService : Service() {
         isRealtimePreparing = true
         realtimeGeneration++
         val generation = realtimeGeneration
-
-        layoutSubMenu.visibility = View.GONE
-        isSubMenuVisible = false
+        hideSubMenu()
         fabMain.setImageResource(android.R.drawable.ic_media_pause)
         removeTranslationOverlay()
         showToast("Real-Time Translator Aktif")
@@ -280,7 +377,6 @@ class FloatingService : Service() {
             stopRealtimeTranslation("Screen Capture tidak siap")
             return
         }
-
         if (!isRealtimeActive || generation != realtimeGeneration) return
 
         isRealtimeBusy = true
@@ -294,7 +390,6 @@ class FloatingService : Service() {
             Log.i(TAG, "Realtime frame captured: ${bitmap.width}x${bitmap.height}")
             val ocr = ocrManager
             val translator = translationManager
-
             if (ocr == null || translator == null) {
                 bitmap.recycle()
                 isRealtimeBusy = false
@@ -311,7 +406,6 @@ class FloatingService : Service() {
                             isRealtimeBusy = false
                             return@recognize
                         }
-
                         Log.i(TAG, "Realtime OCR completed: ${detectedTexts.size} lines")
                         if (detectedTexts.isEmpty()) {
                             bitmap.recycle()
@@ -319,23 +413,21 @@ class FloatingService : Service() {
                             scheduleRealtimeCapture(generation, REALTIME_INTERVAL_MS)
                             return@recognize
                         }
-
                         translateRealtimeTexts(
-                            translator = translator,
-                            texts = detectedTexts,
-                            index = 0,
-                            overlayResults = mutableListOf(),
-                            sourceWidth = bitmap.width,
-                            sourceHeight = bitmap.height,
-                            generation = generation,
-                            onComplete = {
-                                bitmap.recycle()
-                                isRealtimeBusy = false
-                                if (isRealtimeActive && generation == realtimeGeneration) {
-                                    scheduleRealtimeCapture(generation, REALTIME_INTERVAL_MS)
-                                }
+                            translator,
+                            detectedTexts,
+                            0,
+                            mutableListOf(),
+                            bitmap.width,
+                            bitmap.height,
+                            generation
+                        ) {
+                            bitmap.recycle()
+                            isRealtimeBusy = false
+                            if (isRealtimeActive && generation == realtimeGeneration) {
+                                scheduleRealtimeCapture(generation, REALTIME_INTERVAL_MS)
                             }
-                        )
+                        }
                     },
                     onFailure = { exception ->
                         Log.e(TAG, "Realtime OCR failed", exception)
@@ -379,7 +471,6 @@ class FloatingService : Service() {
             onComplete()
             return
         }
-
         if (index >= texts.size) {
             if (overlayResults.isNotEmpty()) {
                 showTranslationOverlay(overlayResults, sourceWidth, sourceHeight)
@@ -397,11 +488,11 @@ class FloatingService : Service() {
                     if (isRealtimeActive && generation == realtimeGeneration) {
                         overlayResults.add(
                             TranslationOverlayItem(
-                                translatedText = translatedText,
-                                left = currentText.left,
-                                top = currentText.top,
-                                right = currentText.right,
-                                bottom = currentText.bottom
+                                translatedText,
+                                currentText.left,
+                                currentText.top,
+                                currentText.right,
+                                currentText.bottom
                             )
                         )
                     }
@@ -447,7 +538,6 @@ class FloatingService : Service() {
 
     private fun stopRealtimeTranslation(message: String = "Real-Time Translator Diberhentikan") {
         if (!isRealtimeActive && realtimeLoop == null) return
-
         isRealtimeActive = false
         isRealtimePreparing = false
         isRealtimeBusy = false
@@ -469,21 +559,18 @@ class FloatingService : Service() {
 
         Log.i(TAG, "Manual translation requested")
         showToast("Mengambil gambar layar...")
-
         val manager = screenCaptureManager
         if (manager == null) {
             Log.e(TAG, "Manual translation aborted: capture manager is null")
             showToast("Screen Capture belum siap")
             return
         }
-
         val ocr = ocrManager
         if (ocr == null) {
             Log.e(TAG, "Manual translation aborted: OCR manager is null")
             showToast("OCR belum siap")
             return
         }
-
         val translator = translationManager
         if (translator == null) {
             Log.e(TAG, "Manual translation aborted: translator is null")
@@ -506,42 +593,45 @@ class FloatingService : Service() {
                     onSuccess = { detectedTexts ->
                         Log.i(TAG, "OCR callback: ${detectedTexts.size} lines")
                         if (detectedTexts.isEmpty()) {
+                            bitmap.recycle()
                             finishManualTranslation("OCR tidak menemukan teks")
                             return@recognize
                         }
-
                         try {
-                            Log.i(TAG, "Preparing translation model")
                             translator.prepare(
                                 onReady = {
-                                    val textsToTranslate = detectedTexts
-                                    Log.i(TAG, "Translation model ready; translating ${textsToTranslate.size} lines")
+                                    Log.i(TAG, "Translation model ready; translating ${detectedTexts.size} lines")
                                     translateTexts(
-                                        translator = translator,
-                                        texts = textsToTranslate,
-                                        index = 0,
-                                        results = mutableListOf(),
-                                        overlayResults = mutableListOf(),
-                                        sourceWidth = bitmap.width,
-                                        sourceHeight = bitmap.height
+                                        translator,
+                                        detectedTexts,
+                                        0,
+                                        mutableListOf(),
+                                        mutableListOf(),
+                                        bitmap.width,
+                                        bitmap.height
                                     )
+                                    bitmap.recycle()
                                 },
                                 onFailure = { exception ->
+                                    bitmap.recycle()
                                     Log.e(TAG, "Translation model preparation failed", exception)
                                     finishManualTranslation("Model terjemahan gagal: ${exception.message ?: "Unknown error"}")
                                 }
                             )
                         } catch (exception: Exception) {
+                            bitmap.recycle()
                             Log.e(TAG, "Translation preparation threw an exception", exception)
                             finishManualTranslation("Gagal menyiapkan translator: ${exception.message ?: "Unknown error"}")
                         }
                     },
                     onFailure = { exception ->
+                        bitmap.recycle()
                         Log.e(TAG, "OCR callback failed", exception)
                         finishManualTranslation("OCR gagal: ${exception.message ?: "Unknown error"}")
                     }
                 )
             } catch (exception: Exception) {
+                bitmap.recycle()
                 Log.e(TAG, "OCR invocation threw an exception", exception)
                 finishManualTranslation("Proses OCR gagal: ${exception.message ?: "Unknown error"}")
             }
@@ -572,12 +662,7 @@ class FloatingService : Service() {
                 Log.e(TAG, "Manual OCR/translation processing timed out after ${MANUAL_PROCESS_TIMEOUT_MS}ms")
                 manager.cancelPendingCapture()
                 manualTranslationPending = false
-                runOnMainThread {
-                    if (::floatingView.isInitialized) {
-                        floatingView.visibility = View.VISIBLE
-                    }
-                    showToast("Proses terjemahan terlalu lama. Coba Manual TL lagi.")
-                }
+                showToast("Proses terjemahan terlalu lama. Coba Manual TL lagi.")
             }
         }
         mainHandler.postDelayed(manualProcessTimeout!!, MANUAL_PROCESS_TIMEOUT_MS)
@@ -605,6 +690,8 @@ class FloatingService : Service() {
             try {
                 TranslationHistory.add(historyEntry)
                 showTranslationOverlay(overlayResults, sourceWidth, sourceHeight)
+                manualOverlayVisible = true
+                updateRemoveOverlayButton()
                 finishManualTranslation("Terjemahan selesai: ${results.size} baris. Overlay ditampilkan.")
             } catch (exception: Exception) {
                 Log.e(TAG, "Failed to save/display translation result", exception)
@@ -615,7 +702,6 @@ class FloatingService : Service() {
 
         val currentText = texts[index]
         Log.i(TAG, "Translating [${index + 1}/${texts.size}]: '${currentText.text}'")
-
         try {
             translator.translate(
                 currentText.text,
@@ -624,11 +710,11 @@ class FloatingService : Service() {
                     results.add("${currentText.text}\n→ $translatedText")
                     overlayResults.add(
                         TranslationOverlayItem(
-                            translatedText = translatedText,
-                            left = currentText.left,
-                            top = currentText.top,
-                            right = currentText.right,
-                            bottom = currentText.bottom
+                            translatedText,
+                            currentText.left,
+                            currentText.top,
+                            currentText.right,
+                            currentText.bottom
                         )
                     )
                     translateTexts(
@@ -675,10 +761,15 @@ class FloatingService : Service() {
         cancelManualProcessTimeout()
         manualTranslationPending = false
         runOnMainThread {
-            if (::floatingView.isInitialized) {
-                floatingView.visibility = View.VISIBLE
-            }
+            if (::floatingView.isInitialized) floatingView.visibility = View.VISIBLE
             showToast(message)
+        }
+    }
+
+    private fun updateRemoveOverlayButton() {
+        runOnMainThread {
+            if (!::btnRemoveOverlay.isInitialized) return@runOnMainThread
+            btnRemoveOverlay.visibility = if (manualOverlayVisible) View.VISIBLE else View.GONE
         }
     }
 
@@ -719,7 +810,6 @@ class FloatingService : Service() {
                 ).apply {
                     gravity = Gravity.TOP or Gravity.START
                 }
-
                 windowManager.addView(it, overlayParams)
             }
 
@@ -738,6 +828,8 @@ class FloatingService : Service() {
                 }
             }
             overlayView = null
+            manualOverlayVisible = false
+            updateRemoveOverlayButton()
         }
     }
 
@@ -751,10 +843,12 @@ class FloatingService : Service() {
         Handler(mainLooper).post(action)
     }
 
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density).toInt().coerceAtLeast(1)
+
     private fun startForegroundServiceNotification() {
         val channelId = "screen_translator_channel"
         val channelName = "Screen Translator"
-
         val notificationManager =
             getSystemService(NOTIFICATION_SERVICE) as NotificationManager
 
