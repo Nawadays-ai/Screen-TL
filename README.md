@@ -7,13 +7,13 @@ Android screen translator yang dirancang untuk menerjemahkan teks dari aplikasi 
 | Bagian | Status | Catatan |
 |---|---|---|
 | Floating button | ✅ | Tampil dan dapat digeser di atas aplikasi lain |
-| Floating menu | 🧪 | Menu sekarang memakai container dinamis dan penempatan relatif terhadap FAB; belum diuji pengguna |
+| Floating menu | 🧪 | Container dan penempatan menu sekarang dinamis mengikuti FAB; belum diuji pengguna |
 | Overlay permission | ✅ | Berjalan |
 | MediaProjection | ⚠️ | Screenshot berhasil dibuat; Android 14+ diarahkan ke full display |
-| OCR | ⚠️ | ML Kit menghasilkan line + bounding box; layout analyzer baru ditambahkan dan perlu diuji |
+| OCR | ⚠️ | ML Kit menghasilkan line + bounding box; layout analyzer baru diterapkan |
 | Manual Translation | ✅ | Capture → OCR → translation → History → overlay sudah pernah berhasil |
 | Translation History | ✅ | Persisten; service-safe dan write menggunakan `commit()` |
-| Translation overlay | 🧪 | Sekarang font-aware dan background-aware; perlu verifikasi perangkat |
+| Translation overlay | 🧪 | Font-aware + background-aware; belum diuji pengguna |
 | Hapus Overlay Manual | 🧪 | Tombol disiapkan setelah overlay Manual TL aktif |
 | Real-Time Translation | ⏸️ | Dasar bekerja, tetapi flicker ditunda |
 
@@ -32,7 +32,7 @@ Target overlay Manual TL:
 
 ## Arsitektur Overlay Baru
 
-Alur Manual TL sekarang dirancang sebagai:
+Alur Manual TL:
 
 `Screen Capture → ML Kit OCR → TextLayoutAnalyzer → Translation → Overlay Renderer`
 
@@ -45,14 +45,14 @@ Alur Manual TL sekarang dirancang sebagai:
 - memakai koordinat mask tersebut;
 - memakai ukuran font source sebagai ukuran awal;
 - mengecilkan font bila translation terlalu lebar/tinggi;
-- menggambar background hasil sampling agar source tertutup tanpa selalu memakai kotak hitam;
+- menggambar background hasil sampling;
 - tetap `FLAG_NOT_TOUCHABLE`.
 
 ## Masalah Aktif
 
 1. Frame MediaProjection masih perlu dipastikan konsisten menangkap aplikasi target.
 2. Posisi overlay perlu diverifikasi terhadap koordinat layar pada perangkat pengguna.
-3. Sistem background sampling belum diuji pada background kompleks seperti gambar/gradient.
+3. Background sampling belum diuji pada gambar/gradient kompleks.
 4. Floating menu adaptif dan `Hapus Overlay` belum diuji pada perangkat.
 5. Real-Time masih berkedip dan sengaja ditunda.
 6. APK update masih bentrok; dugaan utama tetap perbedaan signing key.
@@ -108,34 +108,35 @@ Alur Manual TL sekarang dirancang sebagai:
 
 ## Perubahan Terbaru — 2026-09-07
 
-### Font-aware + background-aware Manual Overlay
+### TextLayoutAnalyzer
 File baru: `TextLayoutAnalyzer.kt`.
 
-Perubahan:
-- mengestimasi tinggi font dari element OCR;
-- memperluas area mask agar glyph source tertutup;
-- mengambil warna background dari sekitar source.
+- estimasi font dari element OCR;
+- mask source diperluas;
+- background source diambil dari sampling lokal.
 
-`OcrManager.kt` sekarang membawa metadata layout tersebut sampai hasil translation.
+Commit: `e0ec39f595f2bb66e09d46d5be469fd7ae6deaab`.
 
-`TranslationOverlayView.kt` menggunakan metadata itu untuk merender translation dengan ukuran yang mengikuti source.
+### OCR + Overlay Renderer
+`OcrManager.kt` membawa metadata layout sampai `TranslationOverlayView.kt`, yang kemudian merender translation menggunakan ukuran font source dan background sampling.
 
-Commit utama:
-- `e0ec39f595f2bb66e09d46d5be469fd7ae6deaab`
-- `28dab21490b73a5c94848971259c9096207cca43`
-- `513e43e1f8c190903f2d1dc539028f0fed9e3e28`
+Commit OCR: `28dab21490b73a5c94848971259c9096207cca43`.
+Commit renderer: `513e43e1f8c190903f2d1dc539028f0fed9e3e28`.
 
-### Floating Menu
-`layout_floating_widget.xml` dan `FloatingService.kt` direvisi agar root WindowManager benar-benar menyesuaikan ukuran menu dan posisi FAB.
+### Floating Menu + Hapus Overlay
+`layout_floating_widget.xml` dan `FloatingService.kt` direvisi agar root WindowManager menyesuaikan menu dan FAB.
 
-Commit:
-- `e59a2b3adef5ff5391dcda1a12df8f0d6d19ec5e`
-- `e85ef0b3d7e5881c282dc98e77108d554e389f8f`
+Commit layout: `e59a2b3adef5ff5391dcda1a12df8f0d6d19ec5e`.
+Commit service: `9dbf8663eaab80f9844c64824964b3e5769e0156`.
 
-**Status semua perubahan di atas: belum diuji pengguna dan belum boleh dianggap stabil.**
+**Status:** seluruh perubahan kode di atas belum diuji pengguna.
 
-## Catatan Build
-Tool GitHub pada sesi ini tidak menyediakan aksi untuk memulai `workflow_dispatch`. Jangan mengklaim build baru berhasil sampai ada hasil workflow yang nyata.
+### Build Automation
+`.github/workflows/build.yml` sekarang menjalankan `assembleDebug` otomatis setiap push ke `main`, dan `workflow_dispatch` tetap tersedia.
+
+Commit: `39b09bffdd878650ade24824872d85daaf08d824`.
+
+Status verifikasi CI pada sesi ini: **belum tersedia**. Tidak ada status check yang dikembalikan untuk commit tersebut, jadi build tidak boleh dianggap lulus.
 
 ## Dokumen Pengembangan
 - `PROJECT_NOTES.md` — catatan teknis dan riwayat kerja.
