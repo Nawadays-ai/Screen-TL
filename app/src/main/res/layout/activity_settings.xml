@@ -75,29 +75,38 @@
             android:textColor="#BBBBBB"
             android:textSize="12sp" />
         <LinearLayout
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
             android:orientation="horizontal">
             <Button
                 android:id="@+id/btnGeminiCheck"
-                android:layout_width="0dp"
+                android:layout_width="wrap_content"
                 android:layout_height="44dp"
-                android:layout_weight="1"
+                android:minWidth="0dp"
+                android:paddingStart="20dp"
+                android:paddingEnd="20dp"
                 android:text="Cek"
                 android:textAllCaps="false" />
             <Button
                 android:id="@+id/btnGeminiUse"
-                android:layout_width="0dp"
+                android:layout_width="wrap_content"
                 android:layout_height="44dp"
-                android:layout_weight="1"
                 android:layout_marginStart="8dp"
+                android:minWidth="0dp"
+                android:paddingStart="20dp"
+                android:paddingEnd="20dp"
                 android:text="Gunakan"
                 android:textAllCaps="false" />
         </LinearLayout>
         <Button
             android:id="@+id/btnGeminiDisable"
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="44dp"
+            android:layout_marginTop="4dp"
+            android:minWidth="0dp"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
             android:text="Nonaktifkan"
             android:textAllCaps="false" />
 
@@ -127,29 +136,38 @@
             android:textColor="#BBBBBB"
             android:textSize="12sp" />
         <LinearLayout
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
             android:orientation="horizontal">
             <Button
                 android:id="@+id/btnDeepLCheck"
-                android:layout_width="0dp"
+                android:layout_width="wrap_content"
                 android:layout_height="44dp"
-                android:layout_weight="1"
+                android:minWidth="0dp"
+                android:paddingStart="20dp"
+                android:paddingEnd="20dp"
                 android:text="Cek"
                 android:textAllCaps="false" />
             <Button
                 android:id="@+id/btnDeepLUse"
-                android:layout_width="0dp"
+                android:layout_width="wrap_content"
                 android:layout_height="44dp"
-                android:layout_weight="1"
                 android:layout_marginStart="8dp"
+                android:minWidth="0dp"
+                android:paddingStart="20dp"
+                android:paddingEnd="20dp"
                 android:text="Gunakan"
                 android:textAllCaps="false" />
         </LinearLayout>
         <Button
             android:id="@+id/btnDeepLDisable"
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="44dp"
+            android:layout_marginTop="4dp"
+            android:minWidth="0dp"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
             android:text="Nonaktifkan"
             android:textAllCaps="false" />
 
