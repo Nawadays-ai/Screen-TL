@@ -51,7 +51,7 @@ Window overlay Manual TL sekarang dibuat pada ukuran pixel yang sama dengan fram
 2. Visual overlay perlu diverifikasi ulang pada perangkat setelah perbaikan coordinate space.
 3. Background sampling belum diuji pada gambar/gradient kompleks.
 4. Floating menu adaptif dan `Hapus Overlay` perlu diuji ulang pada perangkat.
-5. True backdrop blur belum dipakai; mask saat ini dibuat lebih solid. Android `RenderEffect` biasa memburamkan konten view sendiri, bukan otomatis backdrop aplikasi di belakang overlay. citeturn1search10turn0search0
+5. True backdrop blur belum dipakai; mask saat ini dibuat lebih solid. Blur backdrop nyata memerlukan pendekatan rendering/capture yang berbeda dan sengaja belum ditambahkan pada tahap ini.
 6. Real-Time masih berkedip dan sengaja ditunda.
 7. APK update masih bentrok; dugaan utama tetap perbedaan signing key.
 
