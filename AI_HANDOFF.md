@@ -41,39 +41,29 @@ The old renderer used a tight OCR line box and fixed black background. The new d
 `Capture → ML Kit OCR → TextLayoutAnalyzer → Translation → TranslationOverlayView`
 
 ### TextLayoutAnalyzer
-File: `TextLayoutAnalyzer.kt`
-
-For every OCR line:
-1. read the line bounding box;
-2. read element bounding boxes and use their median height to estimate source glyph/font size;
-3. expand the line box with a font-aware margin to create a replacement mask;
-4. sample pixels immediately around that mask;
-5. use the median RGB values as the local replacement background.
+For every OCR line it:
+1. reads the line bounding box;
+2. reads element bounding boxes and uses their median height to estimate source glyph/font size;
+3. expands the line box with a font-aware margin;
+4. samples pixels around that mask;
+5. uses median RGB values as the local replacement background.
 
 Commit: `e0ec39f595f2bb66e09d46d5be469fd7ae6deaab`.
 
 ### OcrManager
-`DetectedText` now carries:
-- expanded mask coordinates;
-- `sourceTextSizePx`;
-- `backgroundColor`.
+`DetectedText` carries expanded mask coordinates, `sourceTextSizePx`, and `backgroundColor`.
 
 Commit: `28dab21490b73a5c94848971259c9096207cca43`.
 
 ### TranslationOverlayView
-The renderer:
-- paints the sampled background over the source region;
-- starts translation font size from the measured source size;
-- reduces size only when the translation is too wide/high;
-- clips text to the replacement mask;
-- stays `FLAG_NOT_TOUCHABLE`.
+The renderer paints the sampled background, starts from source font size, reduces size when needed, clips to the replacement mask, and remains `FLAG_NOT_TOUCHABLE`.
 
 Commit: `513e43e1f8c190903f2d1dc539028f0fed9e3e28`.
 
 **Status: not yet device-tested.**
 
 ## Floating Menu
-The previous XML used a 48dp root plus `translationX`, which caused stacking/positioning problems.
+Previous XML used a 48dp root plus `translationX`, which caused stacking problems.
 
 New design:
 - root uses `wrap_content`;
@@ -82,7 +72,7 @@ New design:
 - FAB left → menu right;
 - FAB right → menu left;
 - FAB lower half → menu above;
-- bottom-right → menu is above and to the left of the FAB.
+- bottom-right → menu above-left relative to FAB.
 
 Layout commit: `e59a2b3adef5ff5391dcda1a12df8f0d6d19ec5e`.
 Service commit: `9dbf8663eaab80f9844c64824964b3e5769e0156`.
@@ -90,27 +80,26 @@ Service commit: `9dbf8663eaab80f9844c64824964b3e5769e0156`.
 **Status: not yet device-tested.**
 
 ## Hapus Overlay
-Required:
+Required and implemented:
 - hidden when no Manual overlay exists;
-- visible after Manual TL creates a non-empty overlay;
+- visible after Manual TL creates an overlay;
 - removes only the overlay;
-- service remains alive;
-- History remains intact;
-- button becomes hidden again.
+- service and History remain alive;
+- button hides again after removal.
 
-Implemented in `FloatingService.kt`; **not yet device-tested**.
+**Status: not yet device-tested.**
 
 ## Manual TL Flow
 1. Remove previous overlay.
 2. Keep FAB usable.
 3. Request one MediaProjection frame.
-4. Capture timeout is 3 seconds.
+4. Capture timeout: 3 seconds.
 5. OCR all returned lines.
 6. Analyze font/mask/background metadata.
 7. Prepare ML Kit translation model.
 8. Translate every detected line sequentially.
 9. Save History.
-10. Render non-touchable overlay using layout metadata.
+10. Render non-touchable overlay.
 11. Expose Hapus Overlay.
 
 ## Real-Time — Paused
@@ -119,13 +108,13 @@ Basic Real-Time works but flickers because the current loop removes the overlay 
 ## APK Update / Build
 `versionCode = 2`, `versionName = "1.1"`.
 
-The APK update conflict is still suspected to be signing-key mismatch between debug APKs.
+APK update conflict is still suspected to be signing-key mismatch between debug APKs.
 
-Build automation has now been changed so `.github/workflows/build.yml` runs `assembleDebug` automatically on every push to `main`; `workflow_dispatch` remains available.
+Build automation now runs `assembleDebug` automatically on every push to `main`; `workflow_dispatch` remains available. The workflow was changed to use `gradle/actions/setup-gradle@v6` with Gradle 8.2 because the previous wrapper-generation step stalled.
 
-CI commit: `39b09bffdd878650ade24824872d85daaf08d824`.
+Final build workflow commit: `cedddc4ce6bf26f2e1bf7a36ad609cca568854cd`.
 
-At the time of this handoff, no status check has been returned for the latest commit, so **do not claim the build passed yet**.
+**Build verified:** GitHub Actions completed `assembleDebug` successfully and uploaded artifact `ScreenTranslator-APK` (artifact ID `10014166550`) for commit `cedddc4ce6bf26f2e1bf7a36ad609cca568854cd`.
 
 ## Diagnostic Logging
 Tags:
@@ -145,7 +134,7 @@ Tags:
 - Never claim a build passed without a real build result.
 
 ## Next Test
-Use the APK produced by the automatic build and verify:
+Use the built APK and verify:
 1. Manual TL still completes and History is saved.
 2. Source is fully covered by the replacement mask.
 3. Background looks like the original surrounding area rather than a fixed black box.
