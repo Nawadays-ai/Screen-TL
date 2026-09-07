@@ -63,7 +63,7 @@ object TextLayoutAnalyzer {
         }
         for (y in top until bottom step stepY) {
             if (left > 1) samples.add(bitmap.getPixel(left - 1, y.coerceIn(0, bitmap.height - 1)))
-            if (right < bitmap.width) samples.add(bitmap.getPixel(right, y.coerceIn(0, bitmap.width - 1)))
+            if (right < bitmap.width) samples.add(bitmap.getPixel(right, y.coerceIn(0, bitmap.height - 1)))
         }
         if (samples.isEmpty()) return Color.BLACK
         val sortedR = samples.map { Color.red(it) }.sorted()
