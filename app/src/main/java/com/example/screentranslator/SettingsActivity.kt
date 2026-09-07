@@ -67,7 +67,7 @@ class SettingsActivity : AppCompatActivity() {
         val key = etGeminiKey.text.toString().trim(); if (key.isBlank()) return
         tvGeminiStatus.text = "Memeriksa API..."
         GeminiTranslationProvider(key, "Inggris", "Indonesia").prepare(
-            onReady = { runOnUiThread { ApiSettings.setGeminiVerified(true); ApiSettings.setGeminiKey(key); renderGemini("API dapat digunakan") } },
+            onReady = { runOnUiThread { ApiSettings.setGeminiKey(key); ApiSettings.setGeminiVerified(true); renderGemini("API dapat digunakan") } },
             onFailure = { error -> runOnUiThread { ApiSettings.setGeminiVerified(false); ApiSettings.setGeminiEnabled(false); tvGeminiStatus.text = "API tidak dapat digunakan${error.message?.let { ": $it" } ?: ""}"; renderGeminiButtonsOnly() } }
         )
     }
@@ -76,7 +76,7 @@ class SettingsActivity : AppCompatActivity() {
         val key = etDeepLKey.text.toString().trim(); if (key.isBlank()) return
         tvDeepLStatus.text = "Memeriksa API..."
         DeepLTranslationProvider(key, "Inggris", "Indonesia").prepare(
-            onReady = { runOnUiThread { ApiSettings.setDeepLVerified(true); ApiSettings.setDeepLKey(key); renderDeepL("API dapat digunakan") } },
+            onReady = { runOnUiThread { ApiSettings.setDeepLKey(key); ApiSettings.setDeepLVerified(true); renderDeepL("API dapat digunakan") } },
             onFailure = { error -> runOnUiThread { ApiSettings.setDeepLVerified(false); ApiSettings.setDeepLEnabled(false); tvDeepLStatus.text = "API tidak dapat digunakan${error.message?.let { ": $it" } ?: ""}"; renderDeepLButtonsOnly() } }
         )
     }
