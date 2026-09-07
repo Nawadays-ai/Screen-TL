@@ -33,7 +33,7 @@ Solusi baru:
 Status: **belum diuji pengguna**.
 
 ### 3. Floating Menu / Hapus Overlay
-XML sebelumnya memiliki root 48dp dengan submenu yang dipaksa keluar memakai `translationX`. Itu membuat menu dapat bertumpuk dengan FAB dan tombol Hapus Overlay tidak terlihat seperti yang diharapkan.
+XML sebelumnya memiliki root 48dp dengan submenu yang dipaksa keluar memakai `translationX`, sehingga menu dapat bertumpuk dengan FAB.
 
 Sekarang:
 - root `FrameLayout` memakai `wrap_content`;
@@ -62,7 +62,7 @@ File baru: `TextLayoutAnalyzer.kt`.
 Commit: `e0ec39f595f2bb66e09d46d5be469fd7ae6deaab`.
 
 ### OcrManager + TranslationOverlayView
-`DetectedText` sekarang membawa ukuran font source dan background color. Renderer memakai metadata tersebut untuk menggambar translation.
+`DetectedText` membawa ukuran font source dan background color. Renderer memakai metadata tersebut untuk menggambar translation.
 
 Commit OCR: `28dab21490b73a5c94848971259c9096207cca43`.
 Commit renderer: `513e43e1f8c190903f2d1dc539028f0fed9e3e28`.
@@ -75,15 +75,16 @@ Commit service: `9dbf8663eaab80f9844c64824964b3e5769e0156`.
 
 Status seluruh perubahan kode: **belum diuji pengguna**.
 
-### Build Automation
-`.github/workflows/build.yml` sekarang menjalankan `assembleDebug` otomatis setiap push ke `main`, sementara `workflow_dispatch` tetap tersedia.
+### Build Automation + Verification
+`.github/workflows/build.yml` sekarang menjalankan build otomatis setiap push ke `main` dengan Gradle 8.2 melalui `gradle/actions/setup-gradle@v6`; `workflow_dispatch` tetap tersedia.
 
-Commit: `39b09bffdd878650ade24824872d85daaf08d824`.
+Commit workflow final: `cedddc4ce6bf26f2e1bf7a36ad609cca568854cd`.
 
-Status CI pada sesi ini: belum ada status check yang dikembalikan, sehingga build belum boleh dianggap lulus.
+**Build terbaru berhasil:** `assembleDebug` selesai dengan sukses dan artifact `ScreenTranslator-APK` berhasil dibuat untuk commit tersebut.
+Artifact ID: `10014166550`.
 
 ## Prioritas Berikutnya
-1. Tunggu/cek hasil build otomatis.
+1. Uji APK hasil build pada perangkat.
 2. Uji Manual TL pada source kecil, sedang, dan besar.
 3. Pastikan source tertutup dan background menyatu dengan area sekitar.
 4. Pastikan ukuran translation mengikuti source dan mengecil jika diperlukan.
