@@ -9,15 +9,16 @@ import android.graphics.Typeface
 import android.view.View
 
 /**
- * Draws translated text over the captured screen without consuming touch events.
- * Coordinates are based on the same display-sized bitmap used by OCR.
+ * Draws translated text directly over the OCR source region without consuming
+ * touch events. The source region is fully covered so the original text is not
+ * visible underneath the translation.
  */
 class TranslationOverlayView(context: Context) : View(context) {
 
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         color = Color.BLACK
-        alpha = 190
+        alpha = 255
     }
 
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -28,12 +29,11 @@ class TranslationOverlayView(context: Context) : View(context) {
         isSubpixelText = true
     }
 
-    // Keep the overlay visually separated from the OCR box without making it bulky.
     private val horizontalPadding = 6f
     private val verticalPadding = 4f
-    private val cornerRadius = 7f
-    private val minTextSize = 9f
-    private val maxTextSize = 30f
+    private val cornerRadius = 5f
+    private val minTextSize = 10f
+    private val maxTextSize = 42f
 
     private var items: List<TranslationOverlayItem> = emptyList()
     private var sourceWidth = 1
@@ -76,26 +76,20 @@ class TranslationOverlayView(context: Context) : View(context) {
             val maxTextWidth = (boxWidth - horizontalPadding * 2f).coerceAtLeast(1f)
             val maxTextHeight = (boxHeight - verticalPadding * 2f).coerceAtLeast(1f)
 
-            // OCR boxes are normally single text lines. Fit the translation into the
-            // original box instead of letting a large font spill into neighboring UI.
+            // Start from a font size based on the original OCR box. Only shrink it
+            // when the translated text is wider than the original source region.
             val textSize = findTextSize(item.translatedText, maxTextWidth, maxTextHeight)
             textPaint.textSize = textSize
-
             val fittedText = fitText(item.translatedText, maxTextWidth)
             if (fittedText.isEmpty()) return@forEach
 
-            // A small expansion keeps short text from touching the rounded background,
-            // while clamping to the screen prevents the overlay from drawing off-screen.
-            val background = RectF(
-                left,
-                top,
-                right,
-                bottom
-            )
+            // Opaque background completely replaces the original source pixels.
+            val background = RectF(left, top, right, bottom)
             canvas.drawRoundRect(background, cornerRadius, cornerRadius, backgroundPaint)
 
             val metrics = textPaint.fontMetrics
-            val baseline = top + (boxHeight - (metrics.descent - metrics.ascent)) / 2f - metrics.ascent
+            val textHeight = metrics.descent - metrics.ascent
+            val baseline = top + (boxHeight - textHeight) / 2f - metrics.ascent
 
             canvas.save()
             canvas.clipRect(left, top, right, bottom)
@@ -110,13 +104,15 @@ class TranslationOverlayView(context: Context) : View(context) {
     }
 
     private fun findTextSize(text: String, maxWidth: Float, maxHeight: Float): Float {
-        val boxBasedSize = (maxHeight * 0.58f).coerceIn(minTextSize, maxTextSize)
-        textPaint.textSize = boxBasedSize
+        val baseSize = (maxHeight * 0.62f).coerceIn(minTextSize, maxTextSize)
+        textPaint.textSize = baseSize
 
-        if (textPaint.measureText(text) <= maxWidth) return boxBasedSize
+        val measuredWidth = textPaint.measureText(text)
+        if (measuredWidth <= maxWidth) return baseSize
 
-        val widthBasedSize = (boxBasedSize * maxWidth / textPaint.measureText(text))
-            .coerceIn(minTextSize, boxBasedSize)
+        // Scale the font down only as much as necessary for longer translations.
+        val widthBasedSize = (baseSize * maxWidth / measuredWidth)
+            .coerceIn(minTextSize, baseSize)
         textPaint.textSize = widthBasedSize
         return widthBasedSize
     }
