@@ -13,7 +13,7 @@ Android screen translator yang dirancang untuk menerjemahkan teks dari aplikasi 
 | OCR | ⚠️ | ML Kit menghasilkan line + bounding box; layout analyzer diterapkan |
 | Manual Translation | ✅ | Capture → OCR → translation → History → overlay sudah pernah berhasil |
 | Translation History | ✅ | Persisten; service-safe dan write menggunakan `commit()` |
-| Translation overlay | 🧪 | Coordinate space diperbaiki agar overlay tidak terlihat seperti layar diperkecil; mask lebih solid |
+| Translation overlay | 🧪 | Coordinate space diperbaiki; sizing dan fitting diperbarui; blur lokal + bounding box terkontrol baru ditambahkan dan belum diuji perangkat |
 | Hapus Overlay Manual | 🧪 | Tombol disiapkan setelah overlay Manual TL aktif |
 | Real-Time Translation | ⏸️ | Dasar bekerja, tetapi flicker ditunda |
 
@@ -29,6 +29,9 @@ Target overlay Manual TL:
 - warna background area diambil dari screenshot di sekitar teks, bukan selalu hitam;
 - mask dibuat lebih solid agar source benar-benar tertutup;
 - jika translation lebih panjang, font dikecilkan hanya seperlunya;
+- bounding box translation boleh melebar dari source tetapi dibatasi sekitar 155% lebar source;
+- bentuk huruf tetap proporsional, tanpa `textScaleX`;
+- blur lokal ringan digunakan untuk menyamarkan glyph source sambil mempertahankan tekstur background;
 - tersedia tombol `Hapus Overlay` setelah Manual TL menghasilkan overlay.
 
 ## Arsitektur Overlay
@@ -39,19 +42,20 @@ Alur Manual TL:
 `TextLayoutAnalyzer.kt` mengubah line OCR menjadi data layout:
 - koordinat mask yang diperluas;
 - estimasi tinggi font dari bounding box element OCR;
-- estimasi warna background dari piksel di sekitar area teks.
+- estimasi warna background dari piksel di sekitar area teks;
+- patch blur lokal berukuran kecil untuk menutup source tanpa kotak warna datar.
 
-`TranslationOverlayView.kt` memakai data tersebut untuk menutup source dan merender translation dengan ukuran yang mengikuti source.
+`TranslationOverlayView.kt` memakai data tersebut untuk menutup source dan merender translation dengan ukuran yang mengikuti source. Bounding box hasil translation dapat melebar secara terbatas agar kalimat Indonesia yang lebih panjang tidak langsung dipaksa terlalu kecil.
 
 Window overlay Manual TL sekarang dibuat pada ukuran pixel yang sama dengan frame capture dan menggunakan `FLAG_LAYOUT_IN_SCREEN`, sehingga koordinat OCR tidak lagi dipaksa mengikuti ukuran area window yang berbeda.
 
 ## Masalah Aktif
 
 1. Frame MediaProjection masih perlu dipastikan konsisten menangkap aplikasi target.
-2. Visual overlay perlu diverifikasi ulang pada perangkat setelah perbaikan coordinate space.
-3. Background sampling belum diuji pada gambar/gradient kompleks.
+2. Visual overlay perlu diverifikasi ulang pada perangkat setelah perubahan sizing terbaru.
+3. Blur lokal dan bounding box 155% belum diuji pada background kompleks/gradient.
 4. Floating menu adaptif dan `Hapus Overlay` perlu diuji ulang pada perangkat.
-5. True backdrop blur belum dipakai; mask saat ini dibuat lebih solid. Blur backdrop nyata memerlukan pendekatan rendering/capture yang berbeda dan sengaja belum ditambahkan pada tahap ini.
+5. True backdrop blur tingkat-window belum digunakan; implementasi sekarang adalah **local source-patch blur**, bukan blur langsung terhadap window aplikasi di bawah.
 6. Real-Time masih berkedip dan sengaja ditunda.
 7. APK update masih bentrok; dugaan utama tetap perbedaan signing key.
 
@@ -77,6 +81,9 @@ Window overlay Manual TL sekarang dibuat pada ukuran pixel yang sama dengan fram
 - [x] Ukuran translation mengikuti source dan menyusut jika perlu.
 - [x] Window overlay memakai pixel size frame capture + `FLAG_LAYOUT_IN_SCREEN`.
 - [x] Mask background dibuat lebih solid.
+- [x] Bounding box translation boleh melebar secara terkontrol.
+- [x] Font fitting memakai ukuran uniform tanpa `textScaleX`.
+- [~] Local blur replacement patch — implementasi baru, belum diuji perangkat.
 - [~] Verifikasi visual pada perangkat.
 - [ ] Verifikasi berbagai resolusi/orientasi.
 - [ ] Penanganan background kompleks.
@@ -122,10 +129,27 @@ Perbaikan:
 Commit overlay: `e6b0bd2fc03a2e55e3335dc2a4121c6155bd6e98`.
 Commit service: `5ebb3bfda9a6474e0de027159ce7b2c6725923a`.
 
-**Status:** kode berhasil di-build oleh GitHub Actions, tetapi belum diuji ulang di perangkat pengguna dan belum boleh dianggap stabil secara visual.
+### Iterasi berikutnya — sizing, bounding box, dan blur — 2026-09-07
+Berdasarkan screenshot pengguna berikutnya, ukuran overlay sudah lebih dekat ke target tetapi masih perlu sedikit dirapikan. Pengguna juga meminta:
+- blur pada area source;
+- bounding box translation yang boleh lebih panjang dari source tetapi tidak berlebihan;
+- font tetap natural dan tidak stretch.
+
+Implementasi baru:
+- `TextLayoutAnalyzer.kt`: membuat patch blur lokal dari screenshot dengan downsample/upscale ringan dan tetap membawa metadata background/font.
+- `OcrManager.kt`: membawa patch blur bersama `DetectedText` sampai proses translation selesai.
+- `TranslationOverlayView.kt`: translation bounding box boleh melebar maksimal sekitar `1.55x` lebar source, tetap terpusat pada source, dan font dikecilkan uniform jika diperlukan.
+- `TranslationOverlayView.kt`: menghilangkan pemaksaan `textScaleX`; teks tetap proporsional.
+- `FloatingService.kt`: meneruskan patch blur ke overlay dan membersihkannya saat gagal/dihapus agar bitmap tidak bocor.
+
+Commit kode terakhir: `5973de45f8dc6a77bd6cdfe930427348e53d8915`.
+Commit overlay renderer: `5f26382a76eb919a61103a73c3eb57c1d9e8119a`.
+Commit layout/blur preparation: `0478c9f26cc42d74c26ea458d829b50afc6945e9`.
+
+**Status:** implementasi baru belum diuji build/perangkat. Jangan dianggap stabil sebelum GitHub Actions dan uji device selesai.
 
 ### Build Verification
-Latest build run: `34112476978` (run #88).
+Latest build run sebelum iterasi blur: `34112476978` (run #88).
 
 - commit: `0c0c9d4a6d1e4d27e4b0f5124c391598a19c027e`
 - result: `success`
@@ -134,30 +158,7 @@ Latest build run: `34112476978` (run #88).
 - artifact ID: `10014932485`
 - SHA-256: `9f5d8e06f18dd1fecaa6c559594978f25c3efe7424158cbf160bb82b80df9458`
 
-Artifact ini berisi perubahan Manual TL terbaru pada commit code `e6b0bd2...` + `5ebb3bf...` beserta dokumentasi.
-
-### TextLayoutAnalyzer
-File: `TextLayoutAnalyzer.kt`.
-- estimasi font dari element OCR;
-- mask source diperluas;
-- background source diambil dari sampling lokal.
-
-Commit: `e0ec39f595f2bb66e09d46d5be469fd7ae6deaab`.
-
-### OCR + Overlay Renderer
-`OcrManager.kt` membawa metadata layout sampai `TranslationOverlayView.kt`.
-
-Commit OCR: `28dab21490b73a5c94848971259c9096207cca43`.
-Commit renderer sebelumnya: `513e43e1f8c190903f2d1dc539028f0fed9e3e28`.
-
-### Floating Menu + Hapus Overlay
-`layout_floating_widget.xml` dan `FloatingService.kt` direvisi agar root WindowManager menyesuaikan menu dan FAB.
-
-Commit layout: `e59a2b3adef5ff5391dcda1a12df8f0d6d19ec5e`.
-Commit service sebelumnya: `9dbf8663eaab80f9844c64824964b3e5769e0156`.
-
-### Build Automation
-`.github/workflows/build.yml` menjalankan build otomatis setiap push ke `main`, dengan Gradle 8.2 melalui `gradle/actions/setup-gradle@v6`. `workflow_dispatch` tetap tersedia.
+Artifact tersebut **belum** mencakup iterasi blur/bounding-box terbaru.
 
 ## Dokumen Pengembangan
 - `PROJECT_NOTES.md` — catatan teknis dan riwayat kerja.
