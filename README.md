@@ -7,126 +7,137 @@ Android screen translator yang dirancang untuk menerjemahkan teks dari aplikasi 
 | Bagian | Status | Catatan |
 |---|---|---|
 | Floating button | ✅ | Tampil dan dapat digeser di atas aplikasi lain |
-| Floating menu | 🧪 | Menu sekarang disiapkan untuk berpindah sisi mengikuti posisi floating button; belum diuji pengguna pada build terbaru |
+| Floating menu | 🧪 | Menu sekarang memakai container dinamis dan penempatan relatif terhadap FAB; belum diuji pengguna |
 | Overlay permission | ✅ | Berjalan |
-| MediaProjection | ⚠️ | Screenshot berhasil dibuat; Android 14+ diarahkan ke full display agar aplikasi target dapat ikut tertangkap |
-| OCR | ⚠️ | Sudah menghasilkan teks, tetapi cakupan seluruh aplikasi target masih perlu diverifikasi |
-| Manual Translation | ✅ | Capture → OCR → translation → History → overlay sudah berhasil pada pengujian perangkat terbaru |
+| MediaProjection | ⚠️ | Screenshot berhasil dibuat; Android 14+ diarahkan ke full display |
+| OCR | ⚠️ | ML Kit menghasilkan line + bounding box; layout analyzer baru ditambahkan dan perlu diuji |
+| Manual Translation | ✅ | Capture → OCR → translation → History → overlay sudah pernah berhasil |
 | Translation History | ✅ | Persisten; service-safe dan write menggunakan `commit()` |
-| Translation overlay | 🧪 | Patch terbaru membuat area OCR tertutup penuh dan menyesuaikan ukuran teks; belum diuji pengguna |
-| Hapus Overlay Manual | 🧪 | Tombol tambahan muncul saat Manual TL menghasilkan overlay dan hilang setelah overlay dihapus; belum diuji pengguna |
-| Real-Time Translation | ⏸️ | Dasar sudah bekerja pada perangkat, tetapi pengembangan Real-Time ditunda sementara karena flicker |
+| Translation overlay | 🧪 | Sekarang font-aware dan background-aware; perlu verifikasi perangkat |
+| Hapus Overlay Manual | 🧪 | Tombol disiapkan setelah overlay Manual TL aktif |
+| Real-Time Translation | ⏸️ | Dasar bekerja, tetapi flicker ditunda |
 
 ## Fokus Saat Ini
 
-Fokus sementara adalah **Manual TL**. Real-Time sengaja ditunda sampai desain/fungsi Manual TL berikutnya selesai.
+Fokus sementara adalah **Manual TL**. Real-Time sengaja ditunda sampai Manual TL stabil dan mode Manual TL baru dapat dirancang.
 
 Target overlay Manual TL:
 - hasil terjemahan langsung menimpa area teks sumber;
-- teks sumber tidak boleh terlihat di bawah hasil terjemahan;
-- ukuran teks mengikuti ukuran bounding box teks asli;
-- jika terjemahan lebih panjang, ukuran teks disesuaikan agar tetap muat;
-- tersedia tombol `Hapus Overlay` setelah Manual TL menghasilkan overlay;
-- tombol `Hapus Overlay` hilang ketika overlay tidak ada.
+- source tidak boleh terlihat di bawah hasil terjemahan;
+- ukuran teks mengikuti estimasi ukuran font source;
+- area mask sedikit diperluas berdasarkan tinggi glyph;
+- warna background area diambil dari screenshot di sekitar teks, bukan selalu hitam;
+- jika translation lebih panjang, font dikecilkan hanya seperlunya;
+- tersedia tombol `Hapus Overlay` setelah Manual TL menghasilkan overlay.
+
+## Arsitektur Overlay Baru
+
+Alur Manual TL sekarang dirancang sebagai:
+
+`Screen Capture → ML Kit OCR → TextLayoutAnalyzer → Translation → Overlay Renderer`
+
+`TextLayoutAnalyzer.kt` mengubah line OCR menjadi data layout:
+- koordinat mask yang diperluas;
+- estimasi tinggi font dari bounding box element OCR;
+- estimasi warna background dari piksel di sekitar area teks.
+
+`TranslationOverlayView.kt` kemudian:
+- memakai koordinat mask tersebut;
+- memakai ukuran font source sebagai ukuran awal;
+- mengecilkan font bila translation terlalu lebar/tinggi;
+- menggambar background hasil sampling agar source tertutup tanpa selalu memakai kotak hitam;
+- tetap `FLAG_NOT_TOUCHABLE`.
 
 ## Masalah Aktif
 
-1. Frame MediaProjection masih perlu dipastikan konsisten menangkap aplikasi target dan bukan hanya jam/status bar atau UI Screen-TL.
-2. Overlay masih perlu verifikasi posisi terhadap koordinat layar pada berbagai perangkat/orientasi.
-3. Patch visual terbaru belum diuji pengguna.
-4. Menu floating adaptif dan tombol Hapus Overlay belum diuji pengguna pada build terbaru.
-5. Real-Time masih berkedip karena implementasi saat ini melepas overlay setiap siklus. Perbaikannya ditunda.
-6. APK update masih bentrok setelah `versionCode` dinaikkan. Dugaan utama tetap perbedaan signing key antara APK lama dan APK GitHub Actions.
+1. Frame MediaProjection masih perlu dipastikan konsisten menangkap aplikasi target.
+2. Posisi overlay perlu diverifikasi terhadap koordinat layar pada perangkat pengguna.
+3. Sistem background sampling belum diuji pada background kompleks seperti gambar/gradient.
+4. Floating menu adaptif dan `Hapus Overlay` belum diuji pada perangkat.
+5. Real-Time masih berkedip dan sengaja ditunda.
+6. APK update masih bentrok; dugaan utama tetap perbedaan signing key.
 
 ## Roadmap
 
 ### Milestone 1 — Stabilkan Manual Translation
-
 - [x] Floating button dan permission dasar.
 - [x] MediaProjection dapat membuat screenshot.
 - [x] OCR manager dengan bounding box.
 - [x] ML Kit Translation manager.
-- [~] Verifikasi bahwa frame yang diberikan ke OCR benar-benar berasal dari aplikasi yang sedang terlihat.
-- [x] Manual TL capture → OCR → translation → History → overlay berhasil pada pengujian perangkat terbaru.
+- [~] Verifikasi frame target dan cakupan OCR.
+- [x] Manual TL capture → OCR → translation → History → overlay pernah berhasil.
 - [ ] Filter status bar/floating button/teks Screen-TL yang tidak relevan.
-- [x] Manual TL memiliki timeout capture 3 detik dan watchdog pemrosesan 30 detik.
+- [x] Timeout capture 3 detik + watchdog proses 30 detik.
 
 ### Milestone 2 — Translation Overlay
-
-- [x] Implementasi overlay teks berdasarkan `DetectedText.boundingBox`.
-- [x] Tampilkan hasil terjemahan pada area teks yang terdeteksi.
-- [x] Overlay dibuat `NOT_TOUCHABLE` agar tidak mengganggu interaksi aplikasi target.
-- [x] Overlay Manual TL menutup area sumber dengan background penuh.
-- [x] Ukuran teks adaptif berdasarkan bounding box dan panjang terjemahan.
-- [x] Tombol `Hapus Overlay` disiapkan untuk hasil Manual TL.
+- [x] Overlay berdasarkan OCR line.
+- [x] Overlay non-touchable.
+- [x] TextLayoutAnalyzer font-aware.
+- [x] Mask OCR diperluas berdasarkan tinggi glyph.
+- [x] Background area diestimasi dari screenshot.
+- [x] Ukuran translation mengikuti source dan menyusut jika perlu.
 - [~] Verifikasi visual pada perangkat.
-- [ ] Verifikasi posisi overlay terhadap koordinat layar pada berbagai perangkat/orientasi.
+- [ ] Verifikasi berbagai resolusi/orientasi.
+- [ ] Penanganan background kompleks.
 
 ### Milestone 3 — Floating Menu
-
-- [x] Menu Real-Time / Manual TL / Keluar.
-- [x] Menu disiapkan untuk muncul di sisi yang sesuai dengan posisi floating button.
-- [x] Tombol Hapus Overlay disembunyikan ketika tidak ada overlay Manual TL.
-- [~] Verifikasi menu pada beberapa posisi floating button.
+- [x] Real-Time / Manual TL / Hapus Overlay / Keluar.
+- [x] Container menu dinamis.
+- [x] Menu kiri/kanan mengikuti FAB.
+- [x] Menu ditempatkan di atas ketika FAB dekat bawah.
+- [~] Verifikasi beberapa posisi FAB pada perangkat.
 
 ### Milestone 4 — Real-Time Translation
-
 - [x] Capture frame berkala tahap pertama.
-- [x] OCR dan translation loop dasar.
-- [x] Update overlay dari hasil frame terbaru.
-- [x] Stop Real-Time tanpa menghentikan service.
-- [~] Hilangkan kedipan overlay pada loop Real-Time — **ditunda**.
-- [ ] Verifikasi kestabilan Real-Time setelah perbaikan kedipan.
-- [ ] Deteksi perubahan layar agar frame yang tidak berubah tidak diproses ulang.
-- [ ] Cache translation agar teks yang sama tidak diterjemahkan berulang.
-- [ ] Optimalkan interval dan beban CPU/baterai berdasarkan hasil device test.
-- [ ] Update overlay hanya untuk teks baru/berubah.
+- [x] OCR + translation loop dasar.
+- [x] Update overlay.
+- [~] Hilangkan flicker — ditunda.
+- [ ] Change detection.
+- [ ] Translation cache.
+- [ ] Optimasi CPU/baterai.
 
 ### Milestone 5 — Translation Engine
-
 - [x] Google ML Kit on-device sebagai baseline.
 - [ ] DeepL API.
 - [ ] Gemini AI.
-- [ ] Pemilihan engine yang benar-benar terhubung ke pipeline Manual/Realtime.
+- [ ] Pemilihan engine terhubung ke pipeline.
 
 ### Milestone 6 — Manual TL Modes
-
-- [ ] Tambahkan mode Manual TL baru setelah overlay dan floating menu saat ini stabil.
+- [ ] Tambahkan mode Manual TL baru setelah overlay saat ini stabil.
 - [ ] Dokumentasikan perilaku mode baru sebelum implementasi.
 
-## Catatan Perubahan
+## Perubahan Terbaru — 2026-09-07
 
-Setiap perubahan kode yang bermakna wajib dicatat di sini atau pada `PROJECT_NOTES.md`, termasuk tanggal, file, perubahan, alasan, hasil build/test, dan masalah yang masih tersisa.
+### Font-aware + background-aware Manual Overlay
+File baru: `TextLayoutAnalyzer.kt`.
 
-### 2026-09-07 — Manual Overlay + Floating Menu
+Perubahan:
+- mengestimasi tinggi font dari element OCR;
+- memperluas area mask agar glyph source tertutup;
+- mengambil warna background dari sekitar source.
 
-- `TranslationOverlayView.kt` diperbarui agar background translation menutup penuh bounding box OCR sehingga teks sumber tidak terlihat di bawahnya.
-- Ukuran teks sekarang dimulai dari ukuran berdasarkan tinggi teks sumber dan hanya mengecil jika terjemahan terlalu lebar.
-- `layout_floating_widget.xml` menambahkan tombol `Hapus Overlay` yang default-nya tersembunyi.
-- `FloatingService.kt` diperbarui untuk menampilkan tombol Hapus Overlay setelah Manual TL berhasil dan menyembunyikannya ketika overlay dihapus.
-- Floating menu sekarang diposisikan relatif terhadap posisi floating button: sisi kiri membuka menu ke kanan, sisi kanan membuka menu ke kiri; ketika floating button berada dekat bawah layar, menu ditempatkan di atas.
-- Perubahan FloatingService mempertahankan pipeline Manual TL dan tidak memperbaiki Real-Time flicker pada tahap ini.
-- **Status:** perubahan kode belum diuji pengguna pada build terbaru.
-- Commit kode overlay: `1116dc9a2f5f197b10bdf2113ad88366c8bdb2dd`.
-- Commit layout: `7197c6b01541727a4c0b9e106b05afefb0dc16d8`.
-- Commit FloatingService: `f77d90e10a12372524e3d5e5997213ba198ea8c5`.
-- **Build:** belum diklaim berhasil; workflow build manual tidak dapat dipicu dari tool GitHub yang tersedia pada sesi ini.
+`OcrManager.kt` sekarang membawa metadata layout tersebut sampai hasil translation.
 
-### 2026-09-07 — Verifikasi Real-Time oleh pengguna
+`TranslationOverlayView.kt` menggunakan metadata itu untuk merender translation dengan ukuran yang mengikuti source.
 
-- Pengguna berhasil menjalankan Real-Time TL pada perangkat.
-- Capture → OCR → translation → overlay terbukti berjalan berulang.
-- Masalah yang ditemukan: overlay berkedip/hilang di antara siklus.
-- Perbaikan flicker ditunda agar fokus kembali ke Manual TL.
+Commit utama:
+- `e0ec39f595f2bb66e09d46d5be469fd7ae6deaab`
+- `28dab21490b73a5c94848971259c9096207cca43`
+- `513e43e1f8c190903f2d1dc539028f0fed9e3e28`
 
-### 2026-09-06 — Perbaikan timeout Manual TL
+### Floating Menu
+`layout_floating_widget.xml` dan `FloatingService.kt` direvisi agar root WindowManager benar-benar menyesuaikan ukuran menu dan posisi FAB.
 
-- `FloatingService.kt`: timeout menunggu frame dipangkas dari 10 detik menjadi 3 detik.
-- `FloatingService.kt`: menambahkan watchdog pemrosesan terpisah selama 30 detik setelah frame berhasil diterima.
-- `FloatingService.kt`: jika OCR atau translation callback tidak kembali, floating button dipulihkan dan pending state dibersihkan.
+Commit:
+- `e59a2b3adef5ff5391dcda1a12df8f0d6d19ec5e`
+- `e85ef0b3d7e5881c282dc98e77108d554e389f8f`
+
+**Status semua perubahan di atas: belum diuji pengguna dan belum boleh dianggap stabil.**
+
+## Catatan Build
+Tool GitHub pada sesi ini tidak menyediakan aksi untuk memulai `workflow_dispatch`. Jangan mengklaim build baru berhasil sampai ada hasil workflow yang nyata.
 
 ## Dokumen Pengembangan
-
-- `PROJECT_NOTES.md` — catatan teknis dan riwayat kerja untuk pemilik proyek.
-- `AI_HANDOFF.md` — konteks teknis untuk AI yang melanjutkan pekerjaan.
-- `AI_README.md` — aturan operasional AI: wajib membaca dokumentasi, mencatat perubahan, dan memperbarui roadmap.
+- `PROJECT_NOTES.md` — catatan teknis dan riwayat kerja.
+- `AI_HANDOFF.md` — konteks teknis untuk AI berikutnya.
+- `AI_README.md` — aturan operasional AI.
