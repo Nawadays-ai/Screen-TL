@@ -14,12 +14,14 @@ import android.view.View
  * Manual TL renderer.
  *
  * The translation starts exactly at the source line's left edge. If the
- * translation needs more room, the box grows only to the right. The maximum
- * width is bounded so a long translation cannot take over the screen.
+ * translation needs more room, the tolerance box grows only to the right.
+ * The colored replacement area itself only covers the translated text plus
+ * padding when the translation fits inside that tolerance. If the text still
+ * exceeds the tolerance after fitting, the color reaches the tolerance edge.
  *
  * The background is reconstructed from colors sampled around the source text,
- * rather than copying the raw screenshot pixels. This gives a soft blur-like
- * replacement while preventing the original glyphs from being drawn twice.
+ * rather than copying raw screenshot pixels. This prevents the original glyphs
+ * from being drawn twice.
  */
 class TranslationOverlayView(context: Context) : View(context) {
 
@@ -50,6 +52,7 @@ class TranslationOverlayView(context: Context) : View(context) {
         val top: Float,
         val right: Float,
         val bottom: Float,
+        val fillRight: Float,
         val textSize: Float,
         val horizontalPadding: Float
     )
@@ -89,17 +92,20 @@ class TranslationOverlayView(context: Context) : View(context) {
             val top = renderItem.top * scaleY
             val right = renderItem.right * scaleX
             val bottom = renderItem.bottom * scaleY
-            if (right <= left || bottom <= top) return@forEach
+            val fillRight = renderItem.fillRight * scaleX
+            if (right <= left || bottom <= top || fillRight <= left) return@forEach
 
             val box = RectF(left, top, right, bottom)
+            val fillBox = RectF(left, top, fillRight.coerceAtMost(right), bottom)
             val radius = ((bottom - top) * 0.08f).coerceIn(2f, 7f)
 
             canvas.save()
             canvas.clipRect(box)
-            drawReconstructedBlur(canvas, box, renderItem.item, radius)
+            drawReconstructedBlur(canvas, fillBox, renderItem.item, radius)
 
             textPaint.textScaleX = 1f
             textPaint.textSize = renderItem.textSize * scaleY
+            textPaint.color = chooseTextColor(renderItem.item.backgroundColor)
             val maxTextWidth = (
                 (right - left) - renderItem.horizontalPadding * 2f * scaleX
             ).coerceAtLeast(1f)
@@ -120,6 +126,7 @@ class TranslationOverlayView(context: Context) : View(context) {
         }
 
         textPaint.textScaleX = 1f
+        textPaint.color = Color.WHITE
     }
 
     private fun drawReconstructedBlur(
@@ -128,24 +135,40 @@ class TranslationOverlayView(context: Context) : View(context) {
         item: TranslationOverlayItem,
         radius: Float
     ) {
-        val base = item.backgroundColor
-        // Slightly stronger tonal falloff makes the reconstructed field feel
-        // softer/deeper without copying any source pixels.
-        val light = adjustColor(base, 1.14f)
-        val dark = adjustColor(base, 0.86f)
+        val base = darkenColor(item.backgroundColor)
+        // Keep the sampled color darker than the original source area while
+        // retaining a gentle multi-stop gradient for the blur-like appearance.
+        val edge = adjustColor(base, 0.94f)
+        val deep = adjustColor(base, 0.88f)
 
         backgroundPaint.alpha = 255
         backgroundPaint.shader = LinearGradient(
             box.left,
             box.top,
-            box.right,
+            box.right.coerceAtLeast(box.left + 1f),
             box.bottom,
-            intArrayOf(light, base, base, base, dark),
+            intArrayOf(edge, base, deep, base, deep),
             floatArrayOf(0f, 0.28f, 0.50f, 0.72f, 1f),
             Shader.TileMode.CLAMP
         )
         canvas.drawRoundRect(box, radius, radius, backgroundPaint)
         backgroundPaint.shader = null
+    }
+
+    private fun darkenColor(color: Int): Int {
+        val luminance = 0.2126f * Color.red(color) +
+                0.7152f * Color.green(color) +
+                0.0722f * Color.blue(color)
+        if (luminance < 45f) return color
+        return adjustColor(color, 0.82f)
+    }
+
+    private fun chooseTextColor(color: Int): Int {
+        val background = darkenColor(color)
+        val luminance = 0.2126f * Color.red(background) +
+                0.7152f * Color.green(background) +
+                0.0722f * Color.blue(background)
+        return if (luminance < 150f) Color.WHITE else Color.BLACK
     }
 
     private fun adjustColor(color: Int, factor: Float): Int {
@@ -214,7 +237,15 @@ class TranslationOverlayView(context: Context) : View(context) {
         if (finalTextHeight > availableHeight && finalTextHeight > 0f) {
             finalTextSize = (finalTextSize * (availableHeight / finalTextHeight))
                 .coerceAtLeast(minTextSizePx)
+            textPaint.textSize = finalTextSize
         }
+
+        // Re-measure after any font-size adjustment. This determines how much
+        // of the tolerance box should actually receive the replacement color.
+        val finalMeasuredWidth = textPaint.measureText(normalized)
+        val fillWidth = (finalMeasuredWidth + horizontalPadding * 2f)
+            .coerceAtLeast(baseWidth)
+            .coerceAtMost(right - left)
 
         return RenderItem(
             item = item,
@@ -222,6 +253,7 @@ class TranslationOverlayView(context: Context) : View(context) {
             top = baseTop,
             right = right,
             bottom = baseBottom,
+            fillRight = left + fillWidth,
             textSize = finalTextSize,
             horizontalPadding = horizontalPadding
         )
