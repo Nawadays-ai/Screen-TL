@@ -1,11 +1,13 @@
 name: Build Android APK
 
-# Build otomatis setiap push ke main. workflow_dispatch tetap tersedia.
+# Build otomatis setiap push ke main atau branch eksperimen visual.
+# workflow_dispatch tetap tersedia.
 
 on:
   push:
     branches:
       - main
+      - 'experiment/**'
   workflow_dispatch:
 
 jobs:
