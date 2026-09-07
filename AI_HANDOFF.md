@@ -1,145 +1,134 @@
 # Screen-TL — AI Handoff / Context
 
 ## Read This First
-This file is the handoff context for any AI assistant continuing development of Screen-TL. Read `README.md`, `AI_README.md`, and `PROJECT_NOTES.md` before changing code. The repository is the source of truth; inspect current files before assuming the code still matches this document.
+Read `README.md`, `AI_README.md`, and `PROJECT_NOTES.md` before changing code. The repository is the source of truth; inspect current files before assuming this document matches the implementation.
 
 ## Project Goal
-Build an Android screen translator with:
-- floating button over other apps;
-- Manual TL: capture one screen → OCR → translate → show translated text directly over the source text;
-- Real-Time TL: repeatedly capture the screen, OCR/translate it, and refresh the overlay without blocking the target app;
-- selectable source/target languages;
-- selectable translation engines, with Google ML Kit on-device translation as the baseline and DeepL/Gemini planned.
+Build an Android screen translator with a floating button over other apps.
+
+Manual TL:
+`capture one screen → OCR → analyze text layout → translate → replace source text with overlay`
+
+Real-Time TL:
+`capture repeatedly → OCR/translate → refresh overlay`
+
+Google ML Kit on-device translation is the current baseline. DeepL and Gemini remain planned.
 
 ## Current Architecture
 Package: `com.example.screentranslator`
 
-Important files:
-- `MainActivity.kt`: permissions, language/API selectors, starts foreground service, requests full-display MediaProjection on Android 14+.
+- `MainActivity.kt`: permissions, language/API selectors, foreground service, full-display MediaProjection consent on Android 14+.
 - `FloatingService.kt`: floating UI, capture lifecycle, OCR/translation orchestration, Manual TL, Real-Time loop, menu, overlay lifecycle.
 - `ScreenCaptureManager.kt`: MediaProjection + ImageReader capture.
-- `TextLayoutAnalyzer.kt`: converts ML Kit line geometry into font-aware mask geometry and estimates background color.
-- `OcrManager.kt`: ML Kit OCR; returns `DetectedText` with mask coordinates, source font size estimate, and background color.
-- `TranslationManager.kt`: Google ML Kit on-device translation.
-- `TranslationOverlayView.kt`: full-screen non-touchable renderer for translated text.
+- `TextLayoutAnalyzer.kt`: font-aware source mask and background-color estimation.
+- `OcrManager.kt`: ML Kit OCR plus layout metadata.
+- `TranslationManager.kt`: Google ML Kit translation.
+- `TranslationOverlayView.kt`: full-screen non-touchable translation renderer.
 - `TranslationHistory.kt`: persistent SharedPreferences history.
-
-## Known Working Behavior
-- Overlay permission works.
-- MediaProjection permission works.
-- Floating button works and can be dragged.
-- Screenshot/Bitmap can be produced.
-- OCR supports Japanese, Chinese, and Latin.
-- Manual TL capture → OCR → translation → History → overlay was verified by the user before the latest visual rewrite.
-- The hard three-line OCR limit was removed previously.
-- Real-Time basic capture → OCR → translation → overlay was verified by the user.
-- Real-Time work is currently paused.
 
 ## Important Regression Evidence
 The user tested build/commit `e1c7006c495d4ea1e8056ad251b86492d54bf939` and reported:
-- source text remained visible under the overlay;
-- translation text size did not follow source size;
-- floating menu still stacked over the FAB;
-- `Hapus Overlay` did not appear.
+- source remained visible under overlay;
+- translation size did not follow source;
+- floating menu stacked over FAB;
+- Hapus Overlay did not appear.
 
-Therefore the previous visual patch must NOT be considered successful.
+That build must not be treated as successful for the visual requirements.
 
 ## New Manual Overlay Architecture — 2026-09-07
-The old renderer only knew the tight OCR line bounding box and used a fixed black background. This was insufficient for reliable source replacement.
+The old renderer used a tight OCR line box and fixed black background. The new design is:
 
-New flow:
 `Capture → ML Kit OCR → TextLayoutAnalyzer → Translation → TranslationOverlayView`
 
 ### TextLayoutAnalyzer
 File: `TextLayoutAnalyzer.kt`
 
-For each OCR line it:
-1. reads the line bounding box;
-2. reads element bounding boxes and estimates the source glyph/font height from their median height;
-3. expands the OCR box by a small font-aware margin to form a replacement mask;
-4. samples pixels immediately around that mask;
-5. uses the median RGB values as the background color.
-
-The intent is to cover the source glyphs while preserving the approximate local background instead of placing a fixed black rectangle.
+For every OCR line:
+1. read the line bounding box;
+2. read element bounding boxes and use their median height to estimate source glyph/font size;
+3. expand the line box with a font-aware margin to create a replacement mask;
+4. sample pixels immediately around that mask;
+5. use the median RGB values as the local replacement background.
 
 Commit: `e0ec39f595f2bb66e09d46d5be469fd7ae6deaab`.
 
 ### OcrManager
 `DetectedText` now carries:
-- `left/top/right/bottom` for the expanded replacement mask;
+- expanded mask coordinates;
 - `sourceTextSizePx`;
 - `backgroundColor`.
 
 Commit: `28dab21490b73a5c94848971259c9096207cca43`.
 
 ### TranslationOverlayView
-Renderer behavior:
-- fills the expanded mask with the sampled background color;
-- starts translation font size from `sourceTextSizePx`;
-- scales down only when the translation does not fit the available width/height;
-- clips drawing to the replacement mask;
-- remains `FLAG_NOT_TOUCHABLE`.
+The renderer:
+- paints the sampled background over the source region;
+- starts translation font size from the measured source size;
+- reduces size only when the translation is too wide/high;
+- clips text to the replacement mask;
+- stays `FLAG_NOT_TOUCHABLE`.
 
 Commit: `513e43e1f8c190903f2d1dc539028f0fed9e3e28`.
 
-**Status: not yet tested by the user.**
+**Status: not yet device-tested.**
 
-## Floating Menu Architecture
-The previous XML had a 48dp root and forced the menu outside it with `translationX`, which made positioning unreliable.
+## Floating Menu
+The previous XML used a 48dp root plus `translationX`, which caused stacking/positioning problems.
 
-New layout:
-- root `FrameLayout` uses `wrap_content`;
+New design:
+- root uses `wrap_content`;
 - submenu has no `translationX`;
-- WindowManager root size is changed to fit menu + FAB when open;
-- menu is placed right of FAB when FAB is on left;
-- menu is placed left of FAB when FAB is on right;
-- menu is placed above when FAB is in the lower half;
-- bottom-right therefore becomes an upper-left menu arrangement relative to the FAB.
+- WindowManager root expands to fit menu + FAB;
+- FAB left → menu right;
+- FAB right → menu left;
+- FAB lower half → menu above;
+- bottom-right → menu is above and to the left of the FAB.
 
-Commit layout: `e59a2b3adef5ff5391dcda1a12df8f0d6d19ec5e`.
+Layout commit: `e59a2b3adef5ff5391dcda1a12df8f0d6d19ec5e`.
+Service commit: `9dbf8663eaab80f9844c64824964b3e5769e0156`.
 
-`FloatingService.kt` was rebuilt around the same behavior and now transfers the new OCR layout metadata into `TranslationOverlayItem`.
-
-Commit service: `e85ef0b3d7e5881c282dc98e77108d554e389f8f`.
+**Status: not yet device-tested.**
 
 ## Hapus Overlay
-Required behavior:
-- hidden before a Manual TL overlay exists;
+Required:
+- hidden when no Manual overlay exists;
 - visible after Manual TL creates a non-empty overlay;
-- tapping it removes only the overlay;
+- removes only the overlay;
 - service remains alive;
 - History remains intact;
 - button becomes hidden again.
 
 Implemented in `FloatingService.kt`; **not yet device-tested**.
 
-## Manual TL Current Flow
-1. Remove any old overlay.
-2. Keep FAB available.
+## Manual TL Flow
+1. Remove previous overlay.
+2. Keep FAB usable.
 3. Request one MediaProjection frame.
-4. Capture timeout: 3 seconds.
-5. OCR with TextLayoutAnalyzer metadata.
-6. Prepare ML Kit translation model.
-7. Translate every detected line sequentially.
-8. Save combined result to History.
-9. Create/update non-touchable overlay using font/background metadata.
-10. Show Hapus Overlay.
-11. Restore normal floating UI state.
+4. Capture timeout is 3 seconds.
+5. OCR all returned lines.
+6. Analyze font/mask/background metadata.
+7. Prepare ML Kit translation model.
+8. Translate every detected line sequentially.
+9. Save History.
+10. Render non-touchable overlay using layout metadata.
+11. Expose Hapus Overlay.
 
-Do not alter capture/OCR/History behavior without a functional reason.
-
-## Real-Time TL — Paused
-Basic Real-Time works but has known flicker because the current loop removes the overlay before each capture. Do not spend this milestone on flicker unless the user explicitly asks.
+## Real-Time — Paused
+Basic Real-Time works but flickers because the current loop removes the overlay before each capture. Do not fix this unless the user explicitly asks to resume Real-Time work.
 
 ## APK Update / Build
 `versionCode = 2`, `versionName = "1.1"`.
 
-The user still reports APK update conflict. Most likely cause remains signing-key mismatch between different debug builds.
+The APK update conflict is still suspected to be signing-key mismatch between debug APKs.
 
-The user wants the AI to perform builds whenever possible. The available GitHub connector does not expose `workflow_dispatch`, so never claim a new build passed unless a real workflow result exists.
+Build automation has now been changed so `.github/workflows/build.yml` runs `assembleDebug` automatically on every push to `main`; `workflow_dispatch` remains available.
+
+CI commit: `39b09bffdd878650ade24824872d85daaf08d824`.
+
+At the time of this handoff, no status check has been returned for the latest commit, so **do not claim the build passed yet**.
 
 ## Diagnostic Logging
-Use tags:
+Tags:
 - `ScreenTL-Capture`
 - `ScreenTL-OCR`
 - `ScreenTL-Service`
@@ -147,19 +136,20 @@ Use tags:
 
 ## Development Rules
 - Inspect actual repository files before edits.
-- Preserve working capture/OCR/History pipeline unless the bug requires changing it.
-- Do not mark untested device behavior as stable.
-- Update `README.md`, `PROJECT_NOTES.md`, and this handoff after meaningful architecture changes.
-- Explain changed files, reason, verification state, and next test to the owner.
-- Manual TL is the current priority.
+- Preserve the working capture/OCR/History pipeline unless a functional bug requires changes.
+- Do not mark device behavior stable before user testing.
+- Update `README.md`, `PROJECT_NOTES.md`, and `AI_HANDOFF.md` after meaningful architecture changes.
+- Explain changed files, reason, verification state, and next test.
+- Manual TL is current priority.
 - Real-Time flicker is paused.
+- Never claim a build passed without a real build result.
 
 ## Next Test
-Use the APK containing commits after `e1c7006` and verify:
+Use the APK produced by the automatic build and verify:
 1. Manual TL still completes and History is saved.
-2. Source text is actually covered by the replacement mask.
-3. Background is no longer a fixed black rectangle on the tested screen.
+2. Source is fully covered by the replacement mask.
+3. Background looks like the original surrounding area rather than a fixed black box.
 4. Translation font size follows the source.
-5. Long translation shrinks rather than becoming oversized.
-6. FAB on left/right/bottom-right places menu without overlap.
-7. Hapus Overlay appears after Manual TL, removes overlay, and then disappears.
+5. Long translation shrinks appropriately.
+6. FAB left/right/bottom-right opens the menu without overlap.
+7. Hapus Overlay appears after Manual TL, removes overlay, and disappears.
