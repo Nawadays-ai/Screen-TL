@@ -90,21 +90,16 @@ jobs:
         val roomLeft = fabScreenX
         val placeRight = if (roomRight >= menuWidth + gap) true else roomLeft < menuWidth + gap
 
-        // Vertical direction is also based on available room. The FAB itself
-        // is never re-centered: its screen x/y remains exactly fabScreenX/Y.
+        // Choose vertical direction from available room. The FAB stays at the
+        // exact dragged screen coordinate instead of being vertically centered.
         val roomBelow = screenHeight - (fabScreenY + fabSize)
         val roomAbove = fabScreenY
         val placeBelow = if (roomBelow >= menuHeight + gap) true else roomAbove < menuHeight + gap
 
         val rootWidth = menuWidth + gap + fabSize
         val rootHeight = menuHeight + gap + fabSize
-
         val rawX = if (placeRight) fabScreenX else fabScreenX - menuWidth - gap
         val rawY = if (placeBelow) fabScreenY else fabScreenY - menuHeight - gap
-
-        // In normal cases no clamping occurs, so the FAB stays at its exact
-        // dragged position. Clamping is only a last resort if the menu itself
-        // cannot fit on that side of the display.
         val rootX = rawX.coerceIn(0, (screenWidth - rootWidth).coerceAtLeast(0))
         val rootY = rawY.coerceIn(0, (screenHeight - rootHeight).coerceAtLeast(0))
 
@@ -126,7 +121,6 @@ jobs:
             menuParams.gravity = if (placeBelow) Gravity.START or Gravity.TOP else Gravity.START or Gravity.BOTTOM
             fabParams.gravity = if (placeBelow) Gravity.END or Gravity.TOP else Gravity.END or Gravity.BOTTOM
         }
-
         layoutSubMenu.layoutParams = menuParams
         fabMain.layoutParams = fabParams
         params?.let {
@@ -140,19 +134,29 @@ jobs:
     }
 '''
 
-        if old_menu not in text:
-            raise SystemExit('Expected positionSubMenu block not found')
-        text = text.replace(old_menu, new_menu, 1)
+        if old_menu in text:
+            text = text.replace(old_menu, new_menu, 1)
 
         old_capture = '        val requested = manager.captureOnce { bitmap ->\n'
         new_capture = '        manager.ensureCurrentDisplayConfiguration()\n        val requested = manager.captureOnce { bitmap ->\n'
-        count = text.count(old_capture)
-        if count < 2:
-            raise SystemExit(f'Expected two captureOnce call sites, found {count}')
-        text = text.replace(old_capture, new_capture)
+        if old_capture in text:
+            text = text.replace(old_capture, new_capture)
 
         path.write_text(text)
         PY
+
+    - name: Persist source fixes
+      shell: bash
+      run: |
+        if git diff --quiet -- app/src/main/java/com/example/screentranslator/FloatingService.kt; then
+          echo "No source fix to commit."
+        else
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/example/screentranslator/FloatingService.kt
+          git commit -m "Fix dynamic floating menu and rotation capture"
+          git push
+        fi
 
     - name: Set up JDK 17
       uses: actions/setup-java@v5
