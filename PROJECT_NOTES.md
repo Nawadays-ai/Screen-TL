@@ -5,13 +5,13 @@ Screen-TL adalah aplikasi Android untuk menerjemahkan teks yang terlihat di laya
 
 ## Status Saat Ini
 - Screen Capture: berhasil membuat screenshot; cakupan frame terhadap aplikasi target masih perlu diverifikasi lebih luas.
-- Floating button: berhasil tampil dan dapat digeser.
+- Floating button: berhasil tampil dan dapat digeser; toggle menu baru diperbaiki dan perlu uji ulang.
 - Floating menu: root dinamis; submenu sekarang seharusnya bisa dibuka dan ditutup dengan tap ulang FAB.
 - Permission overlay dan MediaProjection: berhasil.
 - OCR: ML Kit menghasilkan line + bounding box; metadata layout tambahan sudah diterapkan.
 - Google ML Kit Translation: pipeline Manual TL sudah berjalan sampai History dan overlay pada pengujian sebelumnya.
 - Translation History: persisten dan service-safe.
-- Manual overlay: coordinate space diperbaiki agar sama dengan frame capture; mask dibuat lebih solid; belum diuji ulang pengguna.
+- Manual overlay: coordinate space diperbaiki agar sama dengan frame capture; mask dibuat lebih solid; kode berhasil di-build, belum diuji ulang pengguna.
 - Hapus Overlay: tersedia di menu dan hanya ditampilkan ketika overlay Manual TL aktif; belum diuji ulang pengguna.
 - Real-Time TL: dasar terbukti bekerja, flicker ditunda.
 
@@ -31,9 +31,9 @@ Perbaikan terbaru:
 - renderer tetap memakai scale fallback langsung dari source frame ke ukuran view, tanpa centering/aspect compensation;
 - mask sedikit diperluas dan dibuat lebih solid.
 
-True backdrop blur belum dipasang. `RenderEffect` standar bekerja pada konten view yang dirender, bukan secara otomatis memburamkan aplikasi di belakang overlay. Untuk sekarang fokusnya adalah alignment dan mask yang benar-benar menutup source.
+True backdrop blur belum dipasang. Untuk sekarang fokusnya adalah alignment dan mask yang benar-benar menutup source.
 
-Status: **belum diuji ulang pengguna**.
+Status: **kode berhasil di-build; belum diuji ulang pengguna**.
 
 ### 3. Floating Menu / Capture Menu
 Uji terbaru menunjukkan submenu Screen-TL ikut masuk ke frame Manual TL sehingga tombol menu juga diterjemahkan.
@@ -42,7 +42,7 @@ Perbaikan:
 - `triggerManualTranslation()` sekarang menutup submenu terlebih dahulu;
 - capture ditunda 200 ms setelah menu menjadi `GONE`, memberi WindowManager waktu untuk menerapkan perubahan sebelum frame berikutnya dipakai OCR.
 
-Status: **belum diuji ulang pengguna**.
+Status: **kode berhasil di-build; belum diuji ulang pengguna**.
 
 ### 4. Floating Button Toggle
 Bug ditemukan pada touch listener: submenu disembunyikan pada `ACTION_DOWN`, lalu `ACTION_UP` melihat submenu sudah tersembunyi dan membukanya lagi. Akibatnya tap kedua terlihat tidak bisa menutup menu.
@@ -52,7 +52,7 @@ Perbaikan:
 - tap sederhana ditangani pada `ACTION_UP` sehingga menu benar-benar toggle;
 - ketika gerakan drag melewati ambang, submenu ditutup dan drag tetap berjalan.
 
-Status: **belum diuji ulang pengguna**.
+Status: **kode berhasil di-build; belum diuji ulang pengguna**.
 
 ## Real-Time TL
 Real-Time dasar sudah terbukti pada perangkat pengguna.
@@ -85,6 +85,16 @@ Commit yang sama: `5ebb3bfda9a6474e0de027159ce7b2c6725923a`.
 
 **Status seluruh perubahan ini: belum diuji ulang pengguna.**
 
+### Build Verification
+GitHub Actions run `34112476978` (run #88) berhasil.
+- head commit: `0c0c9d4a6d1e4d27e4b0f5124c391598a19c027e`
+- `assembleDebug`: sukses
+- artifact: `ScreenTranslator-APK`
+- artifact ID: `10014932485`
+- SHA-256: `9f5d8e06f18dd1fecaa6c559594978f25c3efe7424158cbf160bb82b80df9458`
+
+Artifact ini sudah mencakup perubahan kode Manual TL terbaru sebelum dokumentasi build dicatat.
+
 ### TextLayoutAnalyzer
 File baru: `TextLayoutAnalyzer.kt`.
 - estimasi ukuran font source dari tinggi element OCR;
@@ -105,15 +115,11 @@ Root menu dan penempatan FAB/menu direvisi. Metadata OCR juga diteruskan dari `F
 Commit layout: `e59a2b3adef5ff5391dcda1a12df8f0d6d19ec5e`.
 Commit service sebelumnya: `9dbf8663eaab80f9844c64824964b3e5769e0156`.
 
-## Build Automation + Verification
+## Build Automation
 `.github/workflows/build.yml` sekarang menjalankan build otomatis setiap push ke `main` dengan Gradle 8.2 melalui `gradle/actions/setup-gradle@v6`; `workflow_dispatch` tetap tersedia.
 
-Build terakhir yang terverifikasi sukses adalah artifact `ScreenTranslator-APK` untuk commit `cedddc4ce6bf26f2e1bf7a36ad609cca568854cd`, artifact ID `10014166550`.
-
-Perubahan kode setelah build tersebut belum memiliki hasil build baru yang diverifikasi dalam catatan ini. Sesuai aturan proyek, jangan menyebut perubahan terbaru sebagai build-pass sebelum GitHub Actions selesai.
-
 ## Prioritas Berikutnya
-1. Build otomatis dari push perubahan terbaru.
+1. Pastikan build dari perubahan dokumentasi terakhir tetap sukses.
 2. Uji APK pada perangkat.
 3. Pastikan overlay tidak lagi membuat layar terlihat mengecil.
 4. Pastikan menu Screen-TL tidak ikut masuk frame Manual TL.
