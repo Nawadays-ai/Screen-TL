@@ -204,10 +204,10 @@ class TranslationOverlayView(context: Context) : View(context) {
         renderItems.forEachIndexed { index, item ->
             val group = itemGroups[index]
             val color = darkenColor(item.item.backgroundColor)
-            sums[group][0] += Color.red(color)
-            sums[group][1] += Color.green(color)
-            sums[group][2] += Color.blue(color)
-            sums[group][3] += 1f
+            sums[group][0] = sums[group][0] + Color.red(color)
+            sums[group][1] = sums[group][1] + Color.green(color)
+            sums[group][2] = sums[group][2] + Color.blue(color)
+            sums[group][3] = sums[group][3] + 1f
         }
 
         groupColors = sums.map { sum ->
