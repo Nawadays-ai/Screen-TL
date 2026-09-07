@@ -14,7 +14,9 @@ data class DetectedText(
     val left: Int,
     val top: Int,
     val right: Int,
-    val bottom: Int
+    val bottom: Int,
+    val sourceTextSizePx: Float = 0f,
+    val backgroundColor: Int = android.graphics.Color.BLACK
 )
 
 class OcrManager(
@@ -52,15 +54,19 @@ class OcrManager(
 
                 for (block in visionText.textBlocks) {
                     for (line in block.lines) {
-                        val box = line.boundingBox
-                        if (box != null && line.text.isNotBlank()) {
+                        if (line.text.isBlank()) continue
+
+                        val layout = TextLayoutAnalyzer.analyze(bitmap, line)
+                        if (layout != null) {
                             detectedTexts.add(
                                 DetectedText(
                                     text = line.text,
-                                    left = box.left,
-                                    top = box.top,
-                                    right = box.right,
-                                    bottom = box.bottom
+                                    left = layout.left,
+                                    top = layout.top,
+                                    right = layout.right,
+                                    bottom = layout.bottom,
+                                    sourceTextSizePx = layout.sourceTextSizePx,
+                                    backgroundColor = layout.backgroundColor
                                 )
                             )
                         }
@@ -72,7 +78,9 @@ class OcrManager(
                     Log.i(
                         TAG,
                         "[$index] '${detected.text}' " +
-                                "box=${detected.left},${detected.top},${detected.right},${detected.bottom}"
+                                "mask=${detected.left},${detected.top},${detected.right},${detected.bottom} " +
+                                "font=${detected.sourceTextSizePx} " +
+                                "bg=#${detected.backgroundColor.toUInt().toString(16)}"
                     )
                 }
 
