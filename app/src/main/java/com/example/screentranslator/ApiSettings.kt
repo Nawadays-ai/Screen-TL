@@ -63,7 +63,12 @@ object ApiSettings {
 
     fun setGeminiEnabled(value: Boolean) {
         ensureInitialized()
-        preferences.edit().putBoolean(KEY_GEMINI_ENABLED, value).apply()
+        preferences.edit()
+            .putBoolean(KEY_GEMINI_ENABLED, value)
+            .apply()
+        if (value) {
+            preferences.edit().putBoolean(KEY_DEEPL_ENABLED, false).apply()
+        }
     }
 
     fun getDeepLKey(): String? {
@@ -94,7 +99,12 @@ object ApiSettings {
 
     fun setDeepLEnabled(value: Boolean) {
         ensureInitialized()
-        preferences.edit().putBoolean(KEY_DEEPL_ENABLED, value).apply()
+        preferences.edit()
+            .putBoolean(KEY_DEEPL_ENABLED, value)
+            .apply()
+        if (value) {
+            preferences.edit().putBoolean(KEY_GEMINI_ENABLED, false).apply()
+        }
     }
 
     private fun initialized(): Boolean {
