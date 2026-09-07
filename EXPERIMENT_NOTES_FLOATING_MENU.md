@@ -3,19 +3,25 @@
 ## Branch
 `experiment/blur-bounding-box`
 
-This branch is for device-tested refinements after the visual result was accepted for `main`. `main` already contains the accepted left-anchored translation box and color-reconstructed blur-like background.
+This branch is for device-tested refinements after the visual result was accepted for `main`. `main` remains the accepted baseline and is not changed by the work below.
 
 ## Current visual refinements
 
 - Manual TL source font calibration is now `1.15x` glyph height (previously `1.10x`).
 - Translation remains left-anchored to the source.
 - Extra translation width grows only to the right, capped by the existing `1.55x` source-width limit and display bounds.
+- The tolerance box is separate from the colored fill: when the translation is shorter than the tolerance, the replacement color stops around the translated text; if the translation reaches/exceeds the tolerance, the fill stops at the tolerance edge.
 - Background replacement remains fully opaque (`alpha = 255`) so source glyphs cannot ghost through.
-- The reconstructed blur-like color field is slightly stronger/softer than the previous experiment without copying raw screenshot pixels.
+- The reconstructed blur-like field samples surrounding color and darkens it by one level. Very dark colors are preserved instead of being darkened further.
+- Text color now adapts to the effective darkened background so light/dark text remains readable instead of colliding with similarly colored buttons/backgrounds.
 
 ## Why raw screenshot blur is not used
 
 Copying and blurring the raw source patch also copies the original glyphs. That produced a stacked/double-text appearance. The current approach transfers only perimeter color information and reconstructs a local color field in the overlay.
+
+## Landscape / rotation fix
+
+`ScreenCaptureManager` now tracks the active capture dimensions and checks the real display metrics before every capture. If the device rotates, the old virtual-display/ImageReader dimensions are rebuilt to the current width/height before OCR receives the frame. This is intended to prevent portrait-sized coordinates from being reused after switching to landscape.
 
 ## Floating button behavior requested
 
@@ -26,12 +32,13 @@ Target behavior:
 - If FAB is near the middle, choose the direction with enough free space rather than moving the FAB.
 - Horizontal placement should also choose the side with enough room while preserving the FAB screen coordinates.
 - Opening/closing the menu must never re-center or otherwise reposition the FAB.
+- Animation should remain minimal: the FAB is stationary and only the menu should move.
 
-The current `FloatingService.positionSubMenu()` still has the older vertical-center behavior when the FAB is near the top. This is the next branch-only code change to finish; do not merge that change to `main` until device-tested.
+A CI workspace successfully produced the intended `positionSubMenu()` patch, but GitHub Actions uses a read-only token in this repository, so that temporary CI commit could not be pushed. The floating-menu code therefore remains unchanged in the repository and must still be applied directly before it is considered implemented.
 
 ## Rollback
 
-If the stronger blur/opacity or `1.15x` font calibration is worse:
+If the stronger blur/opacity, `1.15x` font calibration, or landscape changes are worse:
 
 1. Do not merge the new experiment commits into `main`.
 2. `main` remains the accepted visual baseline from the earlier merge.
@@ -42,4 +49,11 @@ If the stronger blur/opacity or `1.15x` font calibration is worse:
 
 ## Verification rule
 
-No visual change is considered stable until GitHub Actions succeeds and the APK is tested on the device. Real-Time flicker remains intentionally paused.
+No visual change is considered stable until GitHub Actions succeeds and the APK is tested on the device. Test at minimum:
+- Portrait Manual TL
+- Landscape Manual TL after rotating the device
+- FAB near top, middle, and bottom
+- Short and long translations against the tolerance box
+- Light and very dark source backgrounds
+
+Real-Time flicker remains intentionally paused.
