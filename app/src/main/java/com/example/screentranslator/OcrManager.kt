@@ -17,7 +17,7 @@ data class DetectedText(
     val bottom: Int,
     val sourceTextSizePx: Float = 0f,
     val backgroundColor: Int = android.graphics.Color.BLACK,
-    val blurredPatch: Bitmap? = null
+    var blurredPatch: Bitmap? = null
 )
 
 class OcrManager(
@@ -79,11 +79,7 @@ class OcrManager(
                 detectedTexts.forEachIndexed { index, detected ->
                     Log.i(
                         TAG,
-                        "[$index] '${detected.text}' " +
-                                "mask=${detected.left},${detected.top},${detected.right},${detected.bottom} " +
-                                "font=${detected.sourceTextSizePx} " +
-                                "bg=#${detected.backgroundColor.toUInt().toString(16)} " +
-                                "blur=${detected.blurredPatch != null}"
+                        "[$index] '${detected.text}' box=${detected.left},${detected.top},${detected.right},${detected.bottom} font=${detected.sourceTextSizePx}"
                     )
                 }
 
@@ -92,12 +88,6 @@ class OcrManager(
             .addOnFailureListener { exception ->
                 Log.e(TAG, "OCR failed", exception)
                 onFailure(exception)
-            }
-            .addOnCompleteListener {
-                if (!bitmap.isRecycled) {
-                    bitmap.recycle()
-                }
-                Log.i(TAG, "OCR bitmap released")
             }
     }
 
