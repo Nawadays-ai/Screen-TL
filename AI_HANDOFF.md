@@ -34,6 +34,7 @@ Important files:
 - Manual TL was verified by the user after commit `ff06e2882ee852f51f4deecfd94bb0dbf95da8a3`: capture → OCR → translation → History → overlay works again.
 - The hard three-line limit was removed; Manual TL now processes every OCR line returned by the OCR manager.
 - Translation overlay can be displayed and is `FLAG_NOT_TOUCHABLE`.
+- Real-Time TL basic capture → OCR → translation → overlay loop has been verified by the user on-device.
 
 ## Manual TL Current Flow
 1. Manual TL is requested.
@@ -68,27 +69,41 @@ Important implementation details:
 - Real-Time does not write every frame to History. This is intentional to avoid duplicate History entries.
 - There is currently no change detection, OCR filtering, translation cache, or text-result deduplication.
 
-### Real-Time Verification Status
-**Not yet device-verified.** The code exists, but no claim should be made that Real-Time works until an APK containing this commit is installed and tested.
+### Real-Time Device Verification
+The user has now verified that the basic Real-Time pipeline works on the device: capture → OCR → translation → overlay repeats successfully.
 
-Expected diagnostic sequence while Real-Time is active:
-`Realtime translation started`
-→ `Realtime translation model ready`
-→ `Realtime captureOnce returned=true`
-→ `Realtime frame captured`
-→ `Realtime OCR completed: N lines`
-→ `Realtime overlay updated: N items`
+### Current Real-Time Bug: Overlay Flicker
+Observed behavior:
+- overlay appears for about 2 seconds;
+- overlay disappears;
+- it appears again after another couple of seconds;
+- some cycles have a gap of about 4 seconds.
 
-When stopped:
-`Realtime translation stopped`
+Likely cause: the current Real-Time scheduling path removes the overlay before every capture. This leaves a real empty period while capture/OCR/translation runs.
 
-## Important Capture Constraint
-The current architecture creates one `VirtualDisplay` when `ScreenCaptureManager.start()` is called and reuses that display for repeated `captureOnce()` requests. Do not change this to repeatedly call `MediaProjection.createVirtualDisplay()` for each Real-Time frame on Android 14+, because Android requires user consent for each capture session and disallows invoking `createVirtualDisplay()` multiple times on the same MediaProjection instance. Reuse the existing VirtualDisplay and ImageReader instead. citeturn0search3
+**Do not mark this bug fixed.** The intended functional fix is to keep one overlay window alive during Real-Time and avoid `removeView()`/re-add on every frame. The overlay contents/visibility should be controlled without repeatedly destroying the WindowManager window.
+
+## Translation Overlay Visual Polish — Latest Unverified Change
+Commit `55233dfe6a1d2d200bae92ed970944418d914ccd` updates only `TranslationOverlayView.kt` visual rendering.
+
+Changes:
+- lighter/semi-transparent black background;
+- smoother rounded corners;
+- consistent horizontal/vertical padding;
+- adaptive text size based on OCR box dimensions with min/max bounds;
+- text size reduced when translation is too wide;
+- long text gets ellipsis instead of spilling out of the OCR box;
+- vertical centering;
+- clipping to the OCR box;
+- no change to capture/OCR/translation pipeline;
+- overlay remains non-touchable.
+
+**Important:** This visual patch has **not yet been tested by the user**. Do not mark it stable. The user's screenshot showed the old visual state; the new rendering has not been confirmed visually yet.
 
 ## Known Bugs / Unverified Behavior
 
 ### Capture/OCR
-Earlier tests suggested OCR might be seeing only phone time/status bar content rather than the target application. `MainActivity` now requests `MediaProjectionConfig.createConfigForDefaultDisplay()` on Android 14+ so the intended capture scope is the full default display.
+Earlier tests suggested OCR might be seeing only phone time/status-bar content rather than the target application. `MainActivity` now requests `MediaProjectionConfig.createConfigForDefaultDisplay()` on Android 14+ so the intended capture scope is the full default display.
 
 The previous `detectedTexts.take(3)` limit has been removed.
 
@@ -99,15 +114,15 @@ Current behavior:
 - `FloatingService` carries each translated line together with its OCR bounding box.
 - After translation, `TranslationOverlayView` is added as a full-screen `TYPE_APPLICATION_OVERLAY`.
 - The overlay is `FLAG_NOT_TOUCHABLE`, so touches should pass to the target app.
-- Before a new capture, the previous overlay is removed from WindowManager so it cannot become OCR input.
+- Before a new Manual TL capture, the previous overlay is removed from WindowManager so it cannot become OCR input.
 
 Main verification risks:
 - bitmap coordinates may not map 1:1 to overlay coordinates on every device/orientation;
-- translated text may be too large/small for some OCR boxes;
-- long translations are currently shortened to fit one line;
+- tiny OCR boxes may produce very small text;
+- long translations are shortened to fit one line;
 - system bars and unrelated UI are not yet filtered.
 
-UI polish is intentionally deferred until the functional pipeline is stable.
+The visual rendering patch is present but unverified.
 
 ### History
 History uses `TranslationHistory.initialize(applicationContext)` from the service and `commit()` for writes. Manual TL uses History as persistent output. Real-Time currently does not add frame-by-frame entries.
@@ -136,11 +151,11 @@ Use Logcat tags:
 - The owner wants the AI to run the build workflow itself whenever a test build is needed. Do not claim a build passed unless the actual workflow result was checked.
 
 ## Next Recommended Milestone
-1. Build/install the commit containing the Real-Time loop.
-2. Verify Real-Time produces repeated `Realtime frame captured` and `Realtime OCR completed` logs.
-3. Verify overlay updates while the target app content changes.
+1. Test the latest overlay visual patch on-device.
+2. Fix Real-Time overlay flicker by keeping the overlay WindowManager window alive between frames.
+3. Test Real-Time for at least 15–30 seconds with a static page, then change/scroll the target content.
 4. Verify stopping Real-Time removes the overlay and leaves the floating service alive.
-5. Run Manual TL after stopping Real-Time and confirm Manual TL still works.
-6. If the basic loop is stable, add change detection and translation caching.
+5. Run Manual TL after Real-Time and confirm Manual TL still works.
+6. If stable, add change detection and translation caching.
 7. Then add OCR filtering and optimize CPU/battery usage.
-8. Only after functional stability, return to overlay/UI polish.
+8. Only after functional stability, continue broader UI polish.
