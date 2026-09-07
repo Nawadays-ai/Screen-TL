@@ -105,6 +105,11 @@ class ScreenCaptureManager(
     }
 
     fun captureOnce(callback: (Bitmap) -> Unit): Boolean {
+        if (!ensureCurrentDisplayConfiguration()) {
+            Log.e(TAG, "captureOnce rejected: current display configuration is unavailable")
+            return false
+        }
+
         if (mediaProjection == null || imageReader == null) {
             Log.e(TAG, "captureOnce rejected: projection=${mediaProjection != null}, imageReader=${imageReader != null}")
             return false
