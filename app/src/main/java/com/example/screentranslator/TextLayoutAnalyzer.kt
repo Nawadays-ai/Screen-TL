@@ -34,7 +34,13 @@ object TextLayoutAnalyzer {
             box.height().toFloat()
         }
 
-        val sourceTextSizePx = (glyphHeight * 0.88f).coerceIn(8f, 96f)
+        // Paint.textSize is not the same measurement as visible OCR glyph
+        // height. The previous 0.88 multiplier made the translation visibly
+        // smaller than the source. Calibrate Paint size from glyph height so
+        // the translation keeps approximately the source's visual height.
+        // Width fitting is handled by TranslationOverlayView without reducing
+        // this vertical text size.
+        val sourceTextSizePx = (glyphHeight * 1.45f).coerceIn(8f, 96f)
         val horizontalPad = (glyphHeight * 0.28f).roundToInt().coerceIn(3, 24)
         val verticalPad = (glyphHeight * 0.30f).roundToInt().coerceIn(2, 20)
 
@@ -72,7 +78,7 @@ object TextLayoutAnalyzer {
         }
         for (y in top until bottom step stepY) {
             if (left > 1) samples.add(bitmap.getPixel(left - 1, y.coerceIn(0, bitmap.height - 1)))
-            if (right < bitmap.width) samples.add(bitmap.getPixel(right, y.coerceIn(0, bitmap.height - 1)))
+            if (right < bitmap.width) samples.add(bitmap.getPixel(right, y.coerceIn(0, bitmap.width - 1)))
         }
 
         if (samples.isEmpty()) return Color.BLACK
