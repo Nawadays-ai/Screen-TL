@@ -27,12 +27,15 @@ object ApiSettings {
 
     fun getManualProvider(): String {
         ensureInitialized()
-        return preferences.getString(KEY_MANUAL_PROVIDER, PROVIDER_ML_KIT) ?: PROVIDER_ML_KIT
+        // DeepL is an API-only connection now. If an older install stored it as
+        // the manual provider, transparently migrate that selection to ML Kit.
+        val stored = preferences.getString(KEY_MANUAL_PROVIDER, PROVIDER_ML_KIT) ?: PROVIDER_ML_KIT
+        return if (stored == PROVIDER_ML_KIT) stored else PROVIDER_ML_KIT
     }
 
     fun setManualProvider(provider: String) {
         ensureInitialized()
-        preferences.edit().putString(KEY_MANUAL_PROVIDER, provider).apply()
+        preferences.edit().putString(KEY_MANUAL_PROVIDER, PROVIDER_ML_KIT).apply()
     }
 
     fun getGeminiKey(): String? {
@@ -63,12 +66,8 @@ object ApiSettings {
 
     fun setGeminiEnabled(value: Boolean) {
         ensureInitialized()
-        preferences.edit()
-            .putBoolean(KEY_GEMINI_ENABLED, value)
-            .apply()
-        if (value) {
-            preferences.edit().putBoolean(KEY_DEEPL_ENABLED, false).apply()
-        }
+        preferences.edit().putBoolean(KEY_GEMINI_ENABLED, value).apply()
+        if (value) preferences.edit().putBoolean(KEY_DEEPL_ENABLED, false).apply()
     }
 
     fun getDeepLKey(): String? {
@@ -99,20 +98,10 @@ object ApiSettings {
 
     fun setDeepLEnabled(value: Boolean) {
         ensureInitialized()
-        preferences.edit()
-            .putBoolean(KEY_DEEPL_ENABLED, value)
-            .apply()
-        if (value) {
-            preferences.edit().putBoolean(KEY_GEMINI_ENABLED, false).apply()
-        }
+        preferences.edit().putBoolean(KEY_DEEPL_ENABLED, value).apply()
+        if (value) preferences.edit().putBoolean(KEY_GEMINI_ENABLED, false).apply()
     }
 
-    private fun initialized(): Boolean {
-        ensureInitialized()
-        return true
-    }
-
-    private fun ensureInitialized() {
-        check(::preferences.isInitialized) { "ApiSettings.initialize(context) must be called first" }
-    }
+    private fun initialized(): Boolean { ensureInitialized(); return true }
+    private fun ensureInitialized() { check(::preferences.isInitialized) { "ApiSettings.initialize(context) must be called first" } }
 }
