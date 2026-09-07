@@ -233,11 +233,13 @@ class FloatingService : Service() {
         val placeRight = fabScreenX < screenWidth / 2
         val placeAbove = fabScreenY > screenHeight / 2
         val rootWidth = menuWidth + gap + fabSize
-        val rootHeight = if (placeAbove) menuHeight + gap + fabSize else maxOf(menuHeight, fabSize)
-        val rawX = if (placeRight) fabScreenX else fabScreenX - menuWidth - gap
-        val rawY = if (placeAbove) fabScreenY - menuHeight - gap else fabScreenY - ((rootHeight - fabSize) / 2)
-        val rootX = rawX.coerceIn(0, (screenWidth - rootWidth).coerceAtLeast(0))
-        val rootY = rawY.coerceIn(0, (screenHeight - rootHeight).coerceAtLeast(0))
+// The root contains the complete menu + FAB stack so the FAB keeps
+// its exact dragged screen coordinate when the menu opens.
+val rootHeight = menuHeight + gap + fabSize
+val rawX = if (placeRight) fabScreenX else fabScreenX - menuWidth - gap
+val rawY = if (placeAbove) fabScreenY - menuHeight - gap else fabScreenY
+val rootX = rawX.coerceIn(0, (screenWidth - rootWidth).coerceAtLeast(0))
+val rootY = rawY.coerceIn(0, (screenHeight - rootHeight).coerceAtLeast(0))rawY.coerceIn(0, (screenHeight - rootHeight).coerceAtLeast(0))
         val menuParams = layoutSubMenu.layoutParams as FrameLayout.LayoutParams
         val fabParams = fabMain.layoutParams as FrameLayout.LayoutParams
         menuParams.width = menuWidth
@@ -249,12 +251,12 @@ class FloatingService : Service() {
         fabParams.leftMargin = 0
         fabParams.topMargin = 0
         if (placeRight) {
-            menuParams.gravity = if (placeAbove) Gravity.END or Gravity.TOP else Gravity.END or Gravity.CENTER_VERTICAL
-            fabParams.gravity = if (placeAbove) Gravity.START or Gravity.BOTTOM else Gravity.START or Gravity.CENTER_VERTICAL
-        } else {
-            menuParams.gravity = if (placeAbove) Gravity.START or Gravity.TOP else Gravity.START or Gravity.CENTER_VERTICAL
-            fabParams.gravity = if (placeAbove) Gravity.END or Gravity.BOTTOM else Gravity.END or Gravity.CENTER_VERTICAL
-        }
+    menuParams.gravity = Gravity.END or Gravity.TOP
+    fabParams.gravity = if (placeAbove) Gravity.START or Gravity.BOTTOM else Gravity.START or Gravity.TOP
+} else {
+    menuParams.gravity = Gravity.START or Gravity.TOP
+    fabParams.gravity = if (placeAbove) Gravity.END or Gravity.BOTTOM else Gravity.END or Gravity.TOP
+}
         layoutSubMenu.layoutParams = menuParams
         fabMain.layoutParams = fabParams
         params?.let {
