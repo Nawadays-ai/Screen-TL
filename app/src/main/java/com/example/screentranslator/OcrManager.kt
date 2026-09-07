@@ -16,7 +16,8 @@ data class DetectedText(
     val right: Int,
     val bottom: Int,
     val sourceTextSizePx: Float = 0f,
-    val backgroundColor: Int = android.graphics.Color.BLACK
+    val backgroundColor: Int = android.graphics.Color.BLACK,
+    val blurredPatch: Bitmap? = null
 )
 
 class OcrManager(
@@ -66,7 +67,8 @@ class OcrManager(
                                     right = layout.right,
                                     bottom = layout.bottom,
                                     sourceTextSizePx = layout.sourceTextSizePx,
-                                    backgroundColor = layout.backgroundColor
+                                    backgroundColor = layout.backgroundColor,
+                                    blurredPatch = layout.blurredPatch
                                 )
                             )
                         }
@@ -80,7 +82,8 @@ class OcrManager(
                         "[$index] '${detected.text}' " +
                                 "mask=${detected.left},${detected.top},${detected.right},${detected.bottom} " +
                                 "font=${detected.sourceTextSizePx} " +
-                                "bg=#${detected.backgroundColor.toUInt().toString(16)}"
+                                "bg=#${detected.backgroundColor.toUInt().toString(16)} " +
+                                "blur=${detected.blurredPatch != null}"
                     )
                 }
 
