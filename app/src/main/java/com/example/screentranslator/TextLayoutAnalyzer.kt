@@ -7,8 +7,8 @@ import kotlin.math.roundToInt
 
 /**
  * Converts ML Kit line geometry into rendering geometry for the Manual overlay.
- * The analyzer expands the tight OCR glyph box, estimates source font height,
- * and samples the surrounding screen color so the source text can be covered.
+ * The renderer uses this geometry to cover the source line without making the
+ * translated text oversized or vertically distorted.
  */
 object TextLayoutAnalyzer {
 
@@ -34,15 +34,16 @@ object TextLayoutAnalyzer {
             box.height().toFloat()
         }
 
-        // Paint.textSize is not the same measurement as visible OCR glyph
-        // height. The previous 0.88 multiplier made the translation visibly
-        // smaller than the source. Calibrate Paint size from glyph height so
-        // the translation keeps approximately the source's visual height.
-        // Width fitting is handled by TranslationOverlayView without reducing
-        // this vertical text size.
-        val sourceTextSizePx = (glyphHeight * 1.45f).coerceIn(8f, 96f)
-        val horizontalPad = (glyphHeight * 0.28f).roundToInt().coerceIn(3, 24)
-        val verticalPad = (glyphHeight * 0.30f).roundToInt().coerceIn(2, 20)
+        // OCR glyph height is the visible height of the source characters,
+        // while Paint.textSize is the font's full em size. A smaller calibration
+        // than the old 1.45x keeps the translation close to the source instead
+        // of producing the oversized/tall text seen on the device.
+        val sourceTextSizePx = (glyphHeight * 1.10f).coerceIn(8f, 96f)
+
+        // Give the mask a little breathing room around the source glyphs, but
+        // keep it tight enough that adjacent lines do not get covered.
+        val horizontalPad = (glyphHeight * 0.20f).roundToInt().coerceIn(3, 18)
+        val verticalPad = (glyphHeight * 0.18f).roundToInt().coerceIn(2, 12)
 
         val left = (box.left - horizontalPad).coerceIn(0, bitmap.width - 1)
         val top = (box.top - verticalPad).coerceIn(0, bitmap.height - 1)
@@ -78,7 +79,7 @@ object TextLayoutAnalyzer {
         }
         for (y in top until bottom step stepY) {
             if (left > 1) samples.add(bitmap.getPixel(left - 1, y.coerceIn(0, bitmap.height - 1)))
-            if (right < bitmap.width) samples.add(bitmap.getPixel(right, y.coerceIn(0, bitmap.width - 1)))
+            if (right < bitmap.width) samples.add(bitmap.getPixel(right, y.coerceIn(0, bitmap.height - 1)))
         }
 
         if (samples.isEmpty()) return Color.BLACK
