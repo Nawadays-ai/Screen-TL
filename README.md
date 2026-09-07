@@ -1,7 +1,7 @@
 # Screen-TL
 
 > ## 🤖 AI AGENT — BACA DOKUMEN INI TERLEBIH DAHULU
-> Sebelum mengubah build, signing, package ID, APK distribution, atau melanjutkan pekerjaan dari agent sebelumnya, baca **`AI_README.md`**, **`AI_HANDOFF.md`**, dan terutama **`SIGNING_SETUP.md`**. `SIGNING_SETUP.md` adalah kontrak permanen signing APK Screen-TL. **Jangan membuat Android signing key baru sebagai workaround.**
+> Sebelum mengubah build, signing, package ID, APK distribution, atau melanjutkan pekerjaan dari agent sebelumnya, baca **`AI_README.md`**, **`AI_HANDOFF.md`**, dan **`PROJECT_NOTES.md`**. Untuk aturan signing permanen, baca **`SIGNING_SETUP.md`** jika file tersebut tersedia pada branch/default repository. **Jangan membuat Android signing key baru sebagai workaround.**
 
 Android screen translator yang dirancang untuk menerjemahkan teks dari aplikasi lain melalui screen capture, OCR, translation, dan overlay.
 
@@ -60,7 +60,7 @@ Window overlay Manual TL sekarang dibuat pada ukuran pixel yang sama dengan fram
 4. Floating menu adaptif dan `Hapus Overlay` perlu diuji ulang pada perangkat.
 5. True backdrop blur tingkat-window belum digunakan; implementasi sekarang adalah **local source-patch blur**, bukan blur langsung terhadap window aplikasi di bawah.
 6. Real-Time masih berkedip dan sengaja ditunda.
-7. APK update sedang dimigrasikan ke **permanent CI signing key**; lihat `SIGNING_SETUP.md` dan jangan membuat key baru.
+7. APK update sedang dimigrasikan ke **permanent CI signing key**; aturan AI handoff dan `SIGNING_SETUP.md` menjadi sumber aturan signing.
 
 ## Roadmap
 
@@ -165,6 +165,6 @@ Artifact tersebut **belum** mencakup iterasi blur/bounding-box terbaru.
 
 ## Dokumen Pengembangan
 - `PROJECT_NOTES.md` — catatan teknis dan riwayat kerja.
-- `AI_HANDOFF.md` — konteks teknis untuk AI berikutnya.
+- `AI_HANDOFF.md` — konteks teknis untuk AI berikutnya; termasuk aturan permanent signing.
 - `AI_README.md` — aturan operasional AI.
-- `SIGNING_SETUP.md` — **kontrak permanen Android signing; wajib dibaca sebelum menyentuh build/signing/APK**.
+- `SIGNING_SETUP.md` — **kontrak permanen Android signing; wajib dibaca jika tersedia pada branch/default repository**.
