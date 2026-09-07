@@ -27,20 +27,67 @@ Package: `com.example.screentranslator`
 - `TranslationHistory.kt`: persistent SharedPreferences history.
 
 ## Important Regression Evidence
-The user tested build/commit `e1c7006c495d4ea1e8056ad251b86492d54bf939` and reported:
+The user tested a recent Manual TL build and reported:
 - source remained visible under overlay;
-- translation size did not follow source;
-- floating menu stacked over FAB;
-- Hapus Overlay did not appear.
+- translation appeared displaced so the screen looked smaller: upper results moved downward and lower results moved upward;
+- Screen-TL floating menu was also translated;
+- tapping the floating button again did not close the open menu;
+- text size itself was already acceptable.
 
-That build must not be treated as successful for the visual requirements.
+Do not treat that visual result as stable.
 
-## New Manual Overlay Architecture — 2026-09-07
-The old renderer used a tight OCR line box and fixed black background. The new design is:
+## Latest Manual Overlay Fix — 2026-09-07
+The most important current issue is coordinate-space mismatch between MediaProjection bitmap coordinates and the overlay window.
 
-`Capture → ML Kit OCR → TextLayoutAnalyzer → Translation → TranslationOverlayView`
+### Coordinate Space
+`FloatingService.showTranslationOverlay()` now:
+- creates the overlay window at `sourceWidth x sourceHeight` pixels;
+- uses `FLAG_LAYOUT_IN_SCREEN` instead of `FLAG_LAYOUT_NO_LIMITS`;
+- on Android P+ uses `LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS`;
+- on Android R+ calls `setFitInsetsTypes(0)`.
 
-### TextLayoutAnalyzer
+`TranslationOverlayView` still scales directly from source dimensions to actual view dimensions as a fallback, but it does not center or apply aspect-ratio compensation.
+
+Commit: `5ebb3bfda9a6474e0de027159ce7b2c6725923a`.
+
+### Mask / Background
+`TranslationOverlayView.kt` now:
+- slightly expands horizontal/vertical padding;
+- draws a more solid replacement mask using local sampled background color with alpha 245;
+- uses rounded corners;
+- keeps source-derived font size and long-text fitting.
+
+Commit: `e6b0bd2fc03a2e55e3335dc2a4121c6155bd6e98`.
+
+True backdrop blur is intentionally not implemented yet. Standard `RenderEffect` blurs the view's own rendered content; it does not automatically blur the underlying third-party app for this overlay use case.
+
+**Status: not yet device-tested after these fixes.**
+
+## Floating Menu Fix
+The previous touch listener hid the submenu during `ACTION_DOWN`, then `ACTION_UP` saw it hidden and opened it again. This made a second tap appear unable to close the menu.
+
+Current behavior:
+- `ACTION_DOWN`: records touch position only;
+- `ACTION_MOVE`: once movement exceeds the drag threshold, submenu is hidden and dragging continues;
+- `ACTION_UP`: a simple tap calls the normal open/close toggle.
+
+Commit: `5ebb3bfda9a6474e0de027159ce7b2c6725923a`.
+
+**Status: not yet device-tested after this fix.**
+
+## Manual TL Capture / Menu Filtering
+The user reported that the Screen-TL menu itself was being OCR-translated.
+
+Current mitigation:
+1. close submenu;
+2. wait `200 ms` (`MANUAL_CAPTURE_UI_SETTLE_MS`);
+3. call `captureOnce()`.
+
+This gives the WindowManager time to apply the menu's `GONE` state before the frame used for OCR is accepted.
+
+This is a timing mitigation, not yet a full OCR filter. A later milestone can explicitly exclude status bar, FAB, or Screen-TL UI regions from OCR.
+
+## TextLayoutAnalyzer
 For every OCR line it:
 1. reads the line bounding box;
 2. reads element bounding boxes and uses their median height to estimate source glyph/font size;
@@ -50,34 +97,10 @@ For every OCR line it:
 
 Commit: `e0ec39f595f2bb66e09d46d5be469fd7ae6deaab`.
 
-### OcrManager
+## OcrManager
 `DetectedText` carries expanded mask coordinates, `sourceTextSizePx`, and `backgroundColor`.
 
 Commit: `28dab21490b73a5c94848971259c9096207cca43`.
-
-### TranslationOverlayView
-The renderer paints the sampled background, starts from source font size, reduces size when needed, clips to the replacement mask, and remains `FLAG_NOT_TOUCHABLE`.
-
-Commit: `513e43e1f8c190903f2d1dc539028f0fed9e3e28`.
-
-**Status: not yet device-tested.**
-
-## Floating Menu
-Previous XML used a 48dp root plus `translationX`, which caused stacking problems.
-
-New design:
-- root uses `wrap_content`;
-- submenu has no `translationX`;
-- WindowManager root expands to fit menu + FAB;
-- FAB left → menu right;
-- FAB right → menu left;
-- FAB lower half → menu above;
-- bottom-right → menu above-left relative to FAB.
-
-Layout commit: `e59a2b3adef5ff5391dcda1a12df8f0d6d19ec5e`.
-Service commit: `9dbf8663eaab80f9844c64824964b3e5769e0156`.
-
-**Status: not yet device-tested.**
 
 ## Hapus Overlay
 Required and implemented:
@@ -87,20 +110,22 @@ Required and implemented:
 - service and History remain alive;
 - button hides again after removal.
 
-**Status: not yet device-tested.**
+**Status: not yet device-tested after latest changes.**
 
 ## Manual TL Flow
 1. Remove previous overlay.
-2. Keep FAB usable.
-3. Request one MediaProjection frame.
-4. Capture timeout: 3 seconds.
-5. OCR all returned lines.
-6. Analyze font/mask/background metadata.
-7. Prepare ML Kit translation model.
-8. Translate every detected line sequentially.
-9. Save History.
-10. Render non-touchable overlay.
-11. Expose Hapus Overlay.
+2. Close the floating submenu.
+3. Wait 200 ms for menu state to settle.
+4. Keep FAB usable.
+5. Request one MediaProjection frame.
+6. Capture timeout: 3 seconds.
+7. OCR all returned lines.
+8. Analyze font/mask/background metadata.
+9. Prepare ML Kit translation model.
+10. Translate every detected line sequentially.
+11. Save History.
+12. Render non-touchable overlay in capture pixel space.
+13. Expose Hapus Overlay.
 
 ## Real-Time — Paused
 Basic Real-Time works but flickers because the current loop removes the overlay before each capture. Do not fix this unless the user explicitly asks to resume Real-Time work.
@@ -110,11 +135,11 @@ Basic Real-Time works but flickers because the current loop removes the overlay 
 
 APK update conflict is still suspected to be signing-key mismatch between debug APKs.
 
-Build automation now runs `assembleDebug` automatically on every push to `main`; `workflow_dispatch` remains available. The workflow was changed to use `gradle/actions/setup-gradle@v6` with Gradle 8.2 because the previous wrapper-generation step stalled.
+Build automation runs `assembleDebug` automatically on every push to `main`; `workflow_dispatch` remains available. The workflow uses `gradle/actions/setup-gradle@v6` with Gradle 8.2.
 
-Final build workflow commit: `cedddc4ce6bf26f2e1bf7a36ad609cca568854cd`.
+Last verified successful build: commit `cedddc4ce6bf26f2e1bf7a36ad609cca568854cd`, artifact `ScreenTranslator-APK`, artifact ID `10014166550`.
 
-**Build verified:** GitHub Actions completed `assembleDebug` successfully and uploaded artifact `ScreenTranslator-APK` (artifact ID `10014166550`) for commit `cedddc4ce6bf26f2e1bf7a36ad609cca568854cd`.
+The latest overlay/menu code has not yet been verified by a new GitHub Actions result in this handoff.
 
 ## Diagnostic Logging
 Tags:
@@ -134,11 +159,12 @@ Tags:
 - Never claim a build passed without a real build result.
 
 ## Next Test
-Use the built APK and verify:
+After the automatic build finishes, use the APK and verify:
 1. Manual TL still completes and History is saved.
-2. Source is fully covered by the replacement mask.
-3. Background looks like the original surrounding area rather than a fixed black box.
-4. Translation font size follows the source.
-5. Long translation shrinks appropriately.
-6. FAB left/right/bottom-right opens the menu without overlap.
-7. Hapus Overlay appears after Manual TL, removes overlay, and disappears.
+2. Upper and lower translation boxes stay exactly over their source text; no screen-shrinking effect.
+3. Source is fully covered by the replacement mask.
+4. Screen-TL menu is absent from the captured/translated frame.
+5. FAB second tap closes the menu.
+6. Background looks like the original surrounding area and the mask is more solid.
+7. Translation font size follows the source.
+8. Hapus Overlay appears after Manual TL, removes overlay, and disappears.
