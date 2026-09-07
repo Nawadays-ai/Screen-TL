@@ -9,16 +9,14 @@ import android.graphics.Typeface
 import android.view.View
 
 /**
- * Draws translated text directly over the OCR source region without consuming
- * touch events. The source region is fully covered so the original text is not
- * visible underneath the translation.
+ * Renders Manual TL directly over the source text region. Geometry and source
+ * font size come from TextLayoutAnalyzer; the sampled background color covers
+ * the source instead of drawing a fixed black rectangle.
  */
 class TranslationOverlayView(context: Context) : View(context) {
 
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = Color.BLACK
-        alpha = 255
     }
 
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -29,11 +27,10 @@ class TranslationOverlayView(context: Context) : View(context) {
         isSubpixelText = true
     }
 
-    private val horizontalPadding = 6f
-    private val verticalPadding = 4f
-    private val cornerRadius = 5f
-    private val minTextSize = 10f
-    private val maxTextSize = 42f
+    private val horizontalPaddingRatio = 0.16f
+    private val verticalPaddingRatio = 0.16f
+    private val minTextSizePx = 8f
+    private val maxTextSizePx = 96f
 
     private var items: List<TranslationOverlayItem> = emptyList()
     private var sourceWidth = 1
@@ -68,24 +65,34 @@ class TranslationOverlayView(context: Context) : View(context) {
             val top = item.top * scaleY
             val right = item.right * scaleX
             val bottom = item.bottom * scaleY
-
             if (right <= left || bottom <= top) return@forEach
 
             val boxWidth = right - left
             val boxHeight = bottom - top
+            val horizontalPadding = (boxHeight * horizontalPaddingRatio).coerceIn(2f, 18f)
+            val verticalPadding = (boxHeight * verticalPaddingRatio).coerceIn(2f, 12f)
             val maxTextWidth = (boxWidth - horizontalPadding * 2f).coerceAtLeast(1f)
             val maxTextHeight = (boxHeight - verticalPadding * 2f).coerceAtLeast(1f)
 
-            // Start from a font size based on the original OCR box. Only shrink it
-            // when the translated text is wider than the original source region.
-            val textSize = findTextSize(item.translatedText, maxTextWidth, maxTextHeight)
-            textPaint.textSize = textSize
-            val fittedText = fitText(item.translatedText, maxTextWidth)
-            if (fittedText.isEmpty()) return@forEach
+            backgroundPaint.color = item.backgroundColor
+            canvas.drawRect(RectF(left, top, right, bottom), backgroundPaint)
 
-            // Opaque background completely replaces the original source pixels.
-            val background = RectF(left, top, right, bottom)
-            canvas.drawRoundRect(background, cornerRadius, cornerRadius, backgroundPaint)
+            val sourceFontSize = if (item.sourceTextSizePx > 0f) {
+                item.sourceTextSizePx * scaleY
+            } else {
+                boxHeight * 0.62f
+            }
+
+            val textSize = findTextSize(
+                item.translatedText,
+                sourceFontSize.coerceIn(minTextSizePx, maxTextSizePx),
+                maxTextWidth,
+                maxTextHeight
+            )
+            textPaint.textSize = textSize
+
+            val fittedText = fitSingleLine(item.translatedText, maxTextWidth)
+            if (fittedText.isEmpty()) return@forEach
 
             val metrics = textPaint.fontMetrics
             val textHeight = metrics.descent - metrics.ascent
@@ -93,35 +100,44 @@ class TranslationOverlayView(context: Context) : View(context) {
 
             canvas.save()
             canvas.clipRect(left, top, right, bottom)
-            canvas.drawText(
-                fittedText,
-                left + horizontalPadding,
-                baseline,
-                textPaint
-            )
+            canvas.drawText(fittedText, left + horizontalPadding, baseline, textPaint)
             canvas.restore()
         }
     }
 
-    private fun findTextSize(text: String, maxWidth: Float, maxHeight: Float): Float {
-        val baseSize = (maxHeight * 0.62f).coerceIn(minTextSize, maxTextSize)
-        textPaint.textSize = baseSize
+    private fun findTextSize(
+        text: String,
+        sourceSize: Float,
+        maxWidth: Float,
+        maxHeight: Float
+    ): Float {
+        var size = sourceSize
+        textPaint.textSize = size
 
-        val measuredWidth = textPaint.measureText(text)
-        if (measuredWidth <= maxWidth) return baseSize
+        val width = textPaint.measureText(text)
+        if (width > maxWidth && width > 0f) {
+            size *= maxWidth / width
+        }
 
-        // Scale the font down only as much as necessary for longer translations.
-        val widthBasedSize = (baseSize * maxWidth / measuredWidth)
-            .coerceIn(minTextSize, baseSize)
-        textPaint.textSize = widthBasedSize
-        return widthBasedSize
+        textPaint.textSize = size
+        val metrics = textPaint.fontMetrics
+        val height = metrics.descent - metrics.ascent
+        if (height > maxHeight && height > 0f) {
+            size *= maxHeight / height
+        }
+
+        return size.coerceIn(minTextSizePx, sourceSize)
     }
 
-    private fun fitText(text: String, maxWidth: Float): String {
-        val normalized = text.replace("\n", " ").trim()
+    private fun fitSingleLine(text: String, maxWidth: Float): String {
+        val normalized = text.replace(Regex("\\s+"), " ").trim()
         if (normalized.isEmpty()) return ""
+
         if (textPaint.measureText(normalized) <= maxWidth) return normalized
 
+        // The font has already been reduced to the source-compatible size. If a
+        // translation is still exceptionally long, retain as much as possible
+        // rather than letting it paint outside the source region.
         val ellipsis = "…"
         var end = normalized.length
         while (end > 1 && textPaint.measureText(normalized.substring(0, end) + ellipsis) > maxWidth) {
@@ -136,5 +152,7 @@ data class TranslationOverlayItem(
     val left: Int,
     val top: Int,
     val right: Int,
-    val bottom: Int
+    val bottom: Int,
+    val sourceTextSizePx: Float = 0f,
+    val backgroundColor: Int = Color.BLACK
 )
