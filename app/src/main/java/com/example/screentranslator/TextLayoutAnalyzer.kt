@@ -38,9 +38,9 @@ object TextLayoutAnalyzer {
             box.height().toFloat()
         }
 
-        // Paint.textSize is larger than visible glyph height. 1.10x is a
-        // conservative calibration so the translation stays close to source.
-        val sourceTextSizePx = (glyphHeight * 1.10f).coerceIn(8f, 96f)
+        // Slightly increase the calibrated source size after device testing.
+        // This stays uniform and does not distort glyph proportions.
+        val sourceTextSizePx = (glyphHeight * 1.15f).coerceIn(8f, 96f)
 
         val horizontalPad = (glyphHeight * 0.20f).roundToInt().coerceIn(3, 18)
         val verticalPad = (glyphHeight * 0.18f).roundToInt().coerceIn(2, 12)
@@ -69,11 +69,11 @@ object TextLayoutAnalyzer {
         right: Int,
         bottom: Int
     ): Int {
-        val samples = ArrayList<Int>(32)
+        val samples = ArrayList<Int>(48)
         val width = right - left
         val height = bottom - top
-        val stepX = (width / 8).coerceAtLeast(1)
-        val stepY = (height / 4).coerceAtLeast(1)
+        val stepX = (width / 12).coerceAtLeast(1)
+        val stepY = (height / 6).coerceAtLeast(1)
 
         // Sample outside the source box. This is the only visual information
         // transferred into the replacement background.
