@@ -18,9 +18,9 @@ import android.view.View
  * that pass. Therefore one translation can never be hidden by the background
  * of another translation when their boxes overlap.
  *
- * Intersecting replacement areas are also assigned one shared background
- * color. This makes overlapping boxes visually merge instead of producing
- * stacked, differently-colored rectangles.
+ * Intersecting tolerance boxes are also assigned one shared background color.
+ * This makes a stacked cluster visually consistent even when each individual
+ * translation only paints part of its tolerance width.
  */
 class TranslationOverlayView(context: Context) : View(context) {
 
@@ -55,7 +55,7 @@ class TranslationOverlayView(context: Context) : View(context) {
         val textSize: Float,
         val horizontalPadding: Float
     ) {
-        fun fillRect() = RectF(left, top, fillRight, bottom)
+        fun boxRect() = RectF(left, top, right, bottom)
     }
 
     private var renderItems: List<RenderItem> = emptyList()
@@ -94,8 +94,7 @@ class TranslationOverlayView(context: Context) : View(context) {
         val scaleX = width.toFloat() / sourceWidth.toFloat()
         val scaleY = height.toFloat() / sourceHeight.toFloat()
 
-        // PASS 1: draw every replacement/background. Overlapping items that
-        // belong to the same group use exactly the same effective color.
+        // PASS 1: every replacement/background first.
         renderItems.forEachIndexed { index, renderItem ->
             val left = renderItem.left * scaleX
             val top = renderItem.top * scaleY
@@ -118,8 +117,8 @@ class TranslationOverlayView(context: Context) : View(context) {
             canvas.restore()
         }
 
-        // PASS 2: text is always last. This is the important anti-overlap
-        // rule: background from another OCR item can never cover this text.
+        // PASS 2: all translation text is drawn last. A neighboring box can
+        // therefore never cover the text of an earlier item.
         renderItems.forEachIndexed { index, renderItem ->
             val left = renderItem.left * scaleX
             val top = renderItem.top * scaleY
@@ -157,9 +156,9 @@ class TranslationOverlayView(context: Context) : View(context) {
     }
 
     /**
-     * Builds connected overlap groups. If A overlaps B and B overlaps C,
-     * all three share one background color, even if A and C do not directly
-     * intersect. This prevents visible seams inside a stacked text cluster.
+     * Builds connected overlap groups using the COMPLETE tolerance box, not
+     * only the currently colored portion. If A overlaps B and B overlaps C,
+     * all three share one color group to avoid visible seams in a text stack.
      */
     private fun buildOverlapGroups() {
         if (renderItems.isEmpty()) {
@@ -186,9 +185,9 @@ class TranslationOverlayView(context: Context) : View(context) {
         }
 
         for (i in renderItems.indices) {
-            val a = renderItems[i].fillRect()
+            val a = renderItems[i].boxRect()
             for (j in i + 1 until renderItems.size) {
-                val b = renderItems[j].fillRect()
+                val b = renderItems[j].boxRect()
                 if (RectF.intersects(a, b)) union(i, j)
             }
         }
@@ -227,8 +226,6 @@ class TranslationOverlayView(context: Context) : View(context) {
         baseColor: Int,
         radius: Float
     ) {
-        // The source patch itself is never copied. We only reconstruct a
-        // smooth local field from the sampled perimeter color.
         val edge = adjustColor(baseColor, 0.94f)
         val deep = adjustColor(baseColor, 0.88f)
         backgroundPaint.alpha = 255
@@ -304,7 +301,6 @@ class TranslationOverlayView(context: Context) : View(context) {
         val desiredWidth = (measuredWidth + horizontalPadding * 2f).coerceAtLeast(baseWidth)
         val boxWidth = desiredWidth.coerceAtMost(maxBoxWidth)
 
-        // Source LEFT edge stays fixed. Extra room is only added to the right.
         val left = baseLeft
         val right = (left + boxWidth).coerceAtMost(width.toFloat())
         val maxTextWidth = (right - left - horizontalPadding * 2f).coerceAtLeast(1f)
