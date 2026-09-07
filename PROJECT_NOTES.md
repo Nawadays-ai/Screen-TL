@@ -6,14 +6,14 @@ Screen-TL adalah aplikasi Android untuk menerjemahkan teks yang terlihat di laya
 ## Status Saat Ini
 - Screen Capture: berhasil membuat screenshot; cakupan frame terhadap aplikasi target masih perlu diverifikasi lebih luas.
 - Floating button: berhasil tampil dan dapat digeser.
-- Floating menu: root sekarang dinamis dan menu dihitung relatif terhadap posisi FAB; belum diuji pengguna.
+- Floating menu: root dinamis dan menu dihitung relatif terhadap posisi FAB; belum diuji pengguna.
 - Permission overlay dan MediaProjection: berhasil.
-- OCR: ML Kit menghasilkan line + bounding box; metadata layout tambahan baru diterapkan.
+- OCR: ML Kit menghasilkan line + bounding box; metadata layout tambahan sudah diterapkan.
 - Google ML Kit Translation: pipeline Manual TL sudah berjalan sampai History dan overlay pada pengujian sebelumnya.
 - Translation History: persisten dan service-safe.
-- Manual overlay: sekarang memakai `TextLayoutAnalyzer` untuk ukuran font, mask yang diperluas, dan estimasi warna background; belum diuji pengguna.
+- Manual overlay: memakai `TextLayoutAnalyzer` untuk ukuran font, mask yang diperluas, dan estimasi warna background; belum diuji pengguna.
 - Hapus Overlay: tersedia di menu dan hanya ditampilkan ketika overlay Manual TL aktif; belum diuji pengguna.
-- Real-Time TL: dasar terbukti bekerja, flicker tetap ditunda.
+- Real-Time TL: dasar terbukti bekerja, flicker ditunda.
 
 ## Masalah Aktif
 
@@ -33,7 +33,7 @@ Solusi baru:
 Status: **belum diuji pengguna**.
 
 ### 3. Floating Menu / Hapus Overlay
-XML sebelumnya memiliki root 48dp dengan submenu yang dipaksa keluar memakai `translationX`. Ini membuat menu dapat bertumpuk dengan FAB dan tombol Hapus Overlay tidak terlihat seperti yang diharapkan.
+XML sebelumnya memiliki root 48dp dengan submenu yang dipaksa keluar memakai `translationX`. Itu membuat menu dapat bertumpuk dengan FAB dan tombol Hapus Overlay tidak terlihat seperti yang diharapkan.
 
 Sekarang:
 - root `FrameLayout` memakai `wrap_content`;
@@ -54,57 +54,47 @@ Bug aktif: overlay berkedip karena window dihapus sebelum setiap capture. Perbai
 ## Perubahan Terbaru — 2026-09-07
 
 ### TextLayoutAnalyzer
-File baru:
-`app/src/main/java/com/example/screentranslator/TextLayoutAnalyzer.kt`
-
-Fungsi:
+File baru: `TextLayoutAnalyzer.kt`.
 - estimasi ukuran font source dari tinggi element OCR;
-- memperluas mask source agar teks tertutup;
-- sampling warna background dari sekitar area source.
+- mask diperluas agar source tertutup;
+- sampling warna background dari sekitar source.
 
 Commit: `e0ec39f595f2bb66e09d46d5be469fd7ae6deaab`.
 
-### OcrManager
-`DetectedText` sekarang membawa:
-- `sourceTextSizePx`;
-- `backgroundColor`;
-- koordinat mask hasil analyzer.
+### OcrManager + TranslationOverlayView
+`DetectedText` sekarang membawa ukuran font source dan background color. Renderer memakai metadata tersebut untuk menggambar translation.
 
-Commit: `28dab21490b73a5c94848971259c9096207cca43`.
+Commit OCR: `28dab21490b73a5c94848971259c9096207cca43`.
+Commit renderer: `513e43e1f8c190903f2d1dc539028f0fed9e3e28`.
 
-### TranslationOverlayView
-Renderer sekarang:
-- memakai background hasil sampling;
-- menggunakan source font sebagai ukuran awal;
-- mengecilkan font jika translation tidak muat;
-- mempertahankan clipping dan non-touchable overlay.
-
-Commit: `513e43e1f8c190903f2d1dc539028f0fed9e3e28`.
-
-### Floating Menu / Service
-`layout_floating_widget.xml` dan `FloatingService.kt` direvisi untuk memperbaiki ukuran root dan penempatan menu.
+### Floating Menu + Hapus Overlay
+Root menu dan penempatan FAB/menu direvisi. Metadata OCR juga diteruskan dari `FloatingService` ke renderer.
 
 Commit layout: `e59a2b3adef5ff5391dcda1a12df8f0d6d19ec5e`.
-Commit service: `e85ef0b3d7e5881c282dc98e77108d554e389f8f`.
+Commit service: `9dbf8663eaab80f9844c64824964b3e5769e0156`.
 
-**Penting:** perubahan kode di atas dibuat setelah pengguna menunjukkan screenshot build `e1c7006`, yang memperlihatkan source masih terlihat, ukuran overlay tidak sesuai, menu bertumpuk, dan tombol Hapus Overlay tidak muncul. Perubahan terbaru **belum diuji pengguna**.
+Status seluruh perubahan kode: **belum diuji pengguna**.
+
+### Build Automation
+`.github/workflows/build.yml` sekarang menjalankan `assembleDebug` otomatis setiap push ke `main`, sementara `workflow_dispatch` tetap tersedia.
+
+Commit: `39b09bffdd878650ade24824872d85daaf08d824`.
+
+Status CI pada sesi ini: belum ada status check yang dikembalikan, sehingga build belum boleh dianggap lulus.
 
 ## Prioritas Berikutnya
-1. Dapatkan build APK dari perubahan terbaru bila workflow dapat dijalankan.
+1. Tunggu/cek hasil build otomatis.
 2. Uji Manual TL pada source kecil, sedang, dan besar.
-3. Pastikan source tertutup dan background overlay menyatu dengan area sekitar.
-4. Pastikan ukuran translation mengikuti source dan mengecil jika translation lebih panjang.
+3. Pastikan source tertutup dan background menyatu dengan area sekitar.
+4. Pastikan ukuran translation mengikuti source dan mengecil jika diperlukan.
 5. Uji menu FAB kiri, kanan, bawah-kiri, dan bawah-kanan.
 6. Uji Hapus Overlay muncul setelah Manual TL dan hilang setelah ditekan.
 7. Jika Manual TL stabil, lanjutkan mode Manual TL baru yang direncanakan.
 8. Real-Time flicker tetap ditunda.
 
-## Catatan Build
-Tool GitHub yang tersedia tidak menyediakan aksi untuk memulai `workflow_dispatch`. Jangan mengklaim build baru berhasil tanpa hasil workflow yang nyata.
-
 ## Aturan untuk AI Berikutnya
 - Baca `README.md`, `AI_README.md`, dan `AI_HANDOFF.md` sebelum perubahan besar.
-- Periksa file aktual di branch `main`, jangan mengandalkan catatan lama saja.
+- Periksa file aktual di branch `main`.
 - Manual TL adalah prioritas.
 - Jangan mengerjakan Real-Time flicker kecuali diminta.
 - Setiap perubahan bermakna harus dicatat.
