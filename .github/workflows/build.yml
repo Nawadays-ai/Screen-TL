@@ -1,7 +1,8 @@
 name: Build Android APK
 
-# Build otomatis setiap push ke main atau branch eksperimen visual.
-# workflow_dispatch tetap tersedia.
+# Build otomatis setiap push ke main atau branch eksperimen.
+# CI sengaja gagal jika signing secret belum tersedia, agar tidak pernah
+# menghasilkan APK dengan debug keystore ephemeral yang berbeda-beda.
 
 on:
   push:
@@ -29,7 +30,24 @@ jobs:
       with:
         gradle-version: '8.2'
 
-    - name: Build Debug APK
+    - name: Prepare persistent signing keystore
+      env:
+        SCREEN_TL_KEYSTORE_B64: ${{ secrets.SCREEN_TL_KEYSTORE }}
+      run: |
+        set -euo pipefail
+        test -n "$SCREEN_TL_KEYSTORE_B64" || {
+          echo "Missing GitHub Actions secret: SCREEN_TL_KEYSTORE"
+          exit 1
+        }
+        echo "$SCREEN_TL_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/screentl-signing.jks"
+        test -s "$RUNNER_TEMP/screentl-signing.jks"
+
+    - name: Build Debug APK with persistent signing
+      env:
+        SCREEN_TL_KEYSTORE_FILE: ${{ runner.temp }}/screentl-signing.jks
+        SCREEN_TL_KEYSTORE_PASSWORD: ${{ secrets.SCREEN_TL_KEYSTORE_PASSWORD }}
+        SCREEN_TL_KEY_ALIAS: ${{ secrets.SCREEN_TL_KEY_ALIAS }}
+        SCREEN_TL_KEY_PASSWORD: ${{ secrets.SCREEN_TL_KEY_PASSWORD }}
       run: gradle assembleDebug --stacktrace
 
     - name: Upload APK Artifact
