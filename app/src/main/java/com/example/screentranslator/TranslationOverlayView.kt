@@ -9,9 +9,11 @@ import android.graphics.Typeface
 import android.view.View
 
 /**
- * Renders Manual TL directly over the source text region. The overlay window
- * is created in the same pixel coordinate space as the captured frame, so the
- * renderer should not make the screen appear scaled or shifted.
+ * Renders Manual TL directly over the source text region.
+ *
+ * Important: translated text is fitted by changing Paint.textSize uniformly,
+ * not by changing textScaleX. This keeps the glyph aspect ratio natural and
+ * prevents the vertically-stretched / horizontally-squeezed appearance.
  */
 class TranslationOverlayView(context: Context) : View(context) {
 
@@ -27,12 +29,12 @@ class TranslationOverlayView(context: Context) : View(context) {
         isSubpixelText = true
     }
 
-    private val horizontalPaddingRatio = 0.18f
-    private val verticalPaddingRatio = 0.20f
+    private val horizontalPaddingRatio = 0.14f
+    private val verticalPaddingRatio = 0.10f
     private val minTextSizePx = 8f
     private val maxTextSizePx = 96f
     private val maskAlpha = 245
-    private val minTextScaleX = 0.72f
+    private val minFontScale = 0.62f
 
     private var items: List<TranslationOverlayItem> = emptyList()
     private var sourceWidth = 1
@@ -59,9 +61,9 @@ class TranslationOverlayView(context: Context) : View(context) {
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
-        // The window is intentionally created at sourceWidth x sourceHeight.
-        // Keep the fallback scaling for device/window edge cases, but do not
-        // introduce any centering or aspect-ratio compensation here.
+        // The overlay window is created in the same pixel coordinate space as
+        // the captured frame. Keep only the normal width/height conversion as
+        // a fallback for device/window edge cases.
         val scaleX = width.toFloat() / sourceWidth.toFloat()
         val scaleY = height.toFloat() / sourceHeight.toFloat()
 
@@ -74,10 +76,9 @@ class TranslationOverlayView(context: Context) : View(context) {
 
             val boxWidth = right - left
             val boxHeight = bottom - top
-            val horizontalPadding = (boxHeight * horizontalPaddingRatio).coerceIn(3f, 20f)
-            val verticalPadding = (boxHeight * verticalPaddingRatio).coerceIn(3f, 14f)
+            val horizontalPadding = (boxHeight * horizontalPaddingRatio).coerceIn(3f, 16f)
+            val verticalPadding = (boxHeight * verticalPaddingRatio).coerceIn(2f, 8f)
             val maxTextWidth = (boxWidth - horizontalPadding * 2f).coerceAtLeast(1f)
-            val maxTextHeight = (boxHeight - verticalPadding * 2f).coerceAtLeast(1f)
 
             val sampled = item.backgroundColor
             backgroundPaint.color = Color.argb(
@@ -88,36 +89,50 @@ class TranslationOverlayView(context: Context) : View(context) {
             )
             canvas.drawRoundRect(
                 RectF(left, top, right, bottom),
-                (boxHeight * 0.12f).coerceIn(2f, 10f),
-                (boxHeight * 0.12f).coerceIn(2f, 10f),
+                (boxHeight * 0.08f).coerceIn(2f, 7f),
+                (boxHeight * 0.08f).coerceIn(2f, 7f),
                 backgroundPaint
             )
 
-            // Keep the calibrated source font size. Do not reduce textSize
-            // merely because a translation is wider than the source line.
-            // Instead, use a modest horizontal text scale so the translation
-            // keeps the same visual height as the source whenever possible.
-            val sourceFontSize = if (item.sourceTextSizePx > 0f) {
+            // Start from the calibrated source size. If the translation is
+            // longer, reduce textSize uniformly. Never use textScaleX: doing
+            // so makes letters look unnaturally narrow and vertically stretched.
+            val baseTextSize = if (item.sourceTextSizePx > 0f) {
                 item.sourceTextSizePx * scaleY
             } else {
-                boxHeight * 0.62f
+                boxHeight * 0.72f
             }.coerceIn(minTextSizePx, maxTextSizePx)
 
-            textPaint.textSize = sourceFontSize
             textPaint.textScaleX = 1f
+            textPaint.textSize = baseTextSize
 
             val measuredWidth = textPaint.measureText(item.translatedText)
             if (measuredWidth > maxTextWidth && measuredWidth > 0f) {
-                textPaint.textScaleX = (maxTextWidth / measuredWidth)
-                    .coerceIn(minTextScaleX, 1f)
+                val fitScale = (maxTextWidth / measuredWidth).coerceAtLeast(minFontScale)
+                textPaint.textSize = (baseTextSize * fitScale)
+                    .coerceIn(minTextSizePx, baseTextSize)
             }
 
+            // If the translated text still does not fit at the minimum allowed
+            // font scale, truncate only as a last resort. Aspect ratio remains
+            // untouched because textScaleX stays at 1.0.
             val fittedText = fitSingleLine(item.translatedText, maxTextWidth)
             if (fittedText.isEmpty()) return@forEach
 
             val metrics = textPaint.fontMetrics
             val textHeight = metrics.descent - metrics.ascent
-            val baseline = top + (boxHeight - textHeight) / 2f - metrics.ascent
+            val availableHeight = (boxHeight - verticalPadding * 2f).coerceAtLeast(1f)
+
+            // Keep the visual glyphs inside the source line's mask. If the
+            // calibrated font is slightly too tall, shrink it uniformly.
+            if (textHeight > availableHeight && textHeight > 0f) {
+                textPaint.textSize = (textPaint.textSize * (availableHeight / textHeight))
+                    .coerceAtLeast(minTextSizePx)
+            }
+
+            val finalMetrics = textPaint.fontMetrics
+            val finalTextHeight = finalMetrics.descent - finalMetrics.ascent
+            val baseline = top + (boxHeight - finalTextHeight) / 2f - finalMetrics.ascent
 
             canvas.save()
             canvas.clipRect(left, top, right, bottom)
@@ -125,7 +140,6 @@ class TranslationOverlayView(context: Context) : View(context) {
             canvas.restore()
         }
 
-        // Avoid leaking a horizontal scale into future Canvas/View operations.
         textPaint.textScaleX = 1f
     }
 
@@ -135,10 +149,6 @@ class TranslationOverlayView(context: Context) : View(context) {
 
         if (textPaint.measureText(normalized) <= maxWidth) return normalized
 
-        // The font size is intentionally never reduced here. If the translated
-        // sentence is still too long after the horizontal scale floor, truncate
-        // only as a last resort rather than making the translation vertically
-        // smaller than the source.
         val ellipsis = "…"
         var end = normalized.length
         while (end > 1 && textPaint.measureText(normalized.substring(0, end) + ellipsis) > maxWidth) {
