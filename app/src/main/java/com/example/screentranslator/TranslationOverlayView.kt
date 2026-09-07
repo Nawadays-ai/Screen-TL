@@ -9,9 +9,9 @@ import android.graphics.Typeface
 import android.view.View
 
 /**
- * Renders Manual TL directly over the source text region. Geometry and source
- * font size come from TextLayoutAnalyzer; the sampled background color covers
- * the source instead of drawing a fixed black rectangle.
+ * Renders Manual TL directly over the source text region. The overlay window
+ * is created in the same pixel coordinate space as the captured frame, so the
+ * renderer should not make the screen appear scaled or shifted.
  */
 class TranslationOverlayView(context: Context) : View(context) {
 
@@ -27,10 +27,11 @@ class TranslationOverlayView(context: Context) : View(context) {
         isSubpixelText = true
     }
 
-    private val horizontalPaddingRatio = 0.16f
-    private val verticalPaddingRatio = 0.16f
+    private val horizontalPaddingRatio = 0.18f
+    private val verticalPaddingRatio = 0.20f
     private val minTextSizePx = 8f
     private val maxTextSizePx = 96f
+    private val maskAlpha = 245
 
     private var items: List<TranslationOverlayItem> = emptyList()
     private var sourceWidth = 1
@@ -57,6 +58,9 @@ class TranslationOverlayView(context: Context) : View(context) {
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
+        // The window is intentionally created at sourceWidth x sourceHeight.
+        // Keep the fallback scaling for device/window edge cases, but do not
+        // introduce any centering or aspect-ratio compensation here.
         val scaleX = width.toFloat() / sourceWidth.toFloat()
         val scaleY = height.toFloat() / sourceHeight.toFloat()
 
@@ -69,13 +73,27 @@ class TranslationOverlayView(context: Context) : View(context) {
 
             val boxWidth = right - left
             val boxHeight = bottom - top
-            val horizontalPadding = (boxHeight * horizontalPaddingRatio).coerceIn(2f, 18f)
-            val verticalPadding = (boxHeight * verticalPaddingRatio).coerceIn(2f, 12f)
+            val horizontalPadding = (boxHeight * horizontalPaddingRatio).coerceIn(3f, 20f)
+            val verticalPadding = (boxHeight * verticalPaddingRatio).coerceIn(3f, 14f)
             val maxTextWidth = (boxWidth - horizontalPadding * 2f).coerceAtLeast(1f)
             val maxTextHeight = (boxHeight - verticalPadding * 2f).coerceAtLeast(1f)
 
-            backgroundPaint.color = item.backgroundColor
-            canvas.drawRect(RectF(left, top, right, bottom), backgroundPaint)
+            // Make the replacement mask visually solid enough to reliably hide
+            // the original glyphs. True backdrop blur is not used here because
+            // RenderEffect blurs the overlay's own content, not the app behind it.
+            val sampled = item.backgroundColor
+            backgroundPaint.color = Color.argb(
+                maskAlpha,
+                Color.red(sampled),
+                Color.green(sampled),
+                Color.blue(sampled)
+            )
+            canvas.drawRoundRect(
+                RectF(left, top, right, bottom),
+                (boxHeight * 0.12f).coerceIn(2f, 10f),
+                (boxHeight * 0.12f).coerceIn(2f, 10f),
+                backgroundPaint
+            )
 
             val sourceFontSize = if (item.sourceTextSizePx > 0f) {
                 item.sourceTextSizePx * scaleY
@@ -135,9 +153,6 @@ class TranslationOverlayView(context: Context) : View(context) {
 
         if (textPaint.measureText(normalized) <= maxWidth) return normalized
 
-        // The font has already been reduced to the source-compatible size. If a
-        // translation is still exceptionally long, retain as much as possible
-        // rather than letting it paint outside the source region.
         val ellipsis = "…"
         var end = normalized.length
         while (end > 1 && textPaint.measureText(normalized.substring(0, end) + ellipsis) > maxWidth) {
