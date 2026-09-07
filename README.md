@@ -12,17 +12,18 @@ Android screen translator yang dirancang untuk menerjemahkan teks dari aplikasi 
 | OCR | ⚠️ | Sudah menghasilkan teks, tetapi cakupan seluruh aplikasi target masih perlu diverifikasi |
 | Manual Translation | ✅ | Capture → OCR → translation → History → overlay sudah berhasil pada pengujian perangkat terbaru |
 | Translation History | ✅ | Persisten; service-safe dan write menggunakan `commit()` |
-| Translation overlay | 🧪 | Sudah muncul pada pengujian Manual TL; posisi/kerapian visual masih belum diverifikasi menyeluruh |
+| Translation overlay | 🧪 | Visual overlay baru dirapikan; patch belum diuji pengguna |
 | Real-Time Translation | ⚠️ | Loop capture → OCR → translation → overlay sudah bekerja pada perangkat, tetapi overlay masih berkedip |
 
 ## Masalah Aktif
 
 1. Frame MediaProjection masih perlu dipastikan konsisten menangkap aplikasi target dan bukan hanya jam/status bar atau UI Screen-TL.
-2. Overlay masih perlu verifikasi posisi terhadap koordinat layar, tetapi perapian UI sengaja ditunda sampai fungsi inti stabil.
+2. Overlay masih perlu verifikasi posisi terhadap koordinat layar pada berbagai perangkat/orientasi.
 3. Real-Time tahap pertama memproses frame secara berkala dan berurutan. Change detection dan cache translation belum dibuat.
 4. Real-Time tidak menulis setiap frame ke History agar History tidak dipenuhi duplikasi.
 5. APK update masih bentrok setelah `versionCode` dinaikkan. Dugaan utama tetap perbedaan signing key antara APK lama dan APK GitHub Actions.
 6. **Bug Real-Time terbaru:** pengguna mengonfirmasi Real-Time berhasil menerjemahkan, tetapi overlay berkedip. Polanya: overlay muncul sekitar 2 detik, hilang, muncul lagi; kadang jeda hilang mencapai sekitar 4 detik.
+7. **Patch visual overlay terbaru belum diuji pengguna.**
 
 ## Roadmap
 
@@ -44,7 +45,7 @@ Android screen translator yang dirancang untuk menerjemahkan teks dari aplikasi 
 - [x] Overlay dibuat `NOT_TOUCHABLE` agar tidak mengganggu interaksi aplikasi target.
 - [ ] Verifikasi posisi overlay terhadap koordinat layar pada berbagai perangkat/orientasi.
 - [ ] Sediakan hide/clear overlay yang mudah digunakan.
-- [ ] Rapikan visual overlay setelah fungsi inti stabil.
+- [~] Rapikan visual overlay — patch sudah dibuat, belum diuji pengguna.
 
 ### Milestone 3 — Real-Time Translation
 
@@ -52,7 +53,7 @@ Android screen translator yang dirancang untuk menerjemahkan teks dari aplikasi 
 - [x] OCR dan translation loop dasar.
 - [x] Update overlay dari hasil frame terbaru.
 - [x] Stop Real-Time tanpa menghentikan service.
-- [ ] **Hilangkan kedipan overlay pada loop Real-Time.**
+- [~] **Hilangkan kedipan overlay pada loop Real-Time.**
 - [ ] Verifikasi kestabilan Real-Time setelah perbaikan kedipan.
 - [ ] Deteksi perubahan layar agar frame yang tidak berubah tidak diproses ulang.
 - [ ] Cache translation agar teks yang sama tidak diterjemahkan berulang.
@@ -70,14 +71,26 @@ Android screen translator yang dirancang untuk menerjemahkan teks dari aplikasi 
 
 Setiap perubahan kode yang bermakna wajib dicatat di sini atau pada `PROJECT_NOTES.md`, termasuk tanggal, file, perubahan, alasan, hasil build/test, dan masalah yang masih tersisa.
 
+### 2026-09-07 — Perapian visual Translation Overlay
+
+- `TranslationOverlayView.kt` diperbarui tanpa mengubah pipeline capture/OCR/translation.
+- Background overlay dibuat lebih ringan dan sudutnya lebih halus.
+- Padding teks dibuat konsisten.
+- Ukuran teks sekarang adaptif terhadap tinggi/lebar bounding box dengan batas minimum/maksimum.
+- Translation panjang diperkecil agar lebih aman masuk ke box dan dipotong dengan ellipsis jika tetap terlalu panjang.
+- Teks dipusatkan secara vertikal dan di-clipping agar tidak meluber ke luar bounding box.
+- `FLAG_NOT_TOUCHABLE` dan perilaku overlay tetap dipertahankan.
+- **Status:** kode sudah diterapkan pada commit `55233dfe6a1d2d200bae92ed970944418d914ccd`, tetapi belum diuji pengguna.
+- UI belum dianggap final.
+
 ### 2026-09-07 — Verifikasi Real-Time oleh pengguna
 
 - Pengguna berhasil menjalankan Real-Time TL pada perangkat.
 - Capture → OCR → translation → overlay terbukti berjalan berulang.
 - Masalah yang ditemukan: overlay berkedip/hilang di antara siklus. Overlay biasanya terlihat sekitar 2 detik, lalu hilang, kemudian muncul kembali; pada beberapa siklus jeda dapat sekitar 4 detik.
-- Belum ada perubahan kode untuk masalah ini pada catatan ini. Penyebab yang dicurigai adalah loop sebelumnya melepas (`removeTranslationOverlay()`) overlay sebelum setiap capture, sehingga ada periode ketika WindowManager memang tidak memiliki overlay.
-- Perbaikan berikutnya harus mempertahankan window overlay dan memperbarui isinya tanpa menghapus/re-add window setiap frame.
-- **Build/test status:** perubahan Real-Time dasar sudah diuji oleh pengguna dan berhasil secara fungsi. Perbaikan kedipan yang belum dilakukan belum diuji.
+- Penyebab yang dicurigai adalah loop sebelumnya melepas (`removeTranslationOverlay()`) overlay sebelum setiap capture, sehingga ada periode ketika WindowManager memang tidak memiliki overlay.
+- Perbaikan kedipan belum diterapkan.
+- **Build/test status:** Real-Time dasar sudah diuji pengguna dan berhasil secara fungsi; patch visual overlay terbaru belum diuji.
 
 ### 2026-09-06 — Perbaikan timeout Manual TL
 
