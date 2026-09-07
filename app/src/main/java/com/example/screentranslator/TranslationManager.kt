@@ -16,12 +16,19 @@ class TranslationManager(
         provider.translate(text, onSuccess, onFailure)
     }
 
+    fun getProviderName(): String = when (provider) {
+        is GeminiTranslationProvider -> "Gemini AI"
+        is DeepLTranslationProvider -> ApiSettings.PROVIDER_DEEPL
+        is MlKitTranslationProvider -> ApiSettings.PROVIDER_ML_KIT
+        else -> provider::class.java.simpleName
+    }
+
     fun close() {
         provider.close()
     }
 
     private fun createProvider(manualProvider: String): TranslationProvider {
-        // A verified custom Gemini key has priority over the manual provider selector.
+        // A verified/enabled custom API always takes priority over the manual selector.
         if (ApiSettings.isGeminiEnabled()) {
             val key = ApiSettings.getGeminiKey()
             if (!key.isNullOrBlank()) {
@@ -29,10 +36,20 @@ class TranslationManager(
             }
         }
 
+        // DeepL must also be an active override. Previously it was only selected
+        // when the manual provider spinner happened to be set to DeepL, which
+        // meant pressing "Gunakan" could still leave ML Kit doing the work.
+        if (ApiSettings.isDeepLEnabled()) {
+            val key = ApiSettings.getDeepLKey()
+            if (!key.isNullOrBlank()) {
+                return DeepLTranslationProvider(key, sourceLanguage, targetLanguage)
+            }
+        }
+
         return when (manualProvider) {
             ApiSettings.PROVIDER_DEEPL -> {
                 val key = ApiSettings.getDeepLKey()
-                if (ApiSettings.isDeepLEnabled() && !key.isNullOrBlank()) {
+                if (!key.isNullOrBlank() && ApiSettings.isDeepLVerified()) {
                     DeepLTranslationProvider(key, sourceLanguage, targetLanguage)
                 } else {
                     MissingApiProvider("DeepL API belum diaktifkan di Settings")
