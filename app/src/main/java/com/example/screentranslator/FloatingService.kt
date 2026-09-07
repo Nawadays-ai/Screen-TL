@@ -102,11 +102,12 @@ class FloatingService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         sourceLanguage = intent?.getStringExtra("EXTRA_SOURCE_LANG") ?: "Jepang"
         targetLanguage = intent?.getStringExtra("EXTRA_TARGET_LANG") ?: "Indonesia"
-        Log.i(TAG, "Service started: $sourceLanguage -> $targetLanguage, manual=${ApiSettings.getManualProvider()}, gemini=${ApiSettings.isGeminiEnabled()}")
+        Log.i(TAG, "Service started: $sourceLanguage -> $targetLanguage, manual=${ApiSettings.getManualProvider()}, gemini=${ApiSettings.isGeminiEnabled()}, deepl=${ApiSettings.isDeepLEnabled()}")
 
         ocrManager = OcrManager(sourceLanguage)
         translationManager?.close()
         translationManager = TranslationManager(sourceLanguage, targetLanguage, ApiSettings.getManualProvider())
+        Log.i(TAG, "Translation provider selected: ${translationManager?.getProviderName()}")
 
         if (screenCaptureManager == null) {
             val resultCode = ScreenCaptureSession.resultCode
@@ -286,7 +287,7 @@ class FloatingService : Service() {
     private fun translateTexts(translator: TranslationManager, texts: List<DetectedText>, index: Int, results: MutableList<String>, overlayResults: MutableList<TranslationOverlayItem>, sourceWidth: Int, sourceHeight: Int) {
         if (index >= texts.size) {
             val resultText = results.joinToString("\n\n"); val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-            val historyEntry = buildString { append("[").append(time).append("]\n"); append(sourceLanguage).append(" → ").append(targetLanguage).append("\n\n"); append(resultText) }
+            val historyEntry = buildString { append("[").append(time).append("]\n"); append("TL: ").append(translator.getProviderName()).append("\n"); append(sourceLanguage).append(" → ").append(targetLanguage).append("\n\n"); append(resultText) }
             try { TranslationHistory.add(historyEntry); showTranslationOverlay(overlayResults, sourceWidth, sourceHeight); manualOverlayVisible = overlayResults.isNotEmpty(); updateRemoveOverlayButton(); finishManualTranslation("Terjemahan selesai: ${results.size} baris. Overlay ditampilkan.") }
             catch (exception: Exception) { releaseBlurPatches(texts); Log.e(TAG, "Failed to save/display result", exception); finishManualTranslation("Terjemahan selesai tetapi hasil gagal ditampilkan: ${exception.message ?: "Unknown error"}") }
             return
@@ -303,13 +304,25 @@ class FloatingService : Service() {
     private fun cancelManualCaptureTimeout() { manualCaptureTimeout?.let(mainHandler::removeCallbacks); manualCaptureTimeout = null }
     private fun cancelManualProcessTimeout() { manualProcessTimeout?.let(mainHandler::removeCallbacks); manualProcessTimeout = null }
 
-    // Existing overlay implementation remains below this point.
     private fun showTranslationOverlay(items: List<TranslationOverlayItem>, sourceWidth: Int, sourceHeight: Int) {
         if (items.isEmpty()) return
         overlayView?.let { runCatching { windowManager.removeView(it) } }
         val view = TranslationOverlayView(this)
-        view.setTranslationItems(items, sourceWidth, sourceHeight)
-        val overlayParams = WindowManager.LayoutParams(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT, if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, PixelFormat.TRANSLUCENT)
+        view.setTranslations(items, sourceWidth, sourceHeight)
+        val overlayParams = WindowManager.LayoutParams(
+            sourceWidth.coerceAtLeast(1),
+            sourceHeight.coerceAtLeast(1),
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 0
+            y = 0
+        }
+        Log.i(TAG, "Showing translation overlay: ${sourceWidth}x${sourceHeight} provider=${translationManager?.getProviderName()}")
         overlayView = view
         windowManager.addView(view, overlayParams)
     }
