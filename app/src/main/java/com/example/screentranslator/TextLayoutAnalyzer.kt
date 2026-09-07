@@ -7,8 +7,11 @@ import kotlin.math.roundToInt
 
 /**
  * Converts ML Kit line geometry into rendering geometry for the Manual overlay.
- * Also prepares a small low-resolution source patch that can be enlarged again
- * by the renderer to create a lightweight local blur behind the translation.
+ *
+ * The experimental blur branch intentionally does NOT copy the raw screenshot
+ * behind the source text. Instead it samples colors around the OCR box and
+ * lets TranslationOverlayView reconstruct a soft color field from that data.
+ * This avoids drawing the original source glyphs a second time.
  */
 object TextLayoutAnalyzer {
 
@@ -19,7 +22,7 @@ object TextLayoutAnalyzer {
         val bottom: Int,
         val sourceTextSizePx: Float,
         val backgroundColor: Int,
-        val blurredPatch: Bitmap?
+        val blurredPatch: Bitmap? = null
     )
 
     fun analyze(bitmap: Bitmap, line: Line): Result? {
@@ -36,8 +39,7 @@ object TextLayoutAnalyzer {
         }
 
         // Paint.textSize is larger than visible glyph height. 1.10x is a
-        // conservative calibration for the current device so the translation
-        // stays close to the source instead of becoming oversized.
+        // conservative calibration so the translation stays close to source.
         val sourceTextSizePx = (glyphHeight * 1.10f).coerceIn(8f, 96f)
 
         val horizontalPad = (glyphHeight * 0.20f).roundToInt().coerceIn(3, 18)
@@ -55,45 +57,9 @@ object TextLayoutAnalyzer {
             bottom = bottom,
             sourceTextSizePx = sourceTextSizePx,
             backgroundColor = estimateBackgroundColor(bitmap, left, top, right, bottom),
-            blurredPatch = createBlurredPatch(bitmap, left, top, right, bottom)
+            // Deliberately null on this branch: never copy raw source pixels.
+            blurredPatch = null
         )
-    }
-
-    /**
-     * Fast local blur: downsample the source region heavily, then scale it
-     * back up. This removes the source glyph detail while retaining the local
-     * color/texture. It is deliberately bounded to each OCR line.
-     */
-    private fun createBlurredPatch(
-        bitmap: Bitmap,
-        left: Int,
-        top: Int,
-        right: Int,
-        bottom: Int
-    ): Bitmap? {
-        val safeLeft = left.coerceIn(0, bitmap.width - 1)
-        val safeTop = top.coerceIn(0, bitmap.height - 1)
-        val safeRight = right.coerceIn(safeLeft + 1, bitmap.width)
-        val safeBottom = bottom.coerceIn(safeTop + 1, bitmap.height)
-        val width = safeRight - safeLeft
-        val height = safeBottom - safeTop
-        if (width <= 1 || height <= 1) return null
-
-        return try {
-            val patch = Bitmap.createBitmap(bitmap, safeLeft, safeTop, width, height)
-            val small = Bitmap.createScaledBitmap(
-                patch,
-                (width / 5).coerceAtLeast(1),
-                (height / 5).coerceAtLeast(1),
-                true
-            )
-            if (small !== patch && !patch.isRecycled) patch.recycle()
-            val blurred = Bitmap.createScaledBitmap(small, width, height, true)
-            if (blurred !== small && !small.isRecycled) small.recycle()
-            blurred
-        } catch (_: Exception) {
-            null
-        }
     }
 
     private fun estimateBackgroundColor(
@@ -109,13 +75,15 @@ object TextLayoutAnalyzer {
         val stepX = (width / 8).coerceAtLeast(1)
         val stepY = (height / 4).coerceAtLeast(1)
 
+        // Sample outside the source box. This is the only visual information
+        // transferred into the replacement background.
         for (x in left until right step stepX) {
             if (top > 1) samples.add(bitmap.getPixel(x.coerceIn(0, bitmap.width - 1), top - 1))
             if (bottom < bitmap.height) samples.add(bitmap.getPixel(x.coerceIn(0, bitmap.width - 1), bottom))
         }
         for (y in top until bottom step stepY) {
             if (left > 1) samples.add(bitmap.getPixel(left - 1, y.coerceIn(0, bitmap.height - 1)))
-            if (right < bitmap.width) samples.add(bitmap.getPixel(right, y.coerceIn(0, bitmap.width - 1)))
+            if (right < bitmap.width) samples.add(bitmap.getPixel(right, y.coerceIn(0, bitmap.height - 1)))
         }
 
         if (samples.isEmpty()) return Color.BLACK
