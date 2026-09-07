@@ -46,11 +46,25 @@ class SettingsActivity : AppCompatActivity() {
         installKeyWatcher(etDeepLKey) { ApiSettings.setDeepLKey(it); renderDeepL() }
 
         btnGeminiCheck.setOnClickListener { checkGemini() }
-        btnGeminiUse.setOnClickListener { ApiSettings.setGeminiEnabled(true); renderGemini() }
-        btnGeminiDisable.setOnClickListener { ApiSettings.setGeminiEnabled(false); renderGemini() }
+        btnGeminiUse.setOnClickListener {
+            ApiSettings.setGeminiEnabled(true)
+            renderGemini()
+            renderDeepL()
+        }
+        btnGeminiDisable.setOnClickListener {
+            ApiSettings.setGeminiEnabled(false)
+            renderGemini()
+        }
         btnDeepLCheck.setOnClickListener { checkDeepL() }
-        btnDeepLUse.setOnClickListener { ApiSettings.setDeepLEnabled(true); renderDeepL() }
-        btnDeepLDisable.setOnClickListener { ApiSettings.setDeepLEnabled(false); renderDeepL() }
+        btnDeepLUse.setOnClickListener {
+            ApiSettings.setDeepLEnabled(true)
+            renderDeepL()
+            renderGemini()
+        }
+        btnDeepLDisable.setOnClickListener {
+            ApiSettings.setDeepLEnabled(false)
+            renderDeepL()
+        }
         renderGemini(); renderDeepL()
     }
 
