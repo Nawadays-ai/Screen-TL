@@ -3,6 +3,12 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val isCiBuild = System.getenv("CI") == "true"
+val ciKeystoreFile = System.getenv("SCREEN_TL_KEYSTORE_FILE")
+val ciStorePassword = System.getenv("SCREEN_TL_KEYSTORE_PASSWORD")
+val ciKeyAlias = System.getenv("SCREEN_TL_KEY_ALIAS")
+val ciKeyPassword = System.getenv("SCREEN_TL_KEY_PASSWORD")
+
 android {
     namespace = "com.example.screentranslator"
     compileSdk = 34
@@ -11,11 +17,40 @@ android {
         applicationId = "com.example.screentranslator"
         minSdk = 24
         targetSdk = 34
-        versionCode = 2
+        versionCode = maxOf(2, System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 2)
         versionName = "1.1"
     }
 
+    if (isCiBuild) {
+        require(!ciKeystoreFile.isNullOrBlank()) {
+            "SCREEN_TL_KEYSTORE_FILE is required for CI builds. Refusing to use an ephemeral debug signing key."
+        }
+        require(!ciStorePassword.isNullOrBlank()) {
+            "SCREEN_TL_KEYSTORE_PASSWORD is required for CI builds."
+        }
+        require(!ciKeyAlias.isNullOrBlank()) {
+            "SCREEN_TL_KEY_ALIAS is required for CI builds."
+        }
+        require(!ciKeyPassword.isNullOrBlank()) {
+            "SCREEN_TL_KEY_PASSWORD is required for CI builds."
+        }
+
+        signingConfigs {
+            create("ci") {
+                storeFile = file(ciKeystoreFile!!)
+                storePassword = ciStorePassword
+                keyAlias = ciKeyAlias
+                keyPassword = ciKeyPassword
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            if (isCiBuild) {
+                signingConfig = signingConfigs.getByName("ci")
+            }
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
@@ -39,13 +74,13 @@ dependencies {
     implementation("com.google.android.material:material:1.11.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
 
-   // ML Kit OCR
-implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.0")
-implementation("com.google.android.gms:play-services-mlkit-text-recognition-chinese:16.0.1")
-implementation("com.google.android.gms:play-services-mlkit-text-recognition-japanese:16.0.1")
+    // ML Kit OCR
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.0")
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition-chinese:16.0.1")
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition-japanese:16.0.1")
 
-// ML Kit Translation
-implementation("com.google.mlkit:translate:17.0.3")
+    // ML Kit Translation
+    implementation("com.google.mlkit:translate:17.0.3")
 
     // OkHttp untuk API DeepL & Gemini
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
