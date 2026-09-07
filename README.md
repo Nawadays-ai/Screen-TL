@@ -1,5 +1,8 @@
 # Screen-TL
 
+> ## 🤖 AI AGENT — BACA DOKUMEN INI TERLEBIH DAHULU
+> Sebelum mengubah build, signing, package ID, APK distribution, atau melanjutkan pekerjaan dari agent sebelumnya, baca **`AI_README.md`**, **`AI_HANDOFF.md`**, dan terutama **`SIGNING_SETUP.md`**. `SIGNING_SETUP.md` adalah kontrak permanen signing APK Screen-TL. **Jangan membuat Android signing key baru sebagai workaround.**
+
 Android screen translator yang dirancang untuk menerjemahkan teks dari aplikasi lain melalui screen capture, OCR, translation, dan overlay.
 
 ## Status Saat Ini
@@ -57,7 +60,7 @@ Window overlay Manual TL sekarang dibuat pada ukuran pixel yang sama dengan fram
 4. Floating menu adaptif dan `Hapus Overlay` perlu diuji ulang pada perangkat.
 5. True backdrop blur tingkat-window belum digunakan; implementasi sekarang adalah **local source-patch blur**, bukan blur langsung terhadap window aplikasi di bawah.
 6. Real-Time masih berkedip dan sengaja ditunda.
-7. APK update masih bentrok; dugaan utama tetap perbedaan signing key.
+7. APK update sedang dimigrasikan ke **permanent CI signing key**; lihat `SIGNING_SETUP.md` dan jangan membuat key baru.
 
 ## Roadmap
 
@@ -164,3 +167,4 @@ Artifact tersebut **belum** mencakup iterasi blur/bounding-box terbaru.
 - `PROJECT_NOTES.md` — catatan teknis dan riwayat kerja.
 - `AI_HANDOFF.md` — konteks teknis untuk AI berikutnya.
 - `AI_README.md` — aturan operasional AI.
+- `SIGNING_SETUP.md` — **kontrak permanen Android signing; wajib dibaca sebelum menyentuh build/signing/APK**.
