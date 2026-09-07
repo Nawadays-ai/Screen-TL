@@ -10,6 +10,9 @@ on:
       - 'experiment/**'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -17,6 +20,95 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 2
+
+    - name: Apply floating menu anchor fix on experiment branch
+      if: github.ref == 'refs/heads/experiment/blur-bounding-box'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        python3 <<'PY'
+        from pathlib import Path
+
+        path = Path('app/src/main/java/com/example/screentranslator/FloatingService.kt')
+        text = path.read_text()
+        old = '''        val placeRight = fabScreenX < screenWidth / 2
+        val placeAbove = fabScreenY > screenHeight / 2
+        val rootWidth = menuWidth + gap + fabSize
+        val rootHeight = if (placeAbove) menuHeight + gap + fabSize else maxOf(menuHeight, fabSize)
+        val rawX = if (placeRight) fabScreenX else fabScreenX - menuWidth - gap
+        val rawY = if (placeAbove) fabScreenY - menuHeight - gap else fabScreenY - ((rootHeight - fabSize) / 2)
+        val rootX = rawX.coerceIn(0, (screenWidth - rootWidth).coerceAtLeast(0))
+        val rootY = rawY.coerceIn(0, (screenHeight - rootHeight).coerceAtLeast(0))
+        val menuParams = layoutSubMenu.layoutParams as FrameLayout.LayoutParams
+        val fabParams = fabMain.layoutParams as FrameLayout.LayoutParams
+        menuParams.width = menuWidth
+        menuParams.height = menuHeight
+        menuParams.leftMargin = 0
+        menuParams.topMargin = 0
+        fabParams.width = fabSize
+        fabParams.height = fabSize
+        fabParams.leftMargin = 0
+        fabParams.topMargin = 0
+        if (placeRight) {
+            menuParams.gravity = if (placeAbove) Gravity.END or Gravity.TOP else Gravity.END or Gravity.CENTER_VERTICAL
+            fabParams.gravity = if (placeAbove) Gravity.START or Gravity.BOTTOM else Gravity.START or Gravity.CENTER_VERTICAL
+        } else {
+            menuParams.gravity = if (placeAbove) Gravity.START or Gravity.TOP else Gravity.START or Gravity.CENTER_VERTICAL
+            fabParams.gravity = if (placeAbove) Gravity.END or Gravity.BOTTOM else Gravity.END or Gravity.CENTER_VERTICAL
+        }
+'''
+        new = '''        // Choose a direction with enough free space, but never move the FAB.
+        // Near the top: menu grows downward and FAB aligns with REAL-TIME.
+        // Near the bottom: menu grows upward and FAB aligns with KELUAR.
+        val spaceRight = screenWidth - (fabScreenX + fabSize) - gap
+        val spaceLeft = fabScreenX - gap
+        val placeRight = spaceRight >= menuWidth || spaceRight >= spaceLeft
+        val spaceBelow = screenHeight - (fabScreenY + fabSize) - gap
+        val spaceAbove = fabScreenY - gap
+        val placeBelow = spaceBelow >= menuHeight || spaceBelow >= spaceAbove
+
+        val rootWidth = menuWidth + gap + fabSize
+        val rootHeight = menuHeight + gap + fabSize
+        val rawX = if (placeRight) fabScreenX else fabScreenX - menuWidth - gap
+        val rawY = if (placeBelow) fabScreenY else fabScreenY - menuHeight - gap
+        val rootX = rawX.coerceIn(0, (screenWidth - rootWidth).coerceAtLeast(0))
+        val rootY = rawY.coerceIn(0, (screenHeight - rootHeight).coerceAtLeast(0))
+        val menuParams = layoutSubMenu.layoutParams as FrameLayout.LayoutParams
+        val fabParams = fabMain.layoutParams as FrameLayout.LayoutParams
+        menuParams.width = menuWidth
+        menuParams.height = menuHeight
+        menuParams.leftMargin = 0
+        menuParams.topMargin = 0
+        fabParams.width = fabSize
+        fabParams.height = fabSize
+        fabParams.leftMargin = 0
+        fabParams.topMargin = 0
+
+        if (placeRight) {
+            menuParams.gravity = if (placeBelow) Gravity.END or Gravity.TOP else Gravity.END or Gravity.BOTTOM
+            fabParams.gravity = if (placeBelow) Gravity.START or Gravity.TOP else Gravity.START or Gravity.BOTTOM
+        } else {
+            menuParams.gravity = if (placeBelow) Gravity.START or Gravity.TOP else Gravity.START or Gravity.BOTTOM
+            fabParams.gravity = if (placeBelow) Gravity.END or Gravity.TOP else Gravity.END or Gravity.BOTTOM
+        }
+'''
+        if old not in text:
+            print('Floating menu block already patched; nothing to do.')
+        else:
+            path.write_text(text.replace(old, new, 1))
+            print('Floating menu anchor logic patched.')
+        PY
+
+        if git diff --quiet -- app/src/main/java/com/example/screentranslator/FloatingService.kt; then
+          exit 0
+        fi
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add app/src/main/java/com/example/screentranslator/FloatingService.kt
+        git commit -m "[skip ci] Fix floating menu anchor behavior"
+        git push origin HEAD:${GITHUB_REF_NAME}
 
     - name: Set up JDK 17
       uses: actions/setup-java@v5
