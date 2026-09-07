@@ -63,6 +63,14 @@ This is **not true backdrop blur of the third-party app window**. It is a local 
 `FloatingService.kt` transfers ownership of the patch into `TranslationOverlayItem` after successful translation.
 `TranslationOverlayView.kt` renders and recycles the patch when the overlay is replaced/removed.
 
+### Build Failure and Fix — 2026-09-07
+GitHub Actions run `34118006986` / run #107 failed at `:app:compileDebugKotlin` with:
+`FloatingService.kt:528:14 Val cannot be reassigned`.
+
+Cause: `DetectedText.blurredPatch` was declared as `val`, while `FloatingService.kt` intentionally clears it after transferring bitmap ownership into `TranslationOverlayItem`.
+
+Fix: `OcrManager.kt` commit `20e1a2fc472f7d7d67d955429c6de093c7b7c14e` changes `blurredPatch` to `var`, matching the ownership-transfer design. A new push/build is expected from this commit.
+
 ### Memory / Cleanup
 Blur patches are small but are still bitmaps. Ownership is transferred from `DetectedText` to `TranslationOverlayItem` only when translation succeeds. Failure paths recycle patches that were not transferred. Do not introduce a second cache unless needed.
 
@@ -95,13 +103,13 @@ Basic Real-Time works but flickers because the current loop removes the overlay 
 ## Build / Verification State
 The last verified successful build before the blur/bounding-box iteration was GitHub Actions run `34112476978`, `assembleDebug`, artifact `ScreenTranslator-APK`, artifact ID `10014932485`, SHA-256 `9f5d8e06f18dd1fecaa6c559594978f25c3efe7424158cbf160bb82b80df9458`.
 
-The latest blur/bounding-box commits have **not yet been verified by a new build in this handoff**. Never claim they build successfully without checking GitHub Actions for the new `main` head.
+The blur/bounding-box iteration failed once due to the Kotlin ownership declaration above. The fix is now committed as `20e1a2fc472f7d7d67d955429c6de093c7b7c14e`, but that new commit has not yet been verified by a completed Actions run in this handoff.
 
 ## Latest Code Commits
 - `TextLayoutAnalyzer.kt`: `0478c9f26cc42d74c26ea458d829b50afc6945e9`
 - `TranslationOverlayView.kt`: `5f26382a76eb919a61103a73c3eb57c1d9e8119a`
 - `FloatingService.kt`: `5973de45f8dc6a77bd6cdfe930427348e53d8915`
-- `OcrManager.kt`: `a5f01044b1c76bbb8ca315cd54c634b19f02671d`
+- `OcrManager.kt`: `20e1a2fc472f7d7d67d955429c6de093c7b7c14e`
 
 ## Development Rules
 - Inspect actual repository files before edits.
