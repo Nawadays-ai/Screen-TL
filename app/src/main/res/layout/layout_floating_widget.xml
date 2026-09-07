@@ -1,21 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:layout_width="wrap_content"
-    android:layout_height="wrap_content">
+    android:layout_width="48dp"
+    android:layout_height="48dp"
+    android:clipChildren="false"
+    android:clipToPadding="false">
 
-    <!-- Container Sub-Menu Ekspansi (Disembunyikan saat awal) -->
     <LinearLayout
         android:id="@+id/layoutSubMenu"
-        android:layout_width="wrap_content"
+        android:layout_width="156dp"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:background="#DD1E1E1E"
-        android:padding="8dp"
+        android:background="#E61E1E1E"
+        android:padding="6dp"
         android:visibility="gone"
-        android:layout_gravity="center_horizontal">
+        android:elevation="8dp"
+        android:layout_gravity="center_vertical"
+        android:translationX="56dp">
 
-        <!-- 1. Tombol Start Real-Time -->
         <Button
             android:id="@+id/btnRealtime"
             android:layout_width="140dp"
@@ -26,7 +28,6 @@
             android:backgroundTint="#4CAF50"
             android:layout_marginBottom="4dp" />
 
-        <!-- 2. Tombol Manual Translate -->
         <Button
             android:id="@+id/btnManual"
             android:layout_width="140dp"
@@ -37,7 +38,17 @@
             android:backgroundTint="#2196F3"
             android:layout_marginBottom="4dp" />
 
-        <!-- 3. Tombol Exit -->
+        <Button
+            android:id="@+id/btnRemoveOverlay"
+            android:layout_width="140dp"
+            android:layout_height="40dp"
+            android:text="✕ Hapus Overlay"
+            android:textSize="12sp"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#FF9800"
+            android:visibility="gone"
+            android:layout_marginBottom="4dp" />
+
         <Button
             android:id="@+id/btnExit"
             android:layout_width="140dp"
@@ -48,7 +59,6 @@
             android:backgroundTint="#F44336" />
     </LinearLayout>
 
-    <!-- Floating Button Utama (Ukuran Kunci: 48dp x 48dp) -->
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/fabMain"
         android:layout_width="48dp"
