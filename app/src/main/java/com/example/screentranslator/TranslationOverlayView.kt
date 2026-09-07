@@ -107,7 +107,6 @@ class TranslationOverlayView(context: Context) : View(context) {
             textPaint.alpha = 255
 
             val padding = renderItem.horizontalPadding * scaleX
-            val availableHeight = (bottom - top - renderItem.lineSpacing * (renderItem.lines.size - 1) * scaleY).coerceAtLeast(1f)
             val lineHeight = renderItem.lineSpacing * scaleY
             val totalTextHeight = lineHeight * renderItem.lines.size
             val startTop = top + ((bottom - top - totalTextHeight) / 2f).coerceAtLeast(0f)
@@ -140,7 +139,10 @@ class TranslationOverlayView(context: Context) : View(context) {
         val sums = Array(rootToGroup.size) { FloatArray(4) }
         renderItems.forEachIndexed { index, item ->
             val group = itemGroups[index]; val color = darkenColor(item.item.backgroundColor)
-            sums[group][0] += Color.red(color); sums[group][1] += Color.green(color); sums[group][2] += Color.blue(color); sums[group][3] += 1f
+            sums[group][0] = sums[group][0] + Color.red(color)
+            sums[group][1] = sums[group][1] + Color.green(color)
+            sums[group][2] = sums[group][2] + Color.blue(color)
+            sums[group][3] = sums[group][3] + 1f
         }
         groupColors = sums.map { sum ->
             val count = sum[3].coerceAtLeast(1f)
@@ -205,7 +207,7 @@ class TranslationOverlayView(context: Context) : View(context) {
         var lines = wrapText(normalized, maxTextWidth, finalTextSize)
         val lineSpacing = finalTextSize * 1.16f
         val availableHeight = (boxHeight - verticalPadding * 2f).coerceAtLeast(1f)
-        var totalHeight = lineSpacing * lines.size
+        val totalHeight = lineSpacing * lines.size
         if (totalHeight > availableHeight && totalHeight > 0f) {
             val fitScale = (availableHeight / totalHeight).coerceAtLeast(minFontScale)
             finalTextSize = (finalTextSize * fitScale).coerceIn(minTextSizePx, baseTextSize)
