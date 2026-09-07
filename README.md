@@ -6,8 +6,8 @@ Android screen translator yang dirancang untuk menerjemahkan teks dari aplikasi 
 
 | Bagian | Status | Catatan |
 |---|---|---|
-| Floating button | ✅ | Tampil dan dapat digeser di atas aplikasi lain |
-| Floating menu | 🧪 | Posisi dinamis mengikuti FAB; toggle ulang sekarang dirancang untuk menutup menu |
+| Floating button | 🧪 | Tampil dan dapat digeser; toggle menu baru saja diperbaiki dan perlu uji ulang |
+| Floating menu | 🧪 | Posisi dinamis; tap ulang FAB dirancang untuk menutup menu |
 | Overlay permission | ✅ | Berjalan |
 | MediaProjection | ⚠️ | Screenshot berhasil dibuat; Android 14+ diarahkan ke full display |
 | OCR | ⚠️ | ML Kit menghasilkan line + bounding box; layout analyzer diterapkan |
@@ -122,7 +122,19 @@ Perbaikan:
 Commit overlay: `e6b0bd2fc03a2e55e3335dc2a4121c6155bd6e98`.
 Commit service: `5ebb3bfda9a6474e0de027159ce7b2c6725923a`.
 
-**Status:** kode sudah diubah, tetapi belum diuji ulang di perangkat pengguna dan belum boleh dianggap stabil secara visual.
+**Status:** kode berhasil di-build oleh GitHub Actions, tetapi belum diuji ulang di perangkat pengguna dan belum boleh dianggap stabil secara visual.
+
+### Build Verification
+Latest build run: `34112476978` (run #88).
+
+- commit: `0c0c9d4a6d1e4d27e4b0f5124c391598a19c027e`
+- result: `success`
+- task: `assembleDebug`
+- artifact: `ScreenTranslator-APK`
+- artifact ID: `10014932485`
+- SHA-256: `9f5d8e06f18dd1fecaa6c559594978f25c3efe7424158cbf160bb82b80df9458`
+
+Artifact ini berisi perubahan Manual TL terbaru pada commit code `e6b0bd2...` + `5ebb3bf...` beserta dokumentasi.
 
 ### TextLayoutAnalyzer
 File: `TextLayoutAnalyzer.kt`.
@@ -144,12 +156,8 @@ Commit renderer sebelumnya: `513e43e1f8c190903f2d1dc539028f0fed9e3e28`.
 Commit layout: `e59a2b3adef5ff5391dcda1a12df8f0d6d19ec5e`.
 Commit service sebelumnya: `9dbf8663eaab80f9844c64824964b3e5769e0156`.
 
-### Build Automation + Verification
+### Build Automation
 `.github/workflows/build.yml` menjalankan build otomatis setiap push ke `main`, dengan Gradle 8.2 melalui `gradle/actions/setup-gradle@v6`. `workflow_dispatch` tetap tersedia.
-
-Commit workflow final: `cedddc4ce6bf26f2e1bf7a36ad609cca568854cd`.
-
-Build terakhir yang terverifikasi sukses adalah artifact `ScreenTranslator-APK` untuk commit tersebut. Perubahan terbaru pada overlay/menu belum memiliki hasil build baru yang diverifikasi dalam catatan ini.
 
 ## Dokumen Pengembangan
 - `PROJECT_NOTES.md` — catatan teknis dan riwayat kerja.
