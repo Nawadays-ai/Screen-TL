@@ -6,7 +6,7 @@ This file is the handoff context for any AI assistant continuing development of 
 ## Project Goal
 Build an Android screen translator with:
 - floating button over other apps;
-- Manual TL: capture one screen → OCR → translate → show translated text as an overlay at OCR bounding boxes;
+- Manual TL: capture one screen → OCR → translate → show translated text directly over the source text;
 - Real-Time TL: repeatedly capture the screen, OCR/translate it, and refresh the overlay without blocking the target app;
 - selectable source/target languages;
 - selectable translation engines, with Google ML Kit on-device translation as the baseline and DeepL/Gemini planned.
@@ -16,7 +16,7 @@ Package: `com.example.screentranslator`
 
 Important files:
 - `MainActivity.kt`: permissions, language/API selectors, starts foreground service, requests full-display MediaProjection on Android 14+.
-- `FloatingService.kt`: floating UI, MediaProjection capture manager lifecycle, OCR/translation orchestration, Manual TL, Real-Time TL loop, and translation overlay lifecycle.
+- `FloatingService.kt`: floating UI, MediaProjection capture manager lifecycle, OCR/translation orchestration, Manual TL, Real-Time TL loop, floating menu, and translation overlay lifecycle.
 - `TranslationOverlayView.kt`: full-screen non-touchable overlay that draws translated text using OCR bounding boxes.
 - `ScreenCaptureSession.kt`: holds MediaProjection result code and Intent data in memory.
 - `ScreenCaptureManager.kt`: screen capture implementation plus diagnostic logging and pending-capture cancellation.
@@ -32,14 +32,14 @@ Important files:
 - OCR engine is configured for Japanese, Chinese, and Latin.
 - Translation manager is configured for Indonesian/Japanese/Chinese/English.
 - Manual TL was verified by the user after commit `ff06e2882ee852f51f4deecfd94bb0dbf95da8a3`: capture → OCR → translation → History → overlay works again.
-- The hard three-line limit was removed; Manual TL now processes every OCR line returned by the OCR manager.
-- Translation overlay can be displayed and is `FLAG_NOT_TOUCHABLE`.
-- Real-Time TL basic capture → OCR → translation → overlay loop has been verified by the user on-device.
+- The hard three-line limit was removed; Manual TL processes every OCR line returned by OCR.
+- Real-Time basic capture → OCR → translation → overlay was verified by the user.
+- The user has now requested that Real-Time work be paused while Manual TL overlay behavior is refined.
 
 ## Manual TL Current Flow
 1. Manual TL is requested.
 2. Existing translation overlay is removed completely from WindowManager.
-3. Floating button remains visible while waiting for the frame.
+3. Floating button remains available.
 4. `ScreenCaptureManager.captureOnce()` requests the next ImageReader frame.
 5. Capture timeout is 3 seconds.
 6. After a frame arrives, a separate 30-second watchdog covers OCR/model/translation.
@@ -48,31 +48,64 @@ Important files:
 9. Each detected line is translated sequentially.
 10. Results are written to persistent History.
 11. Translated text + OCR coordinates are displayed as an overlay.
-12. Floating button remains available.
+12. A `Hapus Overlay` menu button becomes available.
 
-The user currently considers Manual TL sufficiently good. Do not add UI polish to Manual TL unless needed for a functional fix.
+The user currently considers the Manual TL pipeline sufficiently good. Do not change the capture/OCR/History pipeline unless required by a functional bug.
 
-## Real-Time TL Current Implementation
-Commit `2f446e40fac1b5094f4a71ba72570ba7afb03060` implements the first actual Real-Time loop in `FloatingService.kt`.
+## Latest Manual Overlay Requirement
+The user wants the translation to behave like the Google Translate screenshot example:
+- translated text should directly cover the source text;
+- the source language/text should not remain visible underneath;
+- text size should follow the source OCR box as closely as possible;
+- if the translation is longer, reduce/adapt the text size only as needed;
+- keep the overlay non-touchable.
+
+### Implementation
+`TranslationOverlayView.kt` commit `1116dc9a2f5f197b10bdf2113ad88366c8bdb2dd`:
+- uses an opaque black background for each OCR region;
+- starts text sizing from the OCR box height;
+- shrinks text when the translation is wider than the source region;
+- clips text to the source OCR region;
+- keeps rounded corners and padding small.
+
+**Important:** This patch has **not been tested by the user yet**. Do not mark it stable.
+
+## Floating Menu Requirement
+The user wants the floating menu to avoid stacking over the FAB:
+- when FAB is on the left side, menu should open to the right;
+- when FAB is on the right side, menu should open to the left;
+- when FAB is near the bottom, menu should be placed above it;
+- specifically, bottom-right should produce an upper-left menu arrangement.
+
+### Implementation
+`layout_floating_widget.xml` commit `7197c6b01541727a4c0b9e106b05afefb0dc16d8` adds:
+- Real-Time
+- Manual TL
+- Hapus Overlay (hidden by default)
+- Keluar
+
+`FloatingService.kt` commit `f77d90e10a12372524e3d5e5997213ba198ea8c5` calculates menu placement from the current FAB coordinates and screen dimensions.
+
+**Important:** The adaptive menu has **not been tested by the user yet**.
+
+## Hapus Overlay Requirement
+Behavior:
+- before Manual TL produces a result: button hidden;
+- after Manual TL successfully displays overlay: button visible;
+- tapping Hapus Overlay removes only the translation overlay;
+- service remains alive;
+- History remains untouched;
+- after overlay removal: button hidden again.
+
+This is implemented in `FloatingService.kt`, but is **not yet user-tested**.
+
+## Real-Time TL — Paused
+The first Real-Time loop was implemented in commit `2f446e40fac1b5094f4a71ba72570ba7afb03060` and verified by the user at the basic functional level.
 
 Flow:
 `Real-Time aktif → prepare model → capture frame → OCR → sequential translation → overlay update → wait ~1.2s → repeat`
 
-Important implementation details:
-- `REALTIME_INTERVAL_MS = 1200L`.
-- `REALTIME_CAPTURE_DELAY_MS = 150L` is used after removing the previous overlay before requesting the next frame.
-- `isRealtimeBusy` prevents overlapping frame processing.
-- `isRealtimePreparing` blocks capture until the translation model is ready.
-- `realtimeGeneration` invalidates callbacks from an older Real-Time session after stop/restart.
-- Starting Real-Time removes the existing overlay first.
-- Stopping Real-Time cancels the pending capture, removes the overlay, resets the FAB icon, but does not stop the foreground service.
-- Real-Time does not write every frame to History. This is intentional to avoid duplicate History entries.
-- There is currently no change detection, OCR filtering, translation cache, or text-result deduplication.
-
-### Real-Time Device Verification
-The user has now verified that the basic Real-Time pipeline works on the device: capture → OCR → translation → overlay repeats successfully.
-
-### Current Real-Time Bug: Overlay Flicker
+### Known Real-Time Bug: Overlay Flicker
 Observed behavior:
 - overlay appears for about 2 seconds;
 - overlay disappears;
@@ -81,56 +114,24 @@ Observed behavior:
 
 Likely cause: the current Real-Time scheduling path removes the overlay before every capture. This leaves a real empty period while capture/OCR/translation runs.
 
-**Do not mark this bug fixed.** The intended functional fix is to keep one overlay window alive during Real-Time and avoid `removeView()`/re-add on every frame. The overlay contents/visibility should be controlled without repeatedly destroying the WindowManager window.
+**Status: deliberately paused. Do not mark fixed.**
 
-## Translation Overlay Visual Polish — Latest Unverified Change
-Commit `55233dfe6a1d2d200bae92ed970944418d914ccd` updates only `TranslationOverlayView.kt` visual rendering.
+Planned fix later:
+- keep one overlay WindowManager window alive;
+- avoid `removeView()`/re-add on every frame;
+- control overlay contents/visibility without destroying the window.
 
-Changes:
-- lighter/semi-transparent black background;
-- smoother rounded corners;
-- consistent horizontal/vertical padding;
-- adaptive text size based on OCR box dimensions with min/max bounds;
-- text size reduced when translation is too wide;
-- long text gets ellipsis instead of spilling out of the OCR box;
-- vertical centering;
-- clipping to the OCR box;
-- no change to capture/OCR/translation pipeline;
-- overlay remains non-touchable.
+Do not spend the current milestone on Real-Time unless the user explicitly asks to resume it.
 
-**Important:** This visual patch has **not yet been tested by the user**. Do not mark it stable. The user's screenshot showed the old visual state; the new rendering has not been confirmed visually yet.
-
-## Known Bugs / Unverified Behavior
-
-### Capture/OCR
-Earlier tests suggested OCR might be seeing only phone time/status-bar content rather than the target application. `MainActivity` now requests `MediaProjectionConfig.createConfigForDefaultDisplay()` on Android 14+ so the intended capture scope is the full default display.
-
-The previous `detectedTexts.take(3)` limit has been removed.
-
-Neither complete-screen capture nor complete-screen OCR coverage should be marked fully verified until another device test confirms it.
-
-### Translation Overlay
-Current behavior:
-- `FloatingService` carries each translated line together with its OCR bounding box.
-- After translation, `TranslationOverlayView` is added as a full-screen `TYPE_APPLICATION_OVERLAY`.
-- The overlay is `FLAG_NOT_TOUCHABLE`, so touches should pass to the target app.
-- Before a new Manual TL capture, the previous overlay is removed from WindowManager so it cannot become OCR input.
-
-Main verification risks:
-- bitmap coordinates may not map 1:1 to overlay coordinates on every device/orientation;
-- tiny OCR boxes may produce very small text;
-- long translations are shortened to fit one line;
-- system bars and unrelated UI are not yet filtered.
-
-The visual rendering patch is present but unverified.
-
-### History
+## History
 History uses `TranslationHistory.initialize(applicationContext)` from the service and `commit()` for writes. Manual TL uses History as persistent output. Real-Time currently does not add frame-by-frame entries.
 
-### APK update/install
+## APK Update / Build
 `app/build.gradle.kts` uses `versionCode = 2` and `versionName = "1.1"`.
 
-The user still reports an update conflict. The remaining likely cause is APK signing identity: a debug APK built on GitHub Actions can be signed with a CI-generated debug keystore that differs from the key used by the already-installed APK. A higher `versionCode` cannot fix a signature mismatch. Do not claim the update problem is solved until an APK built with the same signing key can install over the existing package.
+The user still reports an update conflict. The likely remaining cause is APK signing identity: a fresh GitHub Actions debug build can use a different debug keystore from the already-installed APK. A higher `versionCode` cannot fix a signature mismatch.
+
+The user wants the AI to perform builds whenever possible. However, the currently available GitHub connector does not expose a `workflow_dispatch` action, so **never claim a new build passed unless a real workflow result is available**.
 
 ## Diagnostic Logging
 Use Logcat tags:
@@ -143,19 +144,19 @@ Use Logcat tags:
 - Inspect the actual repository before modifying code.
 - Prefer small, testable changes.
 - Preserve working capture/OCR while diagnosing the pipeline.
-- Do not mark a feature `[x]` until it is verified.
+- Do not mark a feature `[x]` until it is verified by the user/device.
 - After every meaningful code change, update the change log and roadmap.
 - Keep `AI_README.md` as the operational rules for future AI sessions.
 - Update this handoff when architecture, bugs, or priorities change.
 - Always tell the owner what changed, why, what was verified, and what must be tested next.
-- The owner wants the AI to run the build workflow itself whenever a test build is needed. Do not claim a build passed unless the actual workflow result was checked.
+- If a change is implemented but not device-tested, explicitly mark it `[~]` / unverified.
+- Current priority is Manual TL. Real-Time flicker is paused.
 
-## Next Recommended Milestone
-1. Test the latest overlay visual patch on-device.
-2. Fix Real-Time overlay flicker by keeping the overlay WindowManager window alive between frames.
-3. Test Real-Time for at least 15–30 seconds with a static page, then change/scroll the target content.
-4. Verify stopping Real-Time removes the overlay and leaves the floating service alive.
-5. Run Manual TL after Real-Time and confirm Manual TL still works.
-6. If stable, add change detection and translation caching.
-7. Then add OCR filtering and optimize CPU/battery usage.
-8. Only after functional stability, continue broader UI polish.
+## Next Milestone
+1. Build/test the latest Manual TL overlay and floating menu changes.
+2. Verify source text is completely covered by translation.
+3. Verify font sizing on short and long translations.
+4. Move the FAB to left, top-right, bottom-left, and bottom-right and verify menu placement.
+5. Verify Hapus Overlay appears only after Manual TL overlay exists and disappears after clearing it.
+6. Once stable, implement the user's planned new Manual TL mode.
+7. Resume Real-Time flicker work later.
