@@ -33,7 +33,6 @@ Target overlay Manual TL:
 ## Arsitektur Overlay Baru
 
 Alur Manual TL:
-
 `Screen Capture → ML Kit OCR → TextLayoutAnalyzer → Translation → Overlay Renderer`
 
 `TextLayoutAnalyzer.kt` mengubah line OCR menjadi data layout:
@@ -41,12 +40,7 @@ Alur Manual TL:
 - estimasi tinggi font dari bounding box element OCR;
 - estimasi warna background dari piksel di sekitar area teks.
 
-`TranslationOverlayView.kt` kemudian:
-- memakai koordinat mask tersebut;
-- memakai ukuran font source sebagai ukuran awal;
-- mengecilkan font bila translation terlalu lebar/tinggi;
-- menggambar background hasil sampling;
-- tetap `FLAG_NOT_TOUCHABLE`.
+`TranslationOverlayView.kt` memakai data tersebut untuk menutup source dan merender translation dengan ukuran yang mengikuti source.
 
 ## Masalah Aktif
 
@@ -110,7 +104,6 @@ Alur Manual TL:
 
 ### TextLayoutAnalyzer
 File baru: `TextLayoutAnalyzer.kt`.
-
 - estimasi font dari element OCR;
 - mask source diperluas;
 - background source diambil dari sampling lokal.
@@ -118,7 +111,7 @@ File baru: `TextLayoutAnalyzer.kt`.
 Commit: `e0ec39f595f2bb66e09d46d5be469fd7ae6deaab`.
 
 ### OCR + Overlay Renderer
-`OcrManager.kt` membawa metadata layout sampai `TranslationOverlayView.kt`, yang kemudian merender translation menggunakan ukuran font source dan background sampling.
+`OcrManager.kt` membawa metadata layout sampai `TranslationOverlayView.kt`.
 
 Commit OCR: `28dab21490b73a5c94848971259c9096207cca43`.
 Commit renderer: `513e43e1f8c190903f2d1dc539028f0fed9e3e28`.
@@ -129,14 +122,15 @@ Commit renderer: `513e43e1f8c190903f2d1dc539028f0fed9e3e28`.
 Commit layout: `e59a2b3adef5ff5391dcda1a12df8f0d6d19ec5e`.
 Commit service: `9dbf8663eaab80f9844c64824964b3e5769e0156`.
 
-**Status:** seluruh perubahan kode di atas belum diuji pengguna.
+**Status:** perubahan kode belum diuji pengguna.
 
-### Build Automation
-`.github/workflows/build.yml` sekarang menjalankan `assembleDebug` otomatis setiap push ke `main`, dan `workflow_dispatch` tetap tersedia.
+### Build Automation + Verification
+`.github/workflows/build.yml` sekarang menjalankan build otomatis setiap push ke `main`, dengan Gradle 8.2 melalui `gradle/actions/setup-gradle@v6`. `workflow_dispatch` tetap tersedia.
 
-Commit: `39b09bffdd878650ade24824872d85daaf08d824`.
+Commit workflow awal: `39b09bffdd878650ade24824872d85daaf08d824`.
+Commit workflow final: `cedddc4ce6bf26f2e1bf7a36ad609cca568854cd`.
 
-Status verifikasi CI pada sesi ini: **belum tersedia**. Tidak ada status check yang dikembalikan untuk commit tersebut, jadi build tidak boleh dianggap lulus.
+**Build terbaru berhasil.** GitHub Actions menjalankan `assembleDebug` sampai selesai dan artifact `ScreenTranslator-APK` berhasil diupload untuk commit `cedddc4ce6bf26f2e1bf7a36ad609cca568854cd`.
 
 ## Dokumen Pengembangan
 - `PROJECT_NOTES.md` — catatan teknis dan riwayat kerja.
