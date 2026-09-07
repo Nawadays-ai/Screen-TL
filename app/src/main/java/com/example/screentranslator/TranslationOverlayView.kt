@@ -2,8 +2,10 @@ package com.example.screentranslator
 
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.Typeface
 import android.view.View
 
 /**
@@ -14,16 +16,25 @@ class TranslationOverlayView(context: Context) : View(context) {
 
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        alpha = 220
+        color = Color.BLACK
+        alpha = 190
     }
 
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = android.graphics.Color.WHITE
+        color = Color.WHITE
         textAlign = Paint.Align.LEFT
+        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+        isSubpixelText = true
     }
 
-    private val padding = 8f
+    // Keep the overlay visually separated from the OCR box without making it bulky.
+    private val horizontalPadding = 6f
+    private val verticalPadding = 4f
+    private val cornerRadius = 7f
+    private val minTextSize = 9f
+    private val maxTextSize = 30f
+
     private var items: List<TranslationOverlayItem> = emptyList()
     private var sourceWidth = 1
     private var sourceHeight = 1
@@ -60,34 +71,67 @@ class TranslationOverlayView(context: Context) : View(context) {
 
             if (right <= left || bottom <= top) return@forEach
 
-            val rect = RectF(left, top, right, bottom)
-            backgroundPaint.setColor(android.graphics.Color.BLACK)
-            canvas.drawRoundRect(rect, 6f, 6f, backgroundPaint)
+            val boxWidth = right - left
+            val boxHeight = bottom - top
+            val maxTextWidth = (boxWidth - horizontalPadding * 2f).coerceAtLeast(1f)
+            val maxTextHeight = (boxHeight - verticalPadding * 2f).coerceAtLeast(1f)
 
-            val boxHeight = (bottom - top).coerceAtLeast(12f)
-            textPaint.textSize = (boxHeight * 0.72f).coerceIn(12f, 48f)
+            // OCR boxes are normally single text lines. Fit the translation into the
+            // original box instead of letting a large font spill into neighboring UI.
+            val textSize = findTextSize(item.translatedText, maxTextWidth, maxTextHeight)
+            textPaint.textSize = textSize
 
-            val baseline = bottom - padding.coerceAtMost(boxHeight / 4f)
-            val maxWidth = (right - left - padding * 2f).coerceAtLeast(1f)
-            val translated = fitText(item.translatedText, maxWidth)
+            val fittedText = fitText(item.translatedText, maxTextWidth)
+            if (fittedText.isEmpty()) return@forEach
 
+            // A small expansion keeps short text from touching the rounded background,
+            // while clamping to the screen prevents the overlay from drawing off-screen.
+            val background = RectF(
+                left,
+                top,
+                right,
+                bottom
+            )
+            canvas.drawRoundRect(background, cornerRadius, cornerRadius, backgroundPaint)
+
+            val metrics = textPaint.fontMetrics
+            val baseline = top + (boxHeight - (metrics.descent - metrics.ascent)) / 2f - metrics.ascent
+
+            canvas.save()
+            canvas.clipRect(left, top, right, bottom)
             canvas.drawText(
-                translated,
-                left + padding,
+                fittedText,
+                left + horizontalPadding,
                 baseline,
                 textPaint
             )
+            canvas.restore()
         }
     }
 
-    private fun fitText(text: String, maxWidth: Float): String {
-        if (textPaint.measureText(text) <= maxWidth) return text
+    private fun findTextSize(text: String, maxWidth: Float, maxHeight: Float): Float {
+        val boxBasedSize = (maxHeight * 0.58f).coerceIn(minTextSize, maxTextSize)
+        textPaint.textSize = boxBasedSize
 
-        var end = text.length
-        while (end > 1 && textPaint.measureText(text.substring(0, end) + "…") > maxWidth) {
+        if (textPaint.measureText(text) <= maxWidth) return boxBasedSize
+
+        val widthBasedSize = (boxBasedSize * maxWidth / textPaint.measureText(text))
+            .coerceIn(minTextSize, boxBasedSize)
+        textPaint.textSize = widthBasedSize
+        return widthBasedSize
+    }
+
+    private fun fitText(text: String, maxWidth: Float): String {
+        val normalized = text.replace("\n", " ").trim()
+        if (normalized.isEmpty()) return ""
+        if (textPaint.measureText(normalized) <= maxWidth) return normalized
+
+        val ellipsis = "…"
+        var end = normalized.length
+        while (end > 1 && textPaint.measureText(normalized.substring(0, end) + ellipsis) > maxWidth) {
             end--
         }
-        return text.substring(0, end.coerceAtLeast(1)) + "…"
+        return normalized.substring(0, end.coerceAtLeast(1)) + ellipsis
     }
 }
 
