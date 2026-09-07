@@ -170,13 +170,11 @@ class FloatingService : Service() {
                         val dy = (event.rawY - initialTouchY).toInt()
                         if (kotlin.math.abs(dx) > 10 || kotlin.math.abs(dy) > 10) isClick = false
 
-                        val nextX = (initialX + dx).coerceAtLeast(0)
-                        val nextY = (initialY + dy).coerceAtLeast(0)
-                        fabScreenX = nextX
-                        fabScreenY = nextY
+                        fabScreenX = (initialX + dx).coerceAtLeast(0)
+                        fabScreenY = (initialY + dy).coerceAtLeast(0)
                         params?.let {
-                            it.x = nextX
-                            it.y = nextY
+                            it.x = fabScreenX
+                            it.y = fabScreenY
                             windowManager.updateViewLayout(floatingView, it)
                         }
                         return true
@@ -258,27 +256,10 @@ class FloatingService : Service() {
         val rootWidth = menuWidth + gap + fabSize
         val rootHeight = if (placeAbove) menuHeight + gap + fabSize else maxOf(menuHeight, fabSize)
 
-        val rawX = if (placeRight) {
-            fabScreenX
-        } else {
-            fabScreenX - menuWidth - gap
-        }
-        val rawY = if (placeAbove) {
-            fabScreenY - menuHeight - gap
-        } else {
-            fabScreenY - ((rootHeight - fabSize) / 2)
-        }
-
+        val rawX = if (placeRight) fabScreenX else fabScreenX - menuWidth - gap
+        val rawY = if (placeAbove) fabScreenY - menuHeight - gap else fabScreenY - ((rootHeight - fabSize) / 2)
         val rootX = rawX.coerceIn(0, (screenWidth - rootWidth).coerceAtLeast(0))
         val rootY = rawY.coerceIn(0, (screenHeight - rootHeight).coerceAtLeast(0))
-
-        params?.let {
-            it.width = rootWidth
-            it.height = rootHeight
-            it.x = rootX
-            it.y = rootY
-            windowManager.updateViewLayout(floatingView, it)
-        }
 
         val menuParams = layoutSubMenu.layoutParams as FrameLayout.LayoutParams
         val fabParams = fabMain.layoutParams as FrameLayout.LayoutParams
@@ -291,16 +272,27 @@ class FloatingService : Service() {
         fabParams.leftMargin = 0
         fabParams.topMargin = 0
 
-        if (placeAbove) {
-            menuParams.gravity = if (placeRight) Gravity.START or Gravity.TOP else Gravity.END or Gravity.TOP
-            fabParams.gravity = if (placeRight) Gravity.END or Gravity.BOTTOM else Gravity.END or Gravity.BOTTOM
+        if (placeRight) {
+            // Root order: FAB | gap | menu.
+            menuParams.gravity = if (placeAbove) Gravity.END or Gravity.TOP else Gravity.END or Gravity.CENTER_VERTICAL
+            fabParams.gravity = if (placeAbove) Gravity.START or Gravity.BOTTOM else Gravity.START or Gravity.CENTER_VERTICAL
         } else {
-            menuParams.gravity = if (placeRight) Gravity.START or Gravity.CENTER_VERTICAL else Gravity.END or Gravity.CENTER_VERTICAL
-            fabParams.gravity = if (placeRight) Gravity.END or Gravity.CENTER_VERTICAL else Gravity.END or Gravity.CENTER_VERTICAL
+            // Root order: menu | gap | FAB.
+            menuParams.gravity = if (placeAbove) Gravity.START or Gravity.TOP else Gravity.START or Gravity.CENTER_VERTICAL
+            fabParams.gravity = if (placeAbove) Gravity.END or Gravity.BOTTOM else Gravity.END or Gravity.CENTER_VERTICAL
         }
 
         layoutSubMenu.layoutParams = menuParams
         fabMain.layoutParams = fabParams
+
+        params?.let {
+            it.width = rootWidth
+            it.height = rootHeight
+            it.x = rootX
+            it.y = rootY
+            windowManager.updateViewLayout(floatingView, it)
+        }
+
         Log.i(TAG, "Floating menu positioned: right=$placeRight above=$placeAbove root=$rootX,$rootY ${rootWidth}x$rootHeight")
     }
 
@@ -335,7 +327,6 @@ class FloatingService : Service() {
                 onReady = {
                     if (!isRealtimeActive || generation != realtimeGeneration) return@prepare
                     isRealtimePreparing = false
-                    Log.i(TAG, "Realtime translation model ready")
                     scheduleRealtimeCapture(generation, 0L)
                 },
                 onFailure = { exception ->
@@ -458,9 +449,7 @@ class FloatingService : Service() {
             return
         }
         if (index >= texts.size) {
-            if (overlayResults.isNotEmpty()) {
-                showTranslationOverlay(overlayResults, sourceWidth, sourceHeight)
-            }
+            if (overlayResults.isNotEmpty()) showTranslationOverlay(overlayResults, sourceWidth, sourceHeight)
             onComplete()
             return
         }
@@ -691,11 +680,7 @@ class FloatingService : Service() {
         manualProcessTimeout = null
     }
 
-    private fun showTranslationOverlay(
-        items: List<TranslationOverlayItem>,
-        sourceWidth: Int,
-        sourceHeight: Int
-    ) {
+    private fun showTranslationOverlay(items: List<TranslationOverlayItem>, sourceWidth: Int, sourceHeight: Int) {
         runOnMainThread {
             if (items.isEmpty()) return@runOnMainThread
 
