@@ -33,6 +33,7 @@ class FloatingService : Service() {
         private const val TAG = "ScreenTL-Service"
         private const val MANUAL_CAPTURE_TIMEOUT_MS = 3_000L
         private const val MANUAL_PROCESS_TIMEOUT_MS = 30_000L
+        private const val MANUAL_CAPTURE_UI_SETTLE_MS = 200L
         private const val REALTIME_INTERVAL_MS = 1_200L
         private const val REALTIME_CAPTURE_DELAY_MS = 150L
         private const val MENU_GAP_DP = 8
@@ -157,7 +158,8 @@ class FloatingService : Service() {
             override fun onTouch(v: View, event: MotionEvent): Boolean {
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
-                        if (isSubMenuVisible) hideSubMenu()
+                        // Do not hide the menu here. ACTION_UP needs to be able
+                        // to detect a simple second tap and close the menu.
                         initialX = params?.x ?: fabScreenX
                         initialY = params?.y ?: fabScreenY
                         initialTouchX = event.rawX
@@ -168,7 +170,11 @@ class FloatingService : Service() {
                     MotionEvent.ACTION_MOVE -> {
                         val dx = (event.rawX - initialTouchX).toInt()
                         val dy = (event.rawY - initialTouchY).toInt()
-                        if (kotlin.math.abs(dx) > 10 || kotlin.math.abs(dy) > 10) isClick = false
+                        val moved = kotlin.math.abs(dx) > 10 || kotlin.math.abs(dy) > 10
+                        if (moved) {
+                            isClick = false
+                            if (isSubMenuVisible) hideSubMenu()
+                        }
 
                         fabScreenX = (initialX + dx).coerceAtLeast(0)
                         fabScreenY = (initialY + dy).coerceAtLeast(0)
@@ -273,11 +279,9 @@ class FloatingService : Service() {
         fabParams.topMargin = 0
 
         if (placeRight) {
-            // Root order: FAB | gap | menu.
             menuParams.gravity = if (placeAbove) Gravity.END or Gravity.TOP else Gravity.END or Gravity.CENTER_VERTICAL
             fabParams.gravity = if (placeAbove) Gravity.START or Gravity.BOTTOM else Gravity.START or Gravity.CENTER_VERTICAL
         } else {
-            // Root order: menu | gap | FAB.
             menuParams.gravity = if (placeAbove) Gravity.START or Gravity.TOP else Gravity.START or Gravity.CENTER_VERTICAL
             fabParams.gravity = if (placeAbove) Gravity.END or Gravity.BOTTOM else Gravity.END or Gravity.CENTER_VERTICAL
         }
@@ -509,6 +513,24 @@ class FloatingService : Service() {
 
         manualTranslationPending = true
         removeTranslationOverlay()
+        hideSubMenu()
+
+        // Let the WindowManager commit the menu's GONE state before the next
+        // MediaProjection frame is accepted. This prevents the Manual TL frame
+        // from containing the Screen-TL menu itself.
+        mainHandler.postDelayed({
+            if (manualTranslationPending) {
+                requestManualCapture(manager, ocr, translator)
+            }
+        }, MANUAL_CAPTURE_UI_SETTLE_MS)
+    }
+
+    private fun requestManualCapture(
+        manager: ScreenCaptureManager,
+        ocr: OcrManager,
+        translator: TranslationManager
+    ) {
+        if (!manualTranslationPending) return
 
         val requested = manager.captureOnce { bitmap ->
             cancelManualCaptureTimeout()
@@ -692,15 +714,21 @@ class FloatingService : Service() {
                     WindowManager.LayoutParams.TYPE_PHONE
                 }
                 val overlayParams = WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.MATCH_PARENT,
+                    sourceWidth.coerceAtLeast(1),
+                    sourceHeight.coerceAtLeast(1),
                     layoutFlag,
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                             WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                     PixelFormat.TRANSLUCENT
                 ).apply {
                     gravity = Gravity.TOP or Gravity.START
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        setFitInsetsTypes(0)
+                    }
                 }
                 windowManager.addView(it, overlayParams)
             }
