@@ -61,7 +61,7 @@ Commit: `e6b0bd2fc03a2e55e3335dc2a4121c6155bd6e98`.
 
 True backdrop blur is intentionally not implemented yet. Standard `RenderEffect` blurs the view's own rendered content; it does not automatically blur the underlying third-party app for this overlay use case.
 
-**Status: not yet device-tested after these fixes.**
+**Status: code built successfully, not yet device-tested after these fixes.**
 
 ## Floating Menu Fix
 The previous touch listener hid the submenu during `ACTION_DOWN`, then `ACTION_UP` saw it hidden and opened it again. This made a second tap appear unable to close the menu.
@@ -73,7 +73,7 @@ Current behavior:
 
 Commit: `5ebb3bfda9a6474e0de027159ce7b2c6725923a`.
 
-**Status: not yet device-tested after this fix.**
+**Status: code built successfully, not yet device-tested after this fix.**
 
 ## Manual TL Capture / Menu Filtering
 The user reported that the Screen-TL menu itself was being OCR-translated.
@@ -110,7 +110,7 @@ Required and implemented:
 - service and History remain alive;
 - button hides again after removal.
 
-**Status: not yet device-tested after latest changes.**
+**Status: code built successfully, not yet device-tested after latest changes.**
 
 ## Manual TL Flow
 1. Remove previous overlay.
@@ -137,9 +137,15 @@ APK update conflict is still suspected to be signing-key mismatch between debug 
 
 Build automation runs `assembleDebug` automatically on every push to `main`; `workflow_dispatch` remains available. The workflow uses `gradle/actions/setup-gradle@v6` with Gradle 8.2.
 
-Last verified successful build: commit `cedddc4ce6bf26f2e1bf7a36ad609cca568854cd`, artifact `ScreenTranslator-APK`, artifact ID `10014166550`.
+### Verified Build
+GitHub Actions run `34112476978` (run #88) completed successfully.
+- head commit: `0c0c9d4a6d1e4d27e4b0f5124c391598a19c027e`
+- task: `assembleDebug`
+- artifact: `ScreenTranslator-APK`
+- artifact ID: `10014932485`
+- SHA-256: `9f5d8e06f18dd1fecaa6c559594978f25c3efe7424158cbf160bb82b80df9458`
 
-The latest overlay/menu code has not yet been verified by a new GitHub Actions result in this handoff.
+The artifact contains the latest Manual TL code fixes before the documentation-only build record commits.
 
 ## Diagnostic Logging
 Tags:
@@ -159,7 +165,7 @@ Tags:
 - Never claim a build passed without a real build result.
 
 ## Next Test
-After the automatic build finishes, use the APK and verify:
+Use the built APK and verify:
 1. Manual TL still completes and History is saved.
 2. Upper and lower translation boxes stay exactly over their source text; no screen-shrinking effect.
 3. Source is fully covered by the replacement mask.
