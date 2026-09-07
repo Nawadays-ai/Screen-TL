@@ -13,103 +13,119 @@ import androidx.appcompat.app.AppCompatActivity
 
 class SettingsActivity : AppCompatActivity() {
     private lateinit var spinnerManualProvider: Spinner
-    private lateinit var etGeminiKey: EditText
-    private lateinit var tvGeminiStatus: TextView
-    private lateinit var btnGeminiCheck: Button
-    private lateinit var btnGeminiUse: Button
-    private lateinit var btnGeminiDisable: Button
-    private lateinit var etDeepLKey: EditText
-    private lateinit var tvDeepLStatus: TextView
-    private lateinit var btnDeepLCheck: Button
-    private lateinit var btnDeepLUse: Button
-    private lateinit var btnDeepLDisable: Button
+    private lateinit var spinnerApiProvider: Spinner
+    private lateinit var etApiKey: EditText
+    private lateinit var tvApiStatus: TextView
+    private lateinit var btnApiCheck: Button
+    private lateinit var btnApiUse: Button
+    private lateinit var btnApiDisable: Button
+
+    private val apiProviders = arrayOf("Gemini AI", "DeepL API")
+    private var selectedApiProvider = apiProviders[0]
+    private var updatingApiField = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
         ApiSettings.initialize(applicationContext)
+
         spinnerManualProvider = findViewById(R.id.spinnerManualProvider)
-        etGeminiKey = findViewById(R.id.etGeminiKey); tvGeminiStatus = findViewById(R.id.tvGeminiStatus)
-        btnGeminiCheck = findViewById(R.id.btnGeminiCheck); btnGeminiUse = findViewById(R.id.btnGeminiUse); btnGeminiDisable = findViewById(R.id.btnGeminiDisable)
-        etDeepLKey = findViewById(R.id.etDeepLKey); tvDeepLStatus = findViewById(R.id.tvDeepLStatus)
-        btnDeepLCheck = findViewById(R.id.btnDeepLCheck); btnDeepLUse = findViewById(R.id.btnDeepLUse); btnDeepLDisable = findViewById(R.id.btnDeepLDisable)
+        spinnerApiProvider = findViewById(R.id.spinnerApiProvider)
+        etApiKey = findViewById(R.id.etApiKey)
+        tvApiStatus = findViewById(R.id.tvApiStatus)
+        btnApiCheck = findViewById(R.id.btnApiCheck)
+        btnApiUse = findViewById(R.id.btnApiUse)
+        btnApiDisable = findViewById(R.id.btnApiDisable)
         findViewById<Button>(R.id.btnBackSettings).setOnClickListener { finish() }
 
-        val providers = arrayOf(ApiSettings.PROVIDER_ML_KIT, ApiSettings.PROVIDER_DEEPL)
-        spinnerManualProvider.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, providers)
-        spinnerManualProvider.setSelection(providers.indexOf(ApiSettings.getManualProvider()).coerceAtLeast(0))
-        spinnerManualProvider.setOnItemSelectedListener(SimpleItemSelectedListener { position -> ApiSettings.setManualProvider(providers[position]) })
+        // Free/manual translation currently uses Google ML Kit only.
+        val manualProviders = arrayOf(ApiSettings.PROVIDER_ML_KIT)
+        spinnerManualProvider.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, manualProviders)
+        spinnerManualProvider.setSelection(0)
+        spinnerManualProvider.setOnItemSelectedListener(SimpleItemSelectedListener { ApiSettings.setManualProvider(ApiSettings.PROVIDER_ML_KIT) })
 
-        etGeminiKey.setText(ApiSettings.getGeminiKey().orEmpty())
-        etDeepLKey.setText(ApiSettings.getDeepLKey().orEmpty())
-        installKeyWatcher(etGeminiKey) { ApiSettings.setGeminiKey(it); renderGemini() }
-        installKeyWatcher(etDeepLKey) { ApiSettings.setDeepLKey(it); renderDeepL() }
+        spinnerApiProvider.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, apiProviders)
+        val preferredApi = if (ApiSettings.isDeepLEnabled()) "DeepL API" else "Gemini AI"
+        selectedApiProvider = preferredApi
+        spinnerApiProvider.setSelection(apiProviders.indexOf(preferredApi))
+        spinnerApiProvider.setOnItemSelectedListener(SimpleItemSelectedListener { position ->
+            if (position !in apiProviders.indices) return@SimpleItemSelectedListener
+            selectedApiProvider = apiProviders[position]
+            loadSelectedApiKey()
+            renderApi()
+        })
 
-        btnGeminiCheck.setOnClickListener { checkGemini() }
-        btnGeminiUse.setOnClickListener {
-            ApiSettings.setGeminiEnabled(true)
-            renderGemini()
-            renderDeepL()
-        }
-        btnGeminiDisable.setOnClickListener {
-            ApiSettings.setGeminiEnabled(false)
-            renderGemini()
-        }
-        btnDeepLCheck.setOnClickListener { checkDeepL() }
-        btnDeepLUse.setOnClickListener {
-            ApiSettings.setDeepLEnabled(true)
-            renderDeepL()
-            renderGemini()
-        }
-        btnDeepLDisable.setOnClickListener {
-            ApiSettings.setDeepLEnabled(false)
-            renderDeepL()
-        }
-        renderGemini(); renderDeepL()
-    }
-
-    private fun installKeyWatcher(field: EditText, onChanged: (String) -> Unit) {
-        field.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-        field.addTextChangedListener(object : TextWatcher {
+        etApiKey.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        etApiKey.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { onChanged(s?.toString().orEmpty()) }
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                if (updatingApiField) return
+                val key = s?.toString().orEmpty()
+                if (selectedApiProvider == "Gemini AI") ApiSettings.setGeminiKey(key) else ApiSettings.setDeepLKey(key)
+                renderApi()
+            }
             override fun afterTextChanged(s: Editable?) = Unit
         })
+
+        btnApiCheck.setOnClickListener { checkSelectedApi() }
+        btnApiUse.setOnClickListener {
+            if (selectedApiProvider == "Gemini AI") ApiSettings.setGeminiEnabled(true) else ApiSettings.setDeepLEnabled(true)
+            renderApi()
+        }
+        btnApiDisable.setOnClickListener {
+            if (selectedApiProvider == "Gemini AI") ApiSettings.setGeminiEnabled(false) else ApiSettings.setDeepLEnabled(false)
+            renderApi()
+        }
+
+        loadSelectedApiKey()
+        renderApi()
     }
 
-    private fun checkGemini() {
-        val key = etGeminiKey.text.toString().trim(); if (key.isBlank()) return
-        tvGeminiStatus.text = "Memeriksa API..."
-        GeminiTranslationProvider(key, "Inggris", "Indonesia").prepare(
-            onReady = { runOnUiThread { ApiSettings.setGeminiKey(key); ApiSettings.setGeminiVerified(true); renderGemini("API dapat digunakan") } },
-            onFailure = { error -> runOnUiThread { ApiSettings.setGeminiVerified(false); ApiSettings.setGeminiEnabled(false); tvGeminiStatus.text = "API tidak dapat digunakan${error.message?.let { ": $it" } ?: ""}"; renderGeminiButtonsOnly() } }
-        )
+    private fun loadSelectedApiKey() {
+        val key = if (selectedApiProvider == "Gemini AI") ApiSettings.getGeminiKey().orEmpty() else ApiSettings.getDeepLKey().orEmpty()
+        updatingApiField = true
+        etApiKey.setText(key)
+        etApiKey.setSelection(etApiKey.text.length)
+        updatingApiField = false
     }
 
-    private fun checkDeepL() {
-        val key = etDeepLKey.text.toString().trim(); if (key.isBlank()) return
-        tvDeepLStatus.text = "Memeriksa API..."
-        DeepLTranslationProvider(key, "Inggris", "Indonesia").prepare(
-            onReady = { runOnUiThread { ApiSettings.setDeepLKey(key); ApiSettings.setDeepLVerified(true); renderDeepL("API dapat digunakan") } },
-            onFailure = { error -> runOnUiThread { ApiSettings.setDeepLVerified(false); ApiSettings.setDeepLEnabled(false); tvDeepLStatus.text = "API tidak dapat digunakan${error.message?.let { ": $it" } ?: ""}"; renderDeepLButtonsOnly() } }
-        )
+    private fun checkSelectedApi() {
+        val key = etApiKey.text.toString().trim()
+        if (key.isBlank()) return
+        tvApiStatus.text = "Memeriksa API..."
+        if (selectedApiProvider == "Gemini AI") {
+            GeminiTranslationProvider(key, "Inggris", "Indonesia").prepare(
+                onReady = { runOnUiThread { ApiSettings.setGeminiKey(key); ApiSettings.setGeminiVerified(true); renderApi("API dapat digunakan") } },
+                onFailure = { error -> runOnUiThread { ApiSettings.setGeminiVerified(false); ApiSettings.setGeminiEnabled(false); renderApi("API tidak dapat digunakan${error.message?.let { ": $it" } ?: ""}") } }
+            )
+        } else {
+            DeepLTranslationProvider(key, "Inggris", "Indonesia").prepare(
+                onReady = { runOnUiThread { ApiSettings.setDeepLKey(key); ApiSettings.setDeepLVerified(true); renderApi("API dapat digunakan") } },
+                onFailure = { error -> runOnUiThread { ApiSettings.setDeepLVerified(false); ApiSettings.setDeepLEnabled(false); renderApi("API tidak dapat digunakan${error.message?.let { ": $it" } ?: ""}") } }
+            )
+        }
     }
 
-    private fun renderGemini(successMessage: String? = null) {
-        val key = etGeminiKey.text.toString().trim()
-        if (key.isBlank()) { tvGeminiStatus.text = ""; btnGeminiCheck.visibility = Button.GONE; btnGeminiUse.visibility = Button.GONE; btnGeminiDisable.visibility = Button.GONE; return }
-        if (successMessage != null) tvGeminiStatus.text = successMessage else if (ApiSettings.isGeminiEnabled()) tvGeminiStatus.text = "API aktif" else if (ApiSettings.isGeminiVerified()) tvGeminiStatus.text = "API dapat digunakan" else tvGeminiStatus.text = "Belum dicek"
-        btnGeminiCheck.visibility = Button.VISIBLE; btnGeminiUse.visibility = if (ApiSettings.isGeminiVerified() && !ApiSettings.isGeminiEnabled()) Button.VISIBLE else Button.GONE; btnGeminiDisable.visibility = if (ApiSettings.isGeminiEnabled()) Button.VISIBLE else Button.GONE
+    private fun renderApi(message: String? = null) {
+        val key = etApiKey.text.toString().trim()
+        if (key.isBlank()) {
+            tvApiStatus.text = ""
+            btnApiCheck.visibility = Button.GONE
+            btnApiUse.visibility = Button.GONE
+            btnApiDisable.visibility = Button.GONE
+            return
+        }
+        val enabled = if (selectedApiProvider == "Gemini AI") ApiSettings.isGeminiEnabled() else ApiSettings.isDeepLEnabled()
+        val verified = if (selectedApiProvider == "Gemini AI") ApiSettings.isGeminiVerified() else ApiSettings.isDeepLVerified()
+        tvApiStatus.text = message ?: when {
+            enabled -> "API aktif"
+            verified -> "API dapat digunakan"
+            else -> "Belum dicek"
+        }
+        btnApiCheck.visibility = Button.VISIBLE
+        btnApiUse.visibility = if (verified && !enabled) Button.VISIBLE else Button.GONE
+        btnApiDisable.visibility = if (enabled) Button.VISIBLE else Button.GONE
     }
-    private fun renderGeminiButtonsOnly() { btnGeminiCheck.visibility = Button.VISIBLE; btnGeminiUse.visibility = Button.GONE; btnGeminiDisable.visibility = Button.GONE }
-
-    private fun renderDeepL(successMessage: String? = null) {
-        val key = etDeepLKey.text.toString().trim()
-        if (key.isBlank()) { tvDeepLStatus.text = ""; btnDeepLCheck.visibility = Button.GONE; btnDeepLUse.visibility = Button.GONE; btnDeepLDisable.visibility = Button.GONE; return }
-        if (successMessage != null) tvDeepLStatus.text = successMessage else if (ApiSettings.isDeepLEnabled()) tvDeepLStatus.text = "API aktif" else if (ApiSettings.isDeepLVerified()) tvDeepLStatus.text = "API dapat digunakan" else tvDeepLStatus.text = "Belum dicek"
-        btnDeepLCheck.visibility = Button.VISIBLE; btnDeepLUse.visibility = if (ApiSettings.isDeepLVerified() && !ApiSettings.isDeepLEnabled()) Button.VISIBLE else Button.GONE; btnDeepLDisable.visibility = if (ApiSettings.isDeepLEnabled()) Button.VISIBLE else Button.GONE
-    }
-    private fun renderDeepLButtonsOnly() { btnDeepLCheck.visibility = Button.VISIBLE; btnDeepLUse.visibility = Button.GONE; btnDeepLDisable.visibility = Button.GONE }
 }
 
 private class SimpleItemSelectedListener(private val action: (Int) -> Unit) : android.widget.AdapterView.OnItemSelectedListener {
