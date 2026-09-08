@@ -108,6 +108,7 @@ object KlipSelectionController {
         if (selection.width() < MIN_SELECTION_PX || selection.height() < MIN_SELECTION_PX) return
         selectionExists = false
         cleanupMaskOnly()
+        hostRoot?.let { setClipCancelVisible(it, true) }
         toast(owner, "Area dikonfirmasi. Mengambil layar...")
         mainHandler.postDelayed({
             if (!isActive) return@postDelayed
@@ -169,8 +170,7 @@ object KlipSelectionController {
         val view = TranslationOverlayView(context)
         view.setTranslations(items, width, height, TOLERANCE_RATIO)
         val params = WindowManager.LayoutParams(width.coerceAtLeast(1), height.coerceAtLeast(1), if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.START; x = 0; y = 0 }
-        clipOverlayView?.let { runCatching { wm.removeView(it) } }
-        clipOverlayView = view
+        clipOverlayView?.let { runCatching { wm.removeView(it) } }; clipOverlayView = view
         runCatching { wm.addView(view, params) }.onFailure { clipOverlayView = null; Log.e(TAG, "Failed to show Klip overlay", it) }
     }
 
@@ -286,14 +286,12 @@ object KlipSelectionController {
         }
 
         private fun updateCreate(x: Float, y: Float) { val r = selection ?: return; r.left = minOf(downX, x); r.top = minOf(downY, y); r.right = maxOf(downX, x); r.bottom = maxOf(downY, y); normalizeAndClamp(r) }
-
         private fun updateMove(dx: Float, dy: Float) {
             val r = selection ?: return
             val w = startRect.width(); val h = startRect.height()
             val left = (startRect.left + dx).coerceIn(0f, width - w); val top = (startRect.top + dy).coerceIn(0f, height - h)
             r.set(left, top, left + w, top + h); normalizeAndClamp(r)
         }
-
         private fun updateResize(x: Float, y: Float) {
             val r = selection ?: return
             when (activeHandle) {
@@ -305,14 +303,12 @@ object KlipSelectionController {
             }
             normalizeAndClamp(r)
         }
-
         private fun normalizeAndClamp(r: RectF) {
             r.left = r.left.coerceIn(0f, width.toFloat()); r.right = r.right.coerceIn(0f, width.toFloat()); r.top = r.top.coerceIn(0f, height.toFloat()); r.bottom = r.bottom.coerceIn(0f, height.toFloat())
             if (r.right < r.left) { val t = r.left; r.left = r.right; r.right = t }
             if (r.bottom < r.top) { val t = r.top; r.top = r.bottom; r.bottom = t }
             ensureControlBand(r)
         }
-
         private fun ensureControlBand(r: RectF) {
             val band = buttonSize + outsideGap
             val verticalAvailable = r.top >= band || height - r.bottom >= band
@@ -321,15 +317,12 @@ object KlipSelectionController {
             val newBottom = height.toFloat() - band
             if (newBottom - r.top >= minSelection) r.bottom = newBottom else { r.top = 0f; r.bottom = newBottom.coerceAtLeast(minSelection) }
         }
-
         private fun hitHandle(r: RectF, x: Float, y: Float): Handle {
             val hit = handleRadius * 1.8f
             return when { distance(x, y, r.left, r.top) <= hit -> Handle.TL; distance(x, y, r.right, r.top) <= hit -> Handle.TR; distance(x, y, r.left, r.bottom) <= hit -> Handle.BL; distance(x, y, r.right, r.bottom) <= hit -> Handle.BR; else -> Handle.NONE }
         }
-
         private fun distance(x1: Float, y1: Float, x2: Float, y2: Float): Float = kotlin.math.hypot(x1 - x2, y1 - y2)
         private fun drawHandle(canvas: Canvas, x: Float, y: Float) { canvas.drawCircle(x, y, handleRadius, handlePaint); canvas.drawCircle(x, y, handleRadius, selectionStrokePaint) }
-
         private fun controlRects(r: RectF): Pair<RectF, RectF> {
             val totalW = buttonSize * 2f + buttonGap
             val candidates = listOf(
@@ -338,12 +331,11 @@ object KlipSelectionController {
                 RectF(r.right + outsideGap, r.top, r.right + outsideGap + totalW, r.top + buttonSize),
                 RectF(r.left - outsideGap - totalW, r.top, r.left - outsideGap, r.top + buttonSize)
             )
-            val band = candidates.firstOrNull { candidate -> inside(candidate) && !RectF.intersects(candidate, r) } ?: RectF((width - totalW).coerceAtLeast(0f), (height - buttonSize).coerceAtLeast(0f), width.toFloat(), height.toFloat())
+            val band = candidates.firstOrNull { candidate -> inside(candidate) && !RectF.intersects(candidate, r) }
+                ?: RectF((width - totalW).coerceAtLeast(0f), (height - buttonSize).coerceAtLeast(0f), width.toFloat(), height.toFloat())
             return Pair(RectF(band.left, band.top, band.left + buttonSize, band.bottom), RectF(band.left + buttonSize + buttonGap, band.top, band.right, band.bottom))
         }
-
         private fun inside(rect: RectF): Boolean = rect.left >= 0f && rect.top >= 0f && rect.right <= width.toFloat() && rect.bottom <= height.toFloat()
-
         private fun drawButton(canvas: Canvas, rect: RectF, label: String) {
             canvas.drawRoundRect(rect, 10f * density, 10f * density, buttonPaint); canvas.drawRoundRect(rect, 10f * density, 10f * density, buttonStrokePaint)
             val y = rect.centerY() - (buttonTextPaint.ascent() + buttonTextPaint.descent()) / 2f
