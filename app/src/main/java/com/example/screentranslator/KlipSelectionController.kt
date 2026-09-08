@@ -46,8 +46,6 @@ object KlipSelectionController {
 
     fun start(context: Context, sourceView: View) {
         if (isActive) return
-        // The floating UI uses a ContextThemeWrapper. Resolve the real service before
-        // accessing FloatingService state; otherwise Klip silently fails its setup.
         val owner = findFloatingService(context) ?: run {
             toast(context, "Klip belum siap. Translator belum aktif.")
             return
@@ -227,10 +225,11 @@ object KlipSelectionController {
 
     private fun findFloatingService(context: Context): FloatingService? {
         var current: Context? = context
-        repeat(8) {
-            when (current) {
-                is FloatingService -> return current
-                is ContextWrapper -> current = current.baseContext
+        for (i in 0 until 8) {
+            val candidate = current
+            when (candidate) {
+                is FloatingService -> return candidate
+                is ContextWrapper -> current = candidate.baseContext
                 else -> return null
             }
         }
