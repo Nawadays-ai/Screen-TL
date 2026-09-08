@@ -1,6 +1,7 @@
 package com.example.screentranslator
 
 import android.content.Context
+import android.content.ContextWrapper
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -29,12 +30,9 @@ object KlipSelectionController {
     private const val MIN_SELECTION_PX = 8
     private const val CAPTURE_SETTLE_MS = 120L
 
-    @Volatile
-    var isActive: Boolean = false
+    @Volatile var isActive: Boolean = false
         private set
-
-    @Volatile
-    var hasClipOverlay: Boolean = false
+    @Volatile var hasClipOverlay: Boolean = false
         private set
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -42,13 +40,18 @@ object KlipSelectionController {
     private var windowManager: WindowManager? = null
     private var hostRoot: View? = null
     private var hostParams: WindowManager.LayoutParams? = null
-    private var service: Any? = null
+    private var service: FloatingService? = null
     private var clipOverlayView: TranslationOverlayView? = null
     private var selectionCompleted = false
 
     fun start(context: Context, sourceView: View) {
         if (isActive) return
-        val owner = context
+        // The floating UI uses a ContextThemeWrapper. Resolve the real service before
+        // accessing FloatingService state; otherwise Klip silently fails its setup.
+        val owner = findFloatingService(context) ?: run {
+            toast(context, "Klip belum siap. Translator belum aktif.")
+            return
+        }
         val root = sourceView.rootView ?: return
         val wm = owner.getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return
         val capture = readField<ScreenCaptureManager>(owner, "screenCaptureManager")
@@ -80,12 +83,9 @@ object KlipSelectionController {
         try {
             if (root.isAttachedToWindow) wm.removeView(root)
             val maskParams = WindowManager.LayoutParams(
-                display.widthPixels.coerceAtLeast(1),
-                display.heightPixels.coerceAtLeast(1),
+                display.widthPixels.coerceAtLeast(1), display.heightPixels.coerceAtLeast(1),
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT
             ).apply { gravity = Gravity.TOP or Gravity.START; x = 0; y = 0 }
             wm.addView(selectionView, maskParams)
@@ -94,36 +94,27 @@ object KlipSelectionController {
             toast(owner, "Klip aktif — sentuh dan geser area yang ingin diterjemahkan")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to activate Klip mask", e)
-            cleanupMaskOnly()
-            isActive = false
-            hasClipOverlay = false
-            service = null
+            cleanupMaskOnly(); isActive = false; hasClipOverlay = false; service = null
             toast(owner, "Gagal mengaktifkan Klip: ${e.message ?: "Unknown error"}")
         }
     }
 
     fun cancel() {
         if (!isActive && !hasClipOverlay) return
-        val owner = service as? Context
-        readField<ScreenCaptureManager>(owner ?: return, "screenCaptureManager")?.cancelPendingCapture()
+        val owner = service ?: return
+        readField<ScreenCaptureManager>(owner, "screenCaptureManager")?.cancelPendingCapture()
         clipOverlayView?.let { runCatching { windowManager?.removeView(it) } }
         clipOverlayView = null
-        cleanupMaskOnly()
-        isActive = false
-        hasClipOverlay = false
-        service = null
+        cleanupMaskOnly(); isActive = false; hasClipOverlay = false; service = null
         hostRoot?.let { root -> setClipCancelVisible(root, false) }
         toast(owner, "Klip dibatalkan")
     }
 
     private fun finishSelection(rect: Rect, capture: ScreenCaptureManager, ocr: OcrManager, translator: TranslationManager) {
-        val owner = service as? Context ?: return
+        val owner = service ?: return
         val selection = Rect(rect)
         cleanupMaskOnly()
-        if (selection.width() < MIN_SELECTION_PX || selection.height() < MIN_SELECTION_PX) {
-            fail("Area Klip terlalu kecil")
-            return
-        }
+        if (selection.width() < MIN_SELECTION_PX || selection.height() < MIN_SELECTION_PX) { fail("Area Klip terlalu kecil"); return }
         toast(owner, "Area dipilih. Mengambil layar...")
         mainHandler.postDelayed({
             if (!isActive) return@postDelayed
@@ -131,17 +122,10 @@ object KlipSelectionController {
                 try {
                     val crop = cropBitmap(bitmap, selection)
                     bitmap.recycle()
-                    if (crop == null) {
-                        fail("Area Klip berada di luar layar")
-                        return@captureOnce
-                    }
+                    if (crop == null) { fail("Area Klip berada di luar layar"); return@captureOnce }
                     toast(owner, "Memproses OCR area Klip...")
                     ocr.recognize(crop, onSuccess = { detected ->
-                        if (detected.isEmpty()) {
-                            crop.recycle()
-                            fail("OCR tidak menemukan teks di area Klip")
-                            return@recognize
-                        }
+                        if (detected.isEmpty()) { crop.recycle(); fail("OCR tidak menemukan teks di area Klip"); return@recognize }
                         val sourceLeft = selection.left.coerceAtLeast(0)
                         val sourceTop = selection.top.coerceAtLeast(0)
                         val scaleToDisplayX = selection.width().toFloat() / crop.width.toFloat().coerceAtLeast(1f)
@@ -156,13 +140,9 @@ object KlipSelectionController {
                             )
                         }
                         translateAll(owner, translator, adjusted, bitmapSizeFromSelection(selection), 0, mutableListOf(), mutableListOf(), crop)
-                    }, onFailure = { exception ->
-                        crop.recycle()
-                        fail("OCR Klip gagal: ${exception.message ?: "Unknown error"}")
-                    })
+                    }, onFailure = { exception -> crop.recycle(); fail("OCR Klip gagal: ${exception.message ?: "Unknown error"}") })
                 } catch (e: Exception) {
-                    runCatching { bitmap.recycle() }
-                    fail("Gagal memproses area Klip: ${e.message ?: "Unknown error"}")
+                    runCatching { bitmap.recycle() }; fail("Gagal memproses area Klip: ${e.message ?: "Unknown error"}")
                 }
             }
             if (!requested) fail("Gagal mengambil screenshot")
@@ -172,8 +152,7 @@ object KlipSelectionController {
     private fun translateAll(owner: Context, translator: TranslationManager, texts: List<DetectedText>, screenSize: Pair<Int, Int>, index: Int, historyParts: MutableList<String>, overlays: MutableList<TranslationOverlayItem>, crop: Bitmap) {
         if (!isActive) {
             texts.mapNotNull { it.blurredPatch }.forEach { patch -> runCatching { patch.recycle() } }
-            runCatching { crop.recycle() }
-            return
+            runCatching { crop.recycle() }; return
         }
         if (index >= texts.size) {
             runCatching { crop.recycle() }
@@ -182,35 +161,26 @@ object KlipSelectionController {
             val source = readField<String>(owner, "sourceLanguage") ?: "Jepang"
             val target = readField<String>(owner, "targetLanguage") ?: "Indonesia"
             TranslationHistory.add(buildString {
-                append("[").append(time).append("]\n")
-                append("TL: ").append(translator.getProviderName()).append(" (Klip)\n")
-                append(source).append(" → ").append(target).append("\n\n")
-                append(historyParts.joinToString("\n\n"))
+                append("[").append(time).append("]\n"); append("TL: ").append(translator.getProviderName()).append(" (Klip)\n"); append(source).append(" → ").append(target).append("\n\n"); append(historyParts.joinToString("\n\n"))
             })
             showOverlay(owner, overlays, screenSize.first, screenSize.second)
-            isActive = false
-            hasClipOverlay = true
+            isActive = false; hasClipOverlay = true
             hostRoot?.let { root -> setClipCancelVisible(root, true) }
-            service = null
-            toast(owner, "Klip selesai: ${overlays.size} blok diterjemahkan")
+            service = null; toast(owner, "Klip selesai: ${overlays.size} blok diterjemahkan")
             return
         }
         val current = texts[index]
         try {
             translator.translate(current.text, onSuccess = { translated ->
                 if (!isActive) { current.blurredPatch?.let { runCatching { it.recycle() } }; return@translate }
-                historyParts.add("${current.text}\n→ $translated")
-                overlays.add(current.toOverlayItem(translated))
-                translateAll(owner, translator, texts, screenSize, index + 1, historyParts, overlays, crop)
+                historyParts.add("${current.text}\n→ $translated"); overlays.add(current.toOverlayItem(translated)); translateAll(owner, translator, texts, screenSize, index + 1, historyParts, overlays, crop)
             }, onFailure = { exception ->
                 if (!isActive) { current.blurredPatch?.let { runCatching { it.recycle() } }; return@translate }
-                historyParts.add("${current.text}\n→ [Gagal diterjemahkan: ${exception.message ?: "Unknown error"}]")
-                translateAll(owner, translator, texts, screenSize, index + 1, historyParts, overlays, crop)
+                historyParts.add("${current.text}\n→ [Gagal diterjemahkan: ${exception.message ?: "Unknown error"}]"); translateAll(owner, translator, texts, screenSize, index + 1, historyParts, overlays, crop)
             })
         } catch (e: Exception) {
             if (!isActive) { current.blurredPatch?.let { runCatching { it.recycle() } }; return }
-            historyParts.add("${current.text}\n→ [Gagal diterjemahkan: ${e.message ?: "Unknown error"}]")
-            translateAll(owner, translator, texts, screenSize, index + 1, historyParts, overlays, crop)
+            historyParts.add("${current.text}\n→ [Gagal diterjemahkan: ${e.message ?: "Unknown error"}]"); translateAll(owner, translator, texts, screenSize, index + 1, historyParts, overlays, crop)
         }
     }
 
@@ -219,8 +189,7 @@ object KlipSelectionController {
         val view = TranslationOverlayView(context)
         view.setTranslations(items, width, height, TOLERANCE_RATIO)
         val params = WindowManager.LayoutParams(width.coerceAtLeast(1), height.coerceAtLeast(1), if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.START; x = 0; y = 0 }
-        clipOverlayView?.let { runCatching { wm.removeView(it) } }
-        clipOverlayView = view
+        clipOverlayView?.let { runCatching { wm.removeView(it) } }; clipOverlayView = view
         runCatching { wm.addView(view, params) }.onFailure { clipOverlayView = null; Log.e(TAG, "Failed to show Klip overlay", it) }
     }
 
@@ -244,16 +213,28 @@ object KlipSelectionController {
         maskView?.let { view -> runCatching { windowManager?.removeView(view) } }
         maskView = null
         hostRoot?.let { root -> setClipCancelVisible(root, false) }
-        runCatching { service?.let { invokePrivate(it, "updateRemoveOverlayButton") } }
+        service?.let { runCatching { invokePrivate(it, "updateRemoveOverlayButton") } }
         selectionCompleted = false
     }
 
     private fun setClipCancelVisible(root: View, visible: Boolean) { root.findViewById<View>(R.id.btnRemoveOverlay)?.visibility = if (visible) View.VISIBLE else View.GONE }
 
     private fun fail(message: String) {
-        val owner = service as? Context
+        val owner = service
         clipOverlayView?.let { runCatching { windowManager?.removeView(it) } }; clipOverlayView = null
         cleanupMaskOnly(); isActive = false; hasClipOverlay = false; service = null; toast(owner, message)
+    }
+
+    private fun findFloatingService(context: Context): FloatingService? {
+        var current: Context? = context
+        repeat(8) {
+            when (current) {
+                is FloatingService -> return current
+                is ContextWrapper -> current = current.baseContext
+                else -> return null
+            }
+        }
+        return null
     }
 
     @Suppress("UNCHECKED_CAST")
