@@ -2,12 +2,13 @@ package com.example.screentranslator
 
 import android.graphics.Bitmap
 import android.util.Log
+import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.TextRecognizer
+import com.google.mlkit.vision.text.Text.TextBlock
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
-import com.google.mlkit.vision.common.InputImage
 
 data class DetectedText(
     val text: String,
@@ -79,9 +80,11 @@ class OcrManager(
 
                 Log.i(TAG, "OCR completed: ${detectedTexts.size} paragraphs detected")
                 detectedTexts.forEachIndexed { index, detected ->
-                    Log.i(
+                    Log.d(
                         TAG,
-                        "[$index] paragraph='${detected.text.replace("\\n", " ")}' box=${detected.left},${detected.top},${detected.right},${detected.bottom} font=${detected.sourceTextSizePx}"
+                        "[$index] paragraph chars=${detected.text.length} " +
+                            "box=${detected.left},${detected.top},${detected.right},${detected.bottom} " +
+                            "font=${detected.sourceTextSizePx}"
                     )
                 }
 
