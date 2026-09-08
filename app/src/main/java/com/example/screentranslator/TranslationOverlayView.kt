@@ -8,7 +8,9 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
+import android.os.Build
 import android.view.View
+import android.view.WindowInsets
 
 /** Renders translated OCR blocks while keeping screenshot coordinates 1:1. */
 class TranslationOverlayView(context: Context) : View(context) {
@@ -78,8 +80,13 @@ class TranslationOverlayView(context: Context) : View(context) {
         if (renderItems.isEmpty()) return
         val scaleX = width.toFloat() / sourceWidth.toFloat()
         val scaleY = height.toFloat() / sourceHeight.toFloat()
+        val coordinateOffsetY = if (toleranceRatio > 1.5f) klipStatusBarOffsetPx() else 0f
         renderItems.forEachIndexed { index, renderItem ->
-            val left = renderItem.left * scaleX; val top = renderItem.top * scaleY; val right = renderItem.right * scaleX; val bottom = renderItem.bottom * scaleY; val fillRight = renderItem.fillRight * scaleX
+            val left = renderItem.left * scaleX
+            val top = renderItem.top * scaleY + coordinateOffsetY
+            val right = renderItem.right * scaleX
+            val bottom = renderItem.bottom * scaleY + coordinateOffsetY
+            val fillRight = renderItem.fillRight * scaleX
             if (right <= left || bottom <= top || fillRight <= left) return@forEachIndexed
             val box = RectF(left, top, right, bottom); val fillBox = RectF(left, top, fillRight.coerceAtMost(right), bottom)
             val radius = ((bottom - top) * 0.08f).coerceIn(2f, 7f)
@@ -87,7 +94,10 @@ class TranslationOverlayView(context: Context) : View(context) {
             canvas.save(); canvas.clipRect(box); drawReconstructedBlur(canvas, fillBox, effectiveColor, radius); canvas.restore()
         }
         renderItems.forEachIndexed { index, renderItem ->
-            val left = renderItem.left * scaleX; val top = renderItem.top * scaleY; val right = renderItem.right * scaleX; val bottom = renderItem.bottom * scaleY
+            val left = renderItem.left * scaleX
+            val top = renderItem.top * scaleY + coordinateOffsetY
+            val right = renderItem.right * scaleX
+            val bottom = renderItem.bottom * scaleY + coordinateOffsetY
             if (right <= left || bottom <= top) return@forEachIndexed
             val groupId = itemGroups.getOrElse(index) { index }; val effectiveColor = groupColors.getOrElse(groupId) { darkenColor(renderItem.item.backgroundColor) }
             textPaint.textScaleX = 1f; textPaint.textSize = renderItem.textSize * scaleY; textPaint.color = chooseTextColor(effectiveColor); textPaint.alpha = 255
@@ -96,6 +106,17 @@ class TranslationOverlayView(context: Context) : View(context) {
             renderItem.lines.forEachIndexed { lineIndex, line -> canvas.drawText(line, left + padding, firstBaseline + lineIndex * lineHeight, textPaint) }
         }
         textPaint.textScaleX = 1f; textPaint.color = Color.WHITE; textPaint.alpha = 255
+    }
+
+    /** Klip selection coordinates originate in the visible screen area while its overlay is fullscreen. */
+    private fun klipStatusBarOffsetPx(): Float {
+        val inset = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            rootWindowInsets?.getInsets(WindowInsets.Type.statusBars())?.top ?: 0
+        } else {
+            @Suppress("DEPRECATION")
+            rootWindowInsets?.systemWindowInsetTop ?: 0
+        }
+        return inset.toFloat().coerceAtLeast(0f)
     }
 
     private fun buildOverlapGroups() {
