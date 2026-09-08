@@ -33,12 +33,21 @@ class ScreenCaptureManager(
 
     @Volatile
     private var captureRequested = false
+
+    @Volatile
     private var onImageCaptured: ((Bitmap) -> Unit)? = null
 
     private val handlerThread = HandlerThread("ScreenCaptureThread").apply {
         start()
     }
     private val handler = Handler(handlerThread.looper)
+
+    private val projectionCallback = object : MediaProjection.Callback() {
+        override fun onStop() {
+            Log.w(TAG, "MediaProjection stopped by system/user")
+            stop()
+        }
+    }
 
     fun start(): Boolean {
         return try {
@@ -48,24 +57,19 @@ class ScreenCaptureManager(
                 context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
 
             mediaProjection = projectionManager.getMediaProjection(resultCode, data)
-            if (mediaProjection == null) {
+            val projection = mediaProjection
+            if (projection == null) {
                 Log.e(TAG, "MediaProjection returned null")
                 return false
             }
 
+            // Android 14+ requires a MediaProjection callback to be registered
+            // before creating the virtual display.
+            projection.registerCallback(projectionCallback, handler)
+
             val metrics = currentRealMetrics()
             Log.i(TAG, "Capture display metrics: ${metrics.widthPixels}x${metrics.heightPixels}, density=${metrics.densityDpi}")
             configureDisplay(metrics.widthPixels, metrics.heightPixels, metrics.densityDpi)
-
-            mediaProjection?.registerCallback(
-                object : MediaProjection.Callback() {
-                    override fun onStop() {
-                        Log.w(TAG, "MediaProjection stopped by system/user")
-                        stop()
-                    }
-                },
-                handler
-            )
 
             virtualDisplay != null
         } catch (e: Exception) {
@@ -76,28 +80,23 @@ class ScreenCaptureManager(
     }
 
     /**
-     * MediaProjection keeps the dimensions it was created with. Android can
-     * rotate the physical display while this service remains alive, so make
-     * sure the capture surface follows the current real display dimensions.
+     * MediaProjection keeps one virtual display for the capture session.
+     * On configuration changes, resize that display and replace its surface
+     * instead of creating a second virtual display from the same projection.
      */
     fun ensureCurrentDisplayConfiguration(): Boolean {
-        if (mediaProjection == null) return false
+        if (mediaProjection == null || virtualDisplay == null) return false
         return try {
             val metrics = currentRealMetrics()
             val changed = metrics.widthPixels != captureWidth ||
                     metrics.heightPixels != captureHeight ||
                     metrics.densityDpi != captureDensity
-            if (changed) {
-                Log.i(TAG, "Display configuration changed: ${captureWidth}x$captureHeight -> ${metrics.widthPixels}x${metrics.heightPixels}; rebuilding capture surface")
-                captureRequested = false
-                onImageCaptured = null
-                virtualDisplay?.release()
-                virtualDisplay = null
-                imageReader?.close()
-                imageReader = null
-                configureDisplay(metrics.widthPixels, metrics.heightPixels, metrics.densityDpi)
-            }
-            virtualDisplay != null
+            if (!changed) return true
+
+            Log.i(TAG, "Display configuration changed: ${captureWidth}x$captureHeight -> ${metrics.widthPixels}x${metrics.heightPixels}; resizing capture surface")
+            captureRequested = false
+            onImageCaptured = null
+            reconfigureDisplay(metrics.widthPixels, metrics.heightPixels, metrics.densityDpi)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to reconfigure capture for current display", e)
             false
@@ -135,6 +134,7 @@ class ScreenCaptureManager(
     fun stop() {
         Log.i(TAG, "Stopping screen capture")
         captureRequested = false
+        onImageCaptured = null
 
         virtualDisplay?.release()
         virtualDisplay = null
@@ -151,7 +151,6 @@ class ScreenCaptureManager(
 
     fun release() {
         stop()
-        onImageCaptured = null
         handlerThread.quitSafely()
     }
 
@@ -165,15 +164,69 @@ class ScreenCaptureManager(
     }
 
     private fun configureDisplay(width: Int, height: Int, density: Int) {
-        imageReader = ImageReader.newInstance(
+        val reader = createImageReader(width, height)
+        val projection = mediaProjection ?: run {
+            reader.close()
+            return
+        }
+
+        val display = projection.createVirtualDisplay(
+            "ScreenTranslatorCapture",
+            width,
+            height,
+            density,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+            reader.surface,
+            null,
+            handler
+        )
+
+        if (display == null) {
+            Log.e(TAG, "createVirtualDisplay() returned null")
+            reader.close()
+            return
+        }
+
+        imageReader = reader
+        virtualDisplay = display
+        captureWidth = width
+        captureHeight = height
+        captureDensity = density
+        Log.i(TAG, "VirtualDisplay configured: ${width}x${height}, density=$density")
+    }
+
+    private fun reconfigureDisplay(width: Int, height: Int, density: Int): Boolean {
+        val display = virtualDisplay ?: return false
+        val newReader = createImageReader(width, height)
+        val oldReader = imageReader
+
+        return try {
+            display.resize(width, height, density)
+            display.setSurface(newReader.surface)
+            imageReader = newReader
+            captureWidth = width
+            captureHeight = height
+            captureDensity = density
+            oldReader?.close()
+            Log.i(TAG, "VirtualDisplay resized: ${width}x${height}, density=$density")
+            true
+        } catch (e: Exception) {
+            newReader.close()
+            Log.e(TAG, "Failed to resize VirtualDisplay", e)
+            false
+        }
+    }
+
+    private fun createImageReader(width: Int, height: Int): ImageReader {
+        val reader = ImageReader.newInstance(
             width,
             height,
             PixelFormat.RGBA_8888,
             2
         )
 
-        imageReader?.setOnImageAvailableListener({ reader ->
-            val image = reader.acquireLatestImage() ?: run {
+        reader.setOnImageAvailableListener({ availableReader ->
+            val image = availableReader.acquireLatestImage() ?: run {
                 Log.w(TAG, "ImageReader signaled but acquireLatestImage() returned null")
                 return@setOnImageAvailableListener
             }
@@ -202,34 +255,15 @@ class ScreenCaptureManager(
                 if (croppedBitmap !== bitmap) bitmap.recycle()
 
                 Log.i(TAG, "Fresh screen frame captured successfully: ${croppedBitmap.width}x${croppedBitmap.height}")
-                onImageCaptured?.invoke(croppedBitmap)
+                val callback = onImageCaptured
+                onImageCaptured = null
+                callback?.invoke(croppedBitmap) ?: croppedBitmap.recycle()
             } catch (e: Exception) {
                 image.close()
                 Log.e(TAG, "Failed to convert ImageReader frame to Bitmap", e)
             }
         }, handler)
 
-        virtualDisplay = mediaProjection?.createVirtualDisplay(
-            "ScreenTranslatorCapture",
-            width,
-            height,
-            density,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            imageReader?.surface,
-            null,
-            handler
-        )
-
-        captureWidth = width
-        captureHeight = height
-        captureDensity = density
-
-        if (virtualDisplay == null) {
-            Log.e(TAG, "createVirtualDisplay() returned null")
-            imageReader?.close()
-            imageReader = null
-        } else {
-            Log.i(TAG, "VirtualDisplay configured: ${width}x${height}, density=$density")
-        }
+        return reader
     }
 }
