@@ -89,7 +89,17 @@ class ScreenCaptureManager(
         }
     }
 
-    fun captureOnce(callback: (Bitmap) -> Unit, trace: ScreenTLPerformanceTrace? = null): Boolean {
+    // Keep the callback as the final parameter so existing trailing-lambda callers remain valid.
+    // The trace overload is explicit to avoid Kotlin binding a trailing lambda to the trace parameter.
+    fun captureOnce(callback: (Bitmap) -> Unit): Boolean {
+        return captureOnceInternal(callback, null)
+    }
+
+    fun captureOnce(callback: (Bitmap) -> Unit, trace: ScreenTLPerformanceTrace?): Boolean {
+        return captureOnceInternal(callback, trace)
+    }
+
+    private fun captureOnceInternal(callback: (Bitmap) -> Unit, trace: ScreenTLPerformanceTrace?): Boolean {
         val activeTrace = trace ?: ScreenTLPerformanceTrace.start("TranslateFlow")
         activeTrace.mark("capture_request")
         if (!ensureCurrentDisplayConfiguration()) {
