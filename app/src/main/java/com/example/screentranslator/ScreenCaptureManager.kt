@@ -40,9 +40,7 @@ class ScreenCaptureManager(
     @Volatile
     private var captureTrace: ScreenTLPerformanceTrace? = null
 
-    private val handlerThread = HandlerThread("ScreenCaptureThread").apply {
-        start()
-    }
+    private val handlerThread = HandlerThread("ScreenCaptureThread").apply { start() }
     private val handler = Handler(handlerThread.looper)
 
     private val projectionCallback = object : MediaProjection.Callback() {
@@ -55,23 +53,17 @@ class ScreenCaptureManager(
     fun start(): Boolean {
         return try {
             Log.i(TAG, "Starting MediaProjection. resultCode=$resultCode")
-
-            val projectionManager =
-                context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-
+            val projectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
             mediaProjection = projectionManager.getMediaProjection(resultCode, data)
             val projection = mediaProjection
             if (projection == null) {
                 Log.e(TAG, "MediaProjection returned null")
                 return false
             }
-
             projection.registerCallback(projectionCallback, handler)
-
             val metrics = currentRealMetrics()
             Log.i(TAG, "Capture display metrics: ${metrics.widthPixels}x${metrics.heightPixels}, density=${metrics.densityDpi}")
             configureDisplay(metrics.widthPixels, metrics.heightPixels, metrics.densityDpi)
-
             virtualDisplay != null
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start screen capture", e)
@@ -84,11 +76,8 @@ class ScreenCaptureManager(
         if (mediaProjection == null || virtualDisplay == null) return false
         return try {
             val metrics = currentRealMetrics()
-            val changed = metrics.widthPixels != captureWidth ||
-                    metrics.heightPixels != captureHeight ||
-                    metrics.densityDpi != captureDensity
+            val changed = metrics.widthPixels != captureWidth || metrics.heightPixels != captureHeight || metrics.densityDpi != captureDensity
             if (!changed) return true
-
             Log.i(TAG, "Display configuration changed: ${captureWidth}x$captureHeight -> ${metrics.widthPixels}x${metrics.heightPixels}; resizing capture surface")
             captureRequested = false
             onImageCaptured = null
@@ -101,27 +90,27 @@ class ScreenCaptureManager(
     }
 
     fun captureOnce(callback: (Bitmap) -> Unit, trace: ScreenTLPerformanceTrace? = null): Boolean {
-        trace?.mark("capture_request")
+        val activeTrace = trace ?: ScreenTLPerformanceTrace.start("TranslateFlow")
+        activeTrace.mark("capture_request")
         if (!ensureCurrentDisplayConfiguration()) {
             Log.e(TAG, "captureOnce rejected: current display configuration is unavailable")
-            trace?.mark("capture_rejected_no_display")
+            activeTrace.mark("capture_rejected_no_display")
+            activeTrace.finish("capture rejected")
             return false
         }
-
         if (mediaProjection == null || imageReader == null) {
             Log.e(TAG, "captureOnce rejected: projection=${mediaProjection != null}, imageReader=${imageReader != null}")
-            trace?.mark("capture_rejected_resources")
+            activeTrace.mark("capture_rejected_resources")
+            activeTrace.finish("capture rejected")
             return false
         }
-
         if (captureRequested) {
             Log.w(TAG, "captureOnce rejected: another capture is already pending")
-            trace?.mark("capture_rejected_busy")
+            activeTrace.mark("capture_rejected_busy")
             return false
         }
-
         onImageCaptured = callback
-        captureTrace = trace
+        captureTrace = activeTrace
         captureRequested = true
         Log.i(TAG, "captureOnce requested; waiting for next ImageReader frame")
         return true
@@ -139,13 +128,10 @@ class ScreenCaptureManager(
         captureRequested = false
         onImageCaptured = null
         captureTrace = null
-
         virtualDisplay?.release()
         virtualDisplay = null
-
         imageReader?.close()
         imageReader = null
-
         mediaProjection?.stop()
         mediaProjection = null
         captureWidth = 0
@@ -169,11 +155,7 @@ class ScreenCaptureManager(
 
     private fun configureDisplay(width: Int, height: Int, density: Int) {
         val reader = createImageReader(width, height)
-        val projection = mediaProjection ?: run {
-            reader.close()
-            return
-        }
-
+        val projection = mediaProjection ?: run { reader.close(); return }
         val display = projection.createVirtualDisplay(
             "ScreenTranslatorCapture",
             width,
@@ -184,13 +166,11 @@ class ScreenCaptureManager(
             null,
             handler
         )
-
         if (display == null) {
             Log.e(TAG, "createVirtualDisplay() returned null")
             reader.close()
             return
         }
-
         imageReader = reader
         virtualDisplay = display
         captureWidth = width
@@ -203,7 +183,6 @@ class ScreenCaptureManager(
         val display = virtualDisplay ?: return false
         val newReader = createImageReader(width, height)
         val oldReader = imageReader
-
         return try {
             display.resize(width, height, density)
             display.setSurface(newReader.surface)
@@ -222,26 +201,17 @@ class ScreenCaptureManager(
     }
 
     private fun createImageReader(width: Int, height: Int): ImageReader {
-        val reader = ImageReader.newInstance(
-            width,
-            height,
-            PixelFormat.RGBA_8888,
-            2
-        )
-
+        val reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
         reader.setOnImageAvailableListener({ availableReader ->
             val image = availableReader.acquireLatestImage() ?: run {
                 Log.w(TAG, "ImageReader signaled but acquireLatestImage() returned null")
                 return@setOnImageAvailableListener
             }
-
             if (!captureRequested) {
                 image.close()
                 return@setOnImageAvailableListener
             }
-
             captureRequested = false
-
             try {
                 val trace = captureTrace
                 val plane = image.planes[0]
@@ -249,17 +219,13 @@ class ScreenCaptureManager(
                 val rowStride = plane.rowStride
                 val rowPadding = rowStride - pixelStride * width
                 val bitmapWidth = width + rowPadding / pixelStride
-
                 Log.i(TAG, "Capturing frame: image=${image.width}x${image.height}, pixelStride=$pixelStride, rowStride=$rowStride, padding=$rowPadding, bitmap=${bitmapWidth}x$height")
                 trace?.mark("image_reader_frame")
-
                 val bitmap = Bitmap.createBitmap(bitmapWidth, height, Bitmap.Config.ARGB_8888)
                 bitmap.copyPixelsFromBuffer(plane.buffer)
                 image.close()
-
                 val croppedBitmap = Bitmap.createBitmap(bitmap, 0, 0, width, height)
                 if (croppedBitmap !== bitmap) bitmap.recycle()
-
                 Log.i(TAG, "Fresh screen frame captured successfully: ${croppedBitmap.width}x${croppedBitmap.height}")
                 trace?.mark("screenshot_ready ${croppedBitmap.width}x${croppedBitmap.height}")
                 val callback = onImageCaptured
@@ -272,7 +238,6 @@ class ScreenCaptureManager(
                 Log.e(TAG, "Failed to convert ImageReader frame to Bitmap", e)
             }
         }, handler)
-
         return reader
     }
 }
