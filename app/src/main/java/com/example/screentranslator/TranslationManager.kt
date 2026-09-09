@@ -12,18 +12,41 @@ class TranslationManager(
     private val provider: TranslationProvider = createProvider(manualProvider)
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    fun prepare(onReady: () -> Unit, onFailure: (Exception) -> Unit) {
+    fun prepare(
+        onReady: () -> Unit,
+        onFailure: (Exception) -> Unit,
+        trace: ScreenTLPerformanceTrace? = null
+    ) {
+        trace?.mark("translation_prepare_start provider=${getProviderName()}")
         provider.prepare(
-            onReady = { mainHandler.post(onReady) },
-            onFailure = { exception -> mainHandler.post { onFailure(exception) } }
+            onReady = {
+                trace?.mark("translation_prepare_ready")
+                mainHandler.post(onReady)
+            },
+            onFailure = { exception ->
+                trace?.mark("translation_prepare_failed")
+                mainHandler.post { onFailure(exception) }
+            }
         )
     }
 
-    fun translate(text: String, onSuccess: (String) -> Unit, onFailure: (Exception) -> Unit) {
+    fun translate(
+        text: String,
+        onSuccess: (String) -> Unit,
+        onFailure: (Exception) -> Unit,
+        trace: ScreenTLPerformanceTrace? = null
+    ) {
+        trace?.mark("translation_request provider=${getProviderName()} chars=${text.length}")
         provider.translate(
             text = text,
-            onSuccess = { translated -> mainHandler.post { onSuccess(translated) } },
-            onFailure = { exception -> mainHandler.post { onFailure(exception) } }
+            onSuccess = { translated ->
+                trace?.mark("translation_response chars=${translated.length}")
+                mainHandler.post { onSuccess(translated) }
+            },
+            onFailure = { exception ->
+                trace?.mark("translation_failed")
+                mainHandler.post { onFailure(exception) }
+            }
         )
     }
 
@@ -39,7 +62,6 @@ class TranslationManager(
     }
 
     private fun createProvider(manualProvider: String): TranslationProvider {
-        // A verified/enabled custom API always takes priority over the manual selector.
         if (ApiSettings.isGeminiEnabled()) {
             val key = ApiSettings.getGeminiKey()
             if (!key.isNullOrBlank()) {
@@ -47,8 +69,6 @@ class TranslationManager(
             }
         }
 
-        // DeepL must also be an active override. Pressing "Gunakan" makes it
-        // the actual provider regardless of the manual provider selector.
         if (ApiSettings.isDeepLEnabled()) {
             val key = ApiSettings.getDeepLKey()
             if (!key.isNullOrBlank()) {
