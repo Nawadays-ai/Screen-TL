@@ -16,6 +16,7 @@ object TextLayoutAnalyzer {
         val bottom: Int,
         val sourceTextSizePx: Float,
         val backgroundColor: Int,
+        // Kept for source compatibility. Manual TL no longer copies screenshot pixels.
         val blurredPatch: Bitmap? = null
     )
 
@@ -84,41 +85,33 @@ object TextLayoutAnalyzer {
         val top = (rawTop - verticalPad).coerceIn(0, bitmap.height - 1)
         val right = (rawRight + horizontalPad).coerceIn(left + 1, bitmap.width)
         val bottom = (rawBottom + verticalPad).coerceIn(top + 1, bitmap.height)
-        return Result(left, top, right, bottom, sourceTextSizePx, estimateBackgroundColor(bitmap, left, top, right, bottom), createBlurredPatch(bitmap, left, top, right, bottom))
+        return Result(
+            left,
+            top,
+            right,
+            bottom,
+            sourceTextSizePx,
+            estimateBackgroundColor(bitmap, left, top, right, bottom)
+        )
     }
 
-    /** Fast frosted-glass approximation: heavily downsample the source patch before drawing it back. */
-    private fun createBlurredPatch(bitmap: Bitmap, left: Int, top: Int, right: Int, bottom: Int): Bitmap? {
-        return try {
-            val width = right - left
-            val height = bottom - top
-            if (width <= 0 || height <= 0) return null
-            val source = Bitmap.createBitmap(bitmap, left, top, width, height)
-            val longest = maxOf(width, height)
-            val scale = 48f / longest.toFloat()
-            val targetWidth = (width * scale).roundToInt().coerceAtLeast(1)
-            val targetHeight = (height * scale).roundToInt().coerceAtLeast(1)
-            val blurred = Bitmap.createScaledBitmap(source, targetWidth, targetHeight, true)
-            if (blurred !== source) source.recycle()
-            blurred
-        } catch (_: Exception) {
-            null
-        }
-    }
-
+    /**
+     * Samples only the pixels immediately outside the OCR box. No screenshot patch
+     * is retained or drawn, so the original text cannot bleed through the overlay.
+     */
     private fun estimateBackgroundColor(bitmap: Bitmap, left: Int, top: Int, right: Int, bottom: Int): Int {
-        val samples = ArrayList<Int>(48)
+        val samples = ArrayList<Int>(64)
         val width = right - left
         val height = bottom - top
         val stepX = (width / 12).coerceAtLeast(1)
         val stepY = (height / 6).coerceAtLeast(1)
         for (x in left until right step stepX) {
-            if (top > 1) samples.add(bitmap.getPixel(x.coerceIn(0, bitmap.width - 1), top - 1))
-            if (bottom < bitmap.height) samples.add(bitmap.getPixel(x.coerceIn(0, bitmap.width - 1), bottom))
+            if (top > 0) samples.add(bitmap.getPixel(x.coerceIn(0, bitmap.width - 1), (top - 1).coerceIn(0, bitmap.height - 1)))
+            if (bottom < bitmap.height) samples.add(bitmap.getPixel(x.coerceIn(0, bitmap.width - 1), bottom.coerceIn(0, bitmap.height - 1)))
         }
         for (y in top until bottom step stepY) {
-            if (left > 1) samples.add(bitmap.getPixel(left - 1, y.coerceIn(0, bitmap.height - 1)))
-            if (right < bitmap.width) samples.add(bitmap.getPixel(right, y.coerceIn(0, bitmap.width - 1)))
+            if (left > 0) samples.add(bitmap.getPixel((left - 1).coerceIn(0, bitmap.width - 1), y.coerceIn(0, bitmap.height - 1)))
+            if (right < bitmap.width) samples.add(bitmap.getPixel(right.coerceIn(0, bitmap.width - 1), y.coerceIn(0, bitmap.height - 1)))
         }
         if (samples.isEmpty()) return Color.BLACK
         val sortedR = samples.map { Color.red(it) }.sorted()
