@@ -1,7 +1,6 @@
 package com.example.screentranslator
 
 import android.os.Bundle
-import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -46,6 +45,7 @@ class PerformanceActivity : AppCompatActivity() {
                 append("OCR: ").append(formatMs(entry.ocrMs)).append("\n")
                 append("Terjemahan: ").append(formatMs(entry.translationMs)).append("\n")
                 append("Tampilkan: ").append(formatMs(entry.displayMs)).append("\n")
+                append("Lainnya: ").append(entry.unaccountedMs).append(" ms\n")
                 append("TOTAL: ").append(entry.totalMs).append(" ms")
             }
         }
