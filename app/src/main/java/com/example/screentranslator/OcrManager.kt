@@ -36,9 +36,9 @@ class OcrManager(
 
     fun recognize(
         bitmap: Bitmap,
-        trace: ScreenTLPerformanceTrace? = null,
         onSuccess: (List<DetectedText>) -> Unit,
-        onFailure: (Exception) -> Unit
+        onFailure: (Exception) -> Unit,
+        trace: ScreenTLPerformanceTrace? = null
     ) {
         val perfTrace = trace ?: ScreenTLPerformanceTrace.current()
         perfTrace?.mark("ocr_start")
