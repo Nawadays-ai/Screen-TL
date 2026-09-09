@@ -56,15 +56,26 @@ class ScreenTLPerformanceTrace(private val operation: String) {
         mainHandler.postDelayed(finishRunnable!!, delayMs)
     }
 
+    /**
+     * Stage markers may contain diagnostics after the stage name, for example
+     * "screenshot_ready 1080x2400" or "translation_request provider=DeepL".
+     * Match only the stable stage prefix so those details do not turn into a
+     * missing timing entry in the performance UI.
+     */
+    private fun isStage(event: String, stage: String): Boolean =
+        event == stage || event.startsWith("$stage ")
+
     private fun durationBetween(events: List<Pair<String, Long>>, start: String, end: String): Long? {
-        val startAt = events.firstOrNull { it.first == start }?.second ?: return null
-        val endAt = events.firstOrNull { it.first == end && it.second >= startAt }?.second ?: return null
+        val startAt = events.firstOrNull { isStage(it.first, start) }?.second ?: return null
+        val endAt = events.firstOrNull { isStage(it.first, end) && it.second >= startAt }?.second ?: return null
         return (endAt - startAt).coerceAtLeast(0L)
     }
 
     private fun durationBetweenFirstToLast(events: List<Pair<String, Long>>, start: String, ends: Set<String>): Long? {
-        val startAt = events.firstOrNull { it.first == start }?.second ?: return null
-        val endAt = events.lastOrNull { it.first in ends && it.second >= startAt }?.second ?: return null
+        val startAt = events.firstOrNull { isStage(it.first, start) }?.second ?: return null
+        val endAt = events.lastOrNull { event ->
+            ends.any { end -> isStage(event.first, end) } && event.second >= startAt
+        }?.second ?: return null
         return (endAt - startAt).coerceAtLeast(0L)
     }
 }
