@@ -144,16 +144,15 @@ object KlipSelectionController {
             return
         }
 
-        selectionExists = false
-        cleanupMaskOnly()
-        hostRoot?.let { setClipCancelVisible(it, true) }
-
-        toast(owner, "Area dikonfirmasi. Mengambil layar...")
+        // Keep the mask visible while capture/OCR/translation are running.
+        // The selected interior is transparent, so the crop remains untouched.
+        selectionExists = true
+        setClipCancelVisible(owner.findViewByIdRoot(), true)
+        toast(owner, "Area dikonfirmasi. Memproses…")
 
         mainHandler.postDelayed({
             if (!isActive) return@postDelayed
 
-            val startedAt = System.currentTimeMillis()
             val requested = capture.captureOnce { bitmap ->
                 try {
                     val crop = cropBitmap(bitmap, selection)
@@ -164,16 +163,13 @@ object KlipSelectionController {
                         return@captureOnce
                     }
 
-                    val captureMs = System.currentTimeMillis() - startedAt
-                    Log.i(TAG, "Klip capture ready in ${captureMs}ms; crop=${crop.width}x${crop.height}")
-                    toast(owner, "Memproses OCR area Klip...")
+                    Log.i(TAG, "Klip capture ready; crop=${crop.width}x${crop.height}")
+                    toast(owner, "Memproses OCR area Klip…")
 
-                    val ocrStartedAt = System.currentTimeMillis()
                     ocr.recognize(
                         crop,
                         onSuccess = { detected ->
-                            val ocrMs = System.currentTimeMillis() - ocrStartedAt
-                            Log.i(TAG, "Klip OCR completed in ${ocrMs}ms; blocks=${detected.size}")
+                            Log.i(TAG, "Klip OCR completed; blocks=${detected.size}")
 
                             if (detected.isEmpty()) {
                                 crop.recycle()
@@ -181,9 +177,6 @@ object KlipSelectionController {
                                 return@recognize
                             }
 
-                            // One translation request for the whole selected region.
-                            // This removes N network/API round-trips and preserves
-                            // paragraph context for the final scrollable result.
                             val combinedSource = detected
                                 .map { it.text.trim() }
                                 .filter { it.isNotBlank() }
@@ -232,21 +225,16 @@ object KlipSelectionController {
             return
         }
 
-        val translationStartedAt = System.currentTimeMillis()
         try {
             translator.translate(
                 sourceText,
                 onSuccess = { translated ->
-                    val translationMs = System.currentTimeMillis() - translationStartedAt
-                    Log.i(TAG, "Klip translation completed in ${translationMs}ms")
-
                     if (!isActive) {
                         crop.recycle()
                         return@translate
                     }
 
-                    val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-                        .format(Date())
+                    val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
                     val source = readField<String>(owner, "sourceLanguage") ?: "Jepang"
                     val target = readField<String>(owner, "targetLanguage") ?: "Indonesia"
 
@@ -273,9 +261,6 @@ object KlipSelectionController {
                     toast(owner, "Klip selesai")
                 },
                 onFailure = { exception ->
-                    val translationMs = System.currentTimeMillis() - translationStartedAt
-                    Log.w(TAG, "Klip translation failed after ${translationMs}ms", exception)
-
                     if (!isActive) {
                         crop.recycle()
                         return@translate
@@ -308,6 +293,7 @@ object KlipSelectionController {
     ) {
         val wm = windowManager ?: run {
             crop.recycle()
+            ScreenTLPerformanceTrace.current()?.finish("klip result window unavailable")
             return
         }
 
@@ -344,11 +330,18 @@ object KlipSelectionController {
         }
 
         runCatching {
+            ScreenTLPerformanceTrace.current()?.mark("display_start")
             wm.addView(view, params)
+            // Remove the mask only after the result window has been attached.
+            cleanupMaskOnly()
+            ScreenTLPerformanceTrace.current()?.mark("displayed")
+            ScreenTLPerformanceTrace.current()?.finish("klip displayed")
         }.onFailure {
             clipOverlayView = null
             crop.recycle()
             Log.e(TAG, "Failed to show Klip result overlay", it)
+            ScreenTLPerformanceTrace.current()?.finish("klip display failed")
+            cleanupMaskOnly()
         }
     }
 
@@ -398,6 +391,7 @@ object KlipSelectionController {
 
     private fun fail(message: String) {
         val owner = service
+        ScreenTLPerformanceTrace.current()?.finish("klip failed")
 
         clipOverlayView?.let { view ->
             runCatching { windowManager?.removeView(view) }
@@ -440,6 +434,9 @@ object KlipSelectionController {
         method.invoke(target)
     }
 
+    private fun Context.findViewByIdRoot(): View =
+        hostRoot ?: View(this)
+
     private fun toast(context: Context?, message: String) {
         context ?: return
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
@@ -458,7 +455,6 @@ object KlipSelectionController {
             style = Paint.Style.FILL
         }
         private val selectionFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            // Intentionally transparent: the selected area must remain untouched.
             color = Color.TRANSPARENT
             style = Paint.Style.FILL
         }
@@ -531,14 +527,7 @@ object KlipSelectionController {
                         val controls = controlRects(rect)
 
                         if (controls.first.contains(event.x, event.y)) {
-                            onConfirm(
-                                Rect(
-                                    rect.left.toInt(),
-                                    rect.top.toInt(),
-                                    rect.right.toInt(),
-                                    rect.bottom.toInt()
-                                )
-                            )
+                            onConfirm(Rect(rect.left.toInt(), rect.top.toInt(), rect.right.toInt(), rect.bottom.toInt()))
                             return true
                         }
 
@@ -622,7 +611,6 @@ object KlipSelectionController {
 
         private fun updateResize(x: Float, y: Float) {
             val r = selection ?: return
-
             when (activeHandle) {
                 Handle.TL -> {
                     r.left = x.coerceIn(0f, startRect.right - minSelection)
@@ -642,7 +630,6 @@ object KlipSelectionController {
                 }
                 else -> Unit
             }
-
             normalizeAndClamp(r)
         }
 
@@ -651,34 +638,22 @@ object KlipSelectionController {
             r.right = r.right.coerceIn(0f, width.toFloat())
             r.top = r.top.coerceIn(0f, height.toFloat())
             r.bottom = r.bottom.coerceIn(0f, height.toFloat())
-
             if (r.right < r.left) {
-                val temp = r.left
-                r.left = r.right
-                r.right = temp
+                val temp = r.left; r.left = r.right; r.right = temp
             }
             if (r.bottom < r.top) {
-                val temp = r.top
-                r.top = r.bottom
-                r.bottom = temp
+                val temp = r.top; r.top = r.bottom; r.bottom = temp
             }
-
             ensureControlBand(r)
         }
 
         private fun ensureControlBand(r: RectF) {
             val band = buttonSize + outsideGap
             val verticalAvailable = r.top >= band || height - r.bottom >= band
-            val horizontalAvailable =
-                r.left >= buttonSize * 2f + buttonGap + outsideGap ||
-                    width - r.right >= buttonSize * 2f + buttonGap + outsideGap
-
+            val horizontalAvailable = r.left >= buttonSize * 2f + buttonGap + outsideGap || width - r.right >= buttonSize * 2f + buttonGap + outsideGap
             if (verticalAvailable || horizontalAvailable) return
-
             val newBottom = height.toFloat() - band
-            if (newBottom - r.top >= minSelection) {
-                r.bottom = newBottom
-            } else {
+            if (newBottom - r.top >= minSelection) r.bottom = newBottom else {
                 r.top = 0f
                 r.bottom = newBottom.coerceAtLeast(minSelection)
             }
@@ -695,8 +670,7 @@ object KlipSelectionController {
             }
         }
 
-        private fun distance(x1: Float, y1: Float, x2: Float, y2: Float): Float =
-            kotlin.math.hypot(x1 - x2, y1 - y2)
+        private fun distance(x1: Float, y1: Float, x2: Float, y2: Float): Float = kotlin.math.hypot(x1 - x2, y1 - y2)
 
         private fun drawHandle(canvas: Canvas, x: Float, y: Float) {
             canvas.drawCircle(x, y, handleRadius, handlePaint)
@@ -706,73 +680,25 @@ object KlipSelectionController {
         private fun controlRects(r: RectF): Pair<RectF, RectF> {
             val totalW = buttonSize * 2f + buttonGap
             val candidates = listOf(
-                RectF(
-                    r.left,
-                    r.top - outsideGap - buttonSize,
-                    r.left + totalW,
-                    r.top - outsideGap
-                ),
-                RectF(
-                    r.left,
-                    r.bottom + outsideGap,
-                    r.left + totalW,
-                    r.bottom + outsideGap + buttonSize
-                ),
-                RectF(
-                    r.right + outsideGap,
-                    r.top,
-                    r.right + outsideGap + totalW,
-                    r.top + buttonSize
-                ),
-                RectF(
-                    r.left - outsideGap - totalW,
-                    r.top,
-                    r.left - outsideGap,
-                    r.top + buttonSize
-                )
+                RectF(r.left, r.top - outsideGap - buttonSize, r.left + totalW, r.top - outsideGap),
+                RectF(r.left, r.bottom + outsideGap, r.left + totalW, r.bottom + outsideGap + buttonSize),
+                RectF(r.right + outsideGap, r.top, r.right + outsideGap + totalW, r.top + buttonSize),
+                RectF(r.left - outsideGap - totalW, r.top, r.left - outsideGap, r.top + buttonSize)
             )
-
-            val band = candidates.firstOrNull { candidate ->
-                inside(candidate) && !RectF.intersects(candidate, r)
-            } ?: RectF(
-                (width - totalW).coerceAtLeast(0f),
-                (height - buttonSize).coerceAtLeast(0f),
-                width.toFloat(),
-                height.toFloat()
-            )
-
+            val band = candidates.firstOrNull { candidate -> inside(candidate) && !RectF.intersects(candidate, r) }
+                ?: RectF((width - totalW).coerceAtLeast(0f), (height - buttonSize).coerceAtLeast(0f), width.toFloat(), height.toFloat())
             return Pair(
                 RectF(band.left, band.top, band.left + buttonSize, band.bottom),
-                RectF(
-                    band.left + buttonSize + buttonGap,
-                    band.top,
-                    band.right,
-                    band.bottom
-                )
+                RectF(band.left + buttonSize + buttonGap, band.top, band.right, band.bottom)
             )
         }
 
-        private fun inside(rect: RectF): Boolean =
-            rect.left >= 0f &&
-                rect.top >= 0f &&
-                rect.right <= width.toFloat() &&
-                rect.bottom <= height.toFloat()
+        private fun inside(rect: RectF): Boolean = rect.left >= 0f && rect.top >= 0f && rect.right <= width.toFloat() && rect.bottom <= height.toFloat()
 
         private fun drawButton(canvas: Canvas, rect: RectF, label: String) {
-            canvas.drawRoundRect(
-                rect,
-                10f * density,
-                10f * density,
-                buttonPaint
-            )
-            canvas.drawRoundRect(
-                rect,
-                10f * density,
-                10f * density,
-                buttonStrokePaint
-            )
-            val y = rect.centerY() -
-                (buttonTextPaint.ascent() + buttonTextPaint.descent()) / 2f
+            canvas.drawRoundRect(rect, 10f * density, 10f * density, buttonPaint)
+            canvas.drawRoundRect(rect, 10f * density, 10f * density, buttonStrokePaint)
+            val y = rect.centerY() - (buttonTextPaint.ascent() + buttonTextPaint.descent()) / 2f
             canvas.drawText(label, rect.centerX(), y, buttonTextPaint)
         }
     }
