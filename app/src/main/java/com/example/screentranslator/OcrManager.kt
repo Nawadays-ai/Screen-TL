@@ -34,6 +34,16 @@ class OcrManager(
         else -> TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     }
 
+    // Keep the original three-argument API so existing positional callers
+    // remain source-compatible while the traced overload is available.
+    fun recognize(
+        bitmap: Bitmap,
+        onSuccess: (List<DetectedText>) -> Unit,
+        onFailure: (Exception) -> Unit
+    ) {
+        recognize(bitmap, onSuccess, onFailure, null)
+    }
+
     fun recognize(
         bitmap: Bitmap,
         onSuccess: (List<DetectedText>) -> Unit,
