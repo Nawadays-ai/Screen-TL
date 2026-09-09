@@ -14,7 +14,16 @@ data class PerformanceLogEntry(
     val displayMs: Long?,
     val totalMs: Long,
     val result: String
-)
+) {
+    /** Time not covered by the named stages; useful for finding hidden waits/overhead. */
+    val unaccountedMs: Long
+        get() {
+            val measured = listOf(captureMs, ocrMs, translationMs, displayMs)
+                .filterNotNull()
+                .sum()
+            return (totalMs - measured).coerceAtLeast(0L)
+        }
+}
 
 object PerformanceLogStore {
     private const val PREFS = "screen_tl_performance"
