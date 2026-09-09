@@ -12,39 +12,34 @@ class TranslationManager(
     private val provider: TranslationProvider = createProvider(manualProvider)
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    fun prepare(
-        onReady: () -> Unit,
-        onFailure: (Exception) -> Unit,
-        trace: ScreenTLPerformanceTrace? = null
-    ) {
-        trace?.mark("translation_prepare_start provider=${getProviderName()}")
+    fun prepare(onReady: () -> Unit, onFailure: (Exception) -> Unit, trace: ScreenTLPerformanceTrace? = null) {
+        val perfTrace = trace ?: ScreenTLPerformanceTrace.current()
+        perfTrace?.mark("translation_prepare_start provider=${getProviderName()}")
         provider.prepare(
             onReady = {
-                trace?.mark("translation_prepare_ready")
+                perfTrace?.mark("translation_prepare_ready")
                 mainHandler.post(onReady)
             },
             onFailure = { exception ->
-                trace?.mark("translation_prepare_failed")
+                perfTrace?.mark("translation_prepare_failed")
                 mainHandler.post { onFailure(exception) }
             }
         )
     }
 
-    fun translate(
-        text: String,
-        onSuccess: (String) -> Unit,
-        onFailure: (Exception) -> Unit,
-        trace: ScreenTLPerformanceTrace? = null
-    ) {
-        trace?.mark("translation_request provider=${getProviderName()} chars=${text.length}")
+    fun translate(text: String, onSuccess: (String) -> Unit, onFailure: (Exception) -> Unit, trace: ScreenTLPerformanceTrace? = null) {
+        val perfTrace = trace ?: ScreenTLPerformanceTrace.current()
+        perfTrace?.mark("translation_request provider=${getProviderName()} chars=${text.length}")
         provider.translate(
             text = text,
             onSuccess = { translated ->
-                trace?.mark("translation_response chars=${translated.length}")
+                perfTrace?.mark("translation_response chars=${translated.length}")
+                perfTrace?.finishWhenIdle(500L)
                 mainHandler.post { onSuccess(translated) }
             },
             onFailure = { exception ->
-                trace?.mark("translation_failed")
+                perfTrace?.mark("translation_failed")
+                perfTrace?.finishWhenIdle(500L, "translation failed")
                 mainHandler.post { onFailure(exception) }
             }
         )
@@ -64,18 +59,12 @@ class TranslationManager(
     private fun createProvider(manualProvider: String): TranslationProvider {
         if (ApiSettings.isGeminiEnabled()) {
             val key = ApiSettings.getGeminiKey()
-            if (!key.isNullOrBlank()) {
-                return GeminiTranslationProvider(key, sourceLanguage, targetLanguage)
-            }
+            if (!key.isNullOrBlank()) return GeminiTranslationProvider(key, sourceLanguage, targetLanguage)
         }
-
         if (ApiSettings.isDeepLEnabled()) {
             val key = ApiSettings.getDeepLKey()
-            if (!key.isNullOrBlank()) {
-                return DeepLTranslationProvider(key, sourceLanguage, targetLanguage)
-            }
+            if (!key.isNullOrBlank()) return DeepLTranslationProvider(key, sourceLanguage, targetLanguage)
         }
-
         return when (manualProvider) {
             ApiSettings.PROVIDER_DEEPL -> {
                 val key = ApiSettings.getDeepLKey()
@@ -90,14 +79,8 @@ class TranslationManager(
     }
 
     private class MissingApiProvider(private val message: String) : TranslationProvider {
-        override fun prepare(onReady: () -> Unit, onFailure: (Exception) -> Unit) {
-            onFailure(IllegalStateException(message))
-        }
-
-        override fun translate(text: String, onSuccess: (String) -> Unit, onFailure: (Exception) -> Unit) {
-            onFailure(IllegalStateException(message))
-        }
-
+        override fun prepare(onReady: () -> Unit, onFailure: (Exception) -> Unit) { onFailure(IllegalStateException(message)) }
+        override fun translate(text: String, onSuccess: (String) -> Unit, onFailure: (Exception) -> Unit) { onFailure(IllegalStateException(message)) }
         override fun close() = Unit
     }
 }
