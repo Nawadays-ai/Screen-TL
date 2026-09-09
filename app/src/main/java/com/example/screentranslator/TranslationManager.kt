@@ -34,12 +34,12 @@ class TranslationManager(
             text = text,
             onSuccess = { translated ->
                 perfTrace?.mark("translation_response chars=${translated.length}")
-                perfTrace?.finishWhenIdle(500L)
+                // The caller owns the final display point. This prevents the
+                // performance log from ending before the overlay is actually visible.
                 mainHandler.post { onSuccess(translated) }
             },
             onFailure = { exception ->
                 perfTrace?.mark("translation_failed")
-                perfTrace?.finishWhenIdle(500L, "translation failed")
                 mainHandler.post { onFailure(exception) }
             }
         )
