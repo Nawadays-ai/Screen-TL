@@ -80,6 +80,7 @@ class FloatingService : Service() {
         startForegroundServiceNotification()
         ApiSettings.initialize(applicationContext)
         TranslationHistory.initialize(applicationContext)
+        PerformanceLogStore.initialize(applicationContext)
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         val themedContext = ContextThemeWrapper(this, R.style.ScreenTranslatorOverlayTheme)
@@ -244,7 +245,17 @@ class FloatingService : Service() {
 
     private fun translateRealtimeTexts(translator: TranslationManager, texts: List<DetectedText>, index: Int, overlayResults: MutableList<TranslationOverlayItem>, sourceWidth: Int, sourceHeight: Int, generation: Int, onComplete: () -> Unit) {
         if (!isRealtimeActive || generation != realtimeGeneration) { releaseBlurPatches(texts); onComplete(); return }
-        if (index >= texts.size) { if (overlayResults.isNotEmpty()) showTranslationOverlay(overlayResults, sourceWidth, sourceHeight); onComplete(); return }
+        if (index >= texts.size) {
+            if (overlayResults.isNotEmpty()) {
+                val trace = ScreenTLPerformanceTrace.current()
+                trace?.mark("display_start")
+                showTranslationOverlay(overlayResults, sourceWidth, sourceHeight)
+                trace?.mark("displayed")
+                trace?.finish("realtime displayed")
+            }
+            onComplete()
+            return
+        }
         val currentText = texts[index]
         try { translator.translate(currentText.text, onSuccess = { translatedText -> if (isRealtimeActive && generation == realtimeGeneration) overlayResults.add(currentText.toOverlayItem(translatedText)) else currentText.blurredPatch?.let { if (!it.isRecycled) it.recycle() }; translateRealtimeTexts(translator, texts, index + 1, overlayResults, sourceWidth, sourceHeight, generation, onComplete) }, onFailure = { exception -> Log.e(TAG, "Realtime translation failed", exception); currentText.blurredPatch?.let { if (!it.isRecycled) it.recycle() }; translateRealtimeTexts(translator, texts, index + 1, overlayResults, sourceWidth, sourceHeight, generation, onComplete) }) }
         catch (exception: Exception) { Log.e(TAG, "Realtime translation invocation threw", exception); currentText.blurredPatch?.let { if (!it.isRecycled) it.recycle() }; translateRealtimeTexts(translator, texts, index + 1, overlayResults, sourceWidth, sourceHeight, generation, onComplete) }
@@ -275,20 +286,30 @@ class FloatingService : Service() {
             }, onFailure = { exception -> finishManualTranslation("OCR gagal: ${exception.message ?: "Unknown error"}") }) }
             catch (exception: Exception) { Log.e(TAG, "OCR invocation threw", exception); finishManualTranslation("Proses OCR gagal: ${exception.message ?: "Unknown error"}") }
         }
-        if (!requested) { manualTranslationPending = false; showToast("Gagal mengambil screenshot"); return }
-        manualCaptureTimeout = Runnable { if (manualTranslationPending) { manager.cancelPendingCapture(); manualTranslationPending = false; showToast("Screenshot tidak masuk dalam 3 detik. Coba lagi.") } }
+        if (!requested) { manualTranslationPending = false; showToast("Gagal mengambil screenshot"); ScreenTLPerformanceTrace.current()?.finish("manual capture rejected"); return }
+        manualCaptureTimeout = Runnable { if (manualTranslationPending) { manager.cancelPendingCapture(); manualTranslationPending = false; ScreenTLPerformanceTrace.current()?.finish("manual capture timeout"); showToast("Screenshot tidak masuk dalam 3 detik. Coba lagi.") } }
         mainHandler.postDelayed(manualCaptureTimeout!!, MANUAL_CAPTURE_TIMEOUT_MS)
     }
 
     private fun startManualProcessTimeout(manager: ScreenCaptureManager) {
-        cancelManualProcessTimeout(); manualProcessTimeout = Runnable { if (manualTranslationPending) { manager.cancelPendingCapture(); manualTranslationPending = false; showToast("Proses terjemahan terlalu lama. Coba lagi.") } }; mainHandler.postDelayed(manualProcessTimeout!!, MANUAL_PROCESS_TIMEOUT_MS)
+        cancelManualProcessTimeout(); manualProcessTimeout = Runnable { if (manualTranslationPending) { manager.cancelPendingCapture(); manualTranslationPending = false; ScreenTLPerformanceTrace.current()?.finish("manual process timeout"); showToast("Proses terjemahan terlalu lama. Coba lagi.") } }; mainHandler.postDelayed(manualProcessTimeout!!, MANUAL_PROCESS_TIMEOUT_MS)
     }
 
     private fun translateTexts(translator: TranslationManager, texts: List<DetectedText>, index: Int, results: MutableList<String>, overlayResults: MutableList<TranslationOverlayItem>, sourceWidth: Int, sourceHeight: Int) {
         if (index >= texts.size) {
             val resultText = results.joinToString("\n\n"); val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
             val historyEntry = buildString { append("[").append(time).append("]\n"); append("TL: ").append(translator.getProviderName()).append("\n"); append(sourceLanguage).append(" → ").append(targetLanguage).append("\n\n"); append(resultText) }
-            try { TranslationHistory.add(historyEntry); showTranslationOverlay(overlayResults, sourceWidth, sourceHeight); manualOverlayVisible = overlayResults.isNotEmpty(); updateRemoveOverlayButton(); finishManualTranslation("Terjemahan selesai: ${results.size} baris. Overlay ditampilkan.") }
+            try {
+                TranslationHistory.add(historyEntry)
+                val trace = ScreenTLPerformanceTrace.current()
+                trace?.mark("display_start")
+                showTranslationOverlay(overlayResults, sourceWidth, sourceHeight)
+                trace?.mark("displayed")
+                trace?.finish("manual displayed")
+                manualOverlayVisible = overlayResults.isNotEmpty()
+                updateRemoveOverlayButton()
+                finishManualTranslation("Terjemahan selesai: ${results.size} baris. Overlay ditampilkan.")
+            }
             catch (exception: Exception) { releaseBlurPatches(texts); Log.e(TAG, "Failed to save/display result", exception); finishManualTranslation("Terjemahan selesai tetapi hasil gagal ditampilkan: ${exception.message ?: "Unknown error"}") }
             return
         }
@@ -299,7 +320,7 @@ class FloatingService : Service() {
 
     private fun DetectedText.toOverlayItem(translatedText: String): TranslationOverlayItem = TranslationOverlayItem(translatedText = translatedText, left = left, top = top, right = right, bottom = bottom, sourceTextSizePx = sourceTextSizePx, backgroundColor = backgroundColor, blurredPatch = blurredPatch).also { blurredPatch = null }
     private fun releaseBlurPatches(texts: List<DetectedText>) { texts.forEach { item -> item.blurredPatch?.let { if (!it.isRecycled) it.recycle() } } }
-    private fun finishManualTranslation(message: String) { cancelManualCaptureTimeout(); cancelManualProcessTimeout(); manualTranslationPending = false; showToast(message) }
+    private fun finishManualTranslation(message: String) { cancelManualCaptureTimeout(); cancelManualProcessTimeout(); manualTranslationPending = false; if (ScreenTLPerformanceTrace.current() != null && (message.contains("gagal", true) || message.contains("terlalu lama", true) || message.contains("tidak", true))) ScreenTLPerformanceTrace.current()?.finish("manual failed"); showToast(message) }
     private fun updateRemoveOverlayButton() { if (::btnRemoveOverlay.isInitialized) btnRemoveOverlay.visibility = if (manualOverlayVisible && overlayView != null) View.VISIBLE else View.GONE }
     private fun cancelManualCaptureTimeout() { manualCaptureTimeout?.let(mainHandler::removeCallbacks); manualCaptureTimeout = null }
     private fun cancelManualProcessTimeout() { manualProcessTimeout?.let(mainHandler::removeCallbacks); manualProcessTimeout = null }
