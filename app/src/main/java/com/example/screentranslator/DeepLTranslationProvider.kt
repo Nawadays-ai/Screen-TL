@@ -79,12 +79,25 @@ class DeepLTranslationProvider(
             return
         }
 
+        // Avoid a needless API round-trip when the selected languages are identical.
+        if (sourceLanguage == targetLanguage) {
+            onSuccess(text)
+            return
+        }
+
+        val targetCode = deepLTargetCode(targetLanguage)
+        if (targetCode == null) {
+            onFailure(IllegalArgumentException("Bahasa target tidak didukung DeepL: $targetLanguage"))
+            return
+        }
+
         val json = JSONObject()
             .put("text", org.json.JSONArray().put(text))
-            .put("target_lang", deepLCode(targetLanguage))
+            .put("target_lang", targetCode)
             .apply {
-                val source = deepLCode(sourceLanguage)
-                if (source != null) put("source_lang", source)
+                // DeepL uses EN as a source language; EN-US/EN-GB are target variants.
+                // Unknown source values are intentionally omitted so DeepL can auto-detect.
+                deepLSourceCode(sourceLanguage)?.let { put("source_lang", it) }
             }
             .toString()
 
@@ -131,7 +144,15 @@ class DeepLTranslationProvider(
     private fun usageEndpointForKey(): String =
         if (apiKey.endsWith(":fx", ignoreCase = true)) FREE_USAGE_ENDPOINT else PRO_USAGE_ENDPOINT
 
-    private fun deepLCode(language: String): String? = when (language) {
+    private fun deepLSourceCode(language: String): String? = when (language) {
+        "Jepang" -> "JA"
+        "Mandarin (China)" -> "ZH"
+        "Inggris" -> "EN"
+        "Indonesia" -> "ID"
+        else -> null
+    }
+
+    private fun deepLTargetCode(language: String): String? = when (language) {
         "Jepang" -> "JA"
         "Mandarin (China)" -> "ZH"
         "Inggris" -> "EN-US"
