@@ -9,7 +9,6 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
-import android.os.Build
 import android.view.View
 import android.view.WindowInsets
 import kotlin.math.roundToInt
@@ -17,7 +16,6 @@ import kotlin.math.roundToInt
 /** Renders translated OCR blocks while keeping screenshot coordinates 1:1. */
 class TranslationOverlayView(context: Context) : View(context) {
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; alpha = 255 }
-    private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val glassPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.2f }
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -63,7 +61,6 @@ class TranslationOverlayView(context: Context) : View(context) {
 
     /** toleranceRatio=1.0 is normal Manual TL; Klip starts at 1.80x. */
     fun setTranslations(translations: List<TranslationOverlayItem>, sourceWidth: Int, sourceHeight: Int, toleranceRatio: Float) {
-        recyclePatches(renderItems)
         this.sourceWidth = sourceWidth.coerceAtLeast(1)
         this.sourceHeight = sourceHeight.coerceAtLeast(1)
         this.toleranceRatio = toleranceRatio.coerceIn(1f, 3f)
@@ -74,7 +71,6 @@ class TranslationOverlayView(context: Context) : View(context) {
     }
 
     fun clearTranslations() {
-        recyclePatches(renderItems)
         renderItems = emptyList(); groupColors = emptyList(); itemGroups = emptyList()
         visibility = View.GONE; invalidate()
     }
@@ -91,29 +87,16 @@ class TranslationOverlayView(context: Context) : View(context) {
             val top = renderItem.top * scaleY + coordinateOffsetY
             val right = renderItem.right * scaleX
             val bottom = renderItem.bottom * scaleY + coordinateOffsetY
-            val fillRight = renderItem.fillRight * scaleX
-            if (right <= left || bottom <= top || fillRight <= left) return@forEachIndexed
+            if (right <= left || bottom <= top) return@forEachIndexed
             val box = RectF(left, top, right, bottom)
-            val fillBox = RectF(left, top, fillRight.coerceAtMost(right), bottom)
+            val fillBox = RectF(left, top, renderItem.fillRight * scaleX, bottom)
             val radius = ((bottom - top) * 0.10f).coerceIn(5f, 12f)
             val groupId = itemGroups.getOrElse(index) { index }
-            val effectiveColor = groupColors.getOrElse(groupId) { darkenColor(renderItem.item.backgroundColor) }
+            val effectiveColor = groupColors.getOrElse(groupId) { frostBaseColor(renderItem.item.backgroundColor) }
 
             canvas.save()
             canvas.clipRect(box)
-            val patch = renderItem.item.blurredPatch
-            if (patch != null && !patch.isRecycled) {
-                canvas.drawBitmap(patch, null, fillBox, bitmapPaint)
-                glassPaint.color = Color.argb(92, Color.red(effectiveColor), Color.green(effectiveColor), Color.blue(effectiveColor))
-                canvas.drawRoundRect(fillBox, radius, radius, glassPaint)
-                glassPaint.color = Color.argb(38, 255, 255, 255)
-                canvas.drawRoundRect(fillBox, radius, radius, glassPaint)
-            } else {
-                drawReconstructedBlur(canvas, fillBox, effectiveColor, radius)
-            }
-            borderPaint.color = Color.argb(145, 255, 255, 255)
-            borderPaint.strokeWidth = 1.2f.coerceAtLeast(width / 1080f)
-            canvas.drawRoundRect(fillBox, radius, radius, borderPaint)
+            drawFrostGlass(canvas, fillBox, effectiveColor, radius)
             canvas.restore()
         }
 
@@ -124,7 +107,7 @@ class TranslationOverlayView(context: Context) : View(context) {
             val bottom = renderItem.bottom * scaleY + coordinateOffsetY
             if (right <= left || bottom <= top) return@forEachIndexed
             val groupId = itemGroups.getOrElse(index) { index }
-            val effectiveColor = groupColors.getOrElse(groupId) { darkenColor(renderItem.item.backgroundColor) }
+            val effectiveColor = groupColors.getOrElse(groupId) { frostBaseColor(renderItem.item.backgroundColor) }
             textPaint.textScaleX = 1f
             textPaint.textSize = renderItem.textSize * scaleY
             textPaint.color = chooseTextColor(effectiveColor)
@@ -135,13 +118,15 @@ class TranslationOverlayView(context: Context) : View(context) {
             val startTop = top + ((bottom - top - totalTextHeight) / 2f).coerceAtLeast(0f)
             val metrics = textPaint.fontMetrics
             val firstBaseline = startTop - metrics.ascent
-            renderItem.lines.forEachIndexed { lineIndex, line -> canvas.drawText(line, left + padding, firstBaseline + lineIndex * lineHeight, textPaint) }
+            renderItem.lines.forEachIndexed { lineIndex, line ->
+                canvas.drawText(line, left + padding, firstBaseline + lineIndex * lineHeight, textPaint)
+            }
         }
         textPaint.textScaleX = 1f; textPaint.color = Color.WHITE; textPaint.alpha = 255
     }
 
     private fun klipStatusBarOffsetPx(): Float {
-        val inset = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) rootWindowInsets?.getInsets(WindowInsets.Type.statusBars())?.top ?: 0 else {
+        val inset = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) rootWindowInsets?.getInsets(WindowInsets.Type.statusBars())?.top ?: 0 else {
             @Suppress("DEPRECATION") rootWindowInsets?.systemWindowInsetTop ?: 0
         }
         return inset.toFloat().coerceAtLeast(0f)
@@ -162,7 +147,7 @@ class TranslationOverlayView(context: Context) : View(context) {
         val sums = Array(rootToGroup.size) { FloatArray(4) }
         renderItems.forEachIndexed { index, item ->
             val group = itemGroups[index]
-            val color = darkenColor(item.item.backgroundColor)
+            val color = frostBaseColor(item.item.backgroundColor)
             sums[group][0] = sums[group][0] + Color.red(color)
             sums[group][1] = sums[group][1] + Color.green(color)
             sums[group][2] = sums[group][2] + Color.blue(color)
@@ -174,22 +159,46 @@ class TranslationOverlayView(context: Context) : View(context) {
         }
     }
 
-    private fun drawReconstructedBlur(canvas: Canvas, box: RectF, baseColor: Int, radius: Float) {
-        val edge = adjustColor(baseColor, 0.94f); val deep = adjustColor(baseColor, 0.88f)
+    /**
+     * Frosted-glass treatment based only on the sampled background color.
+     * No source screenshot pixels are retained or drawn behind the translation.
+     */
+    private fun drawFrostGlass(canvas: Canvas, box: RectF, baseColor: Int, radius: Float) {
+        val safeBox = RectF(box)
+        val edge = adjustColor(baseColor, 0.92f)
+        val deep = adjustColor(baseColor, 0.48f)
+        backgroundPaint.shader = LinearGradient(
+            safeBox.left,
+            safeBox.top,
+            safeBox.right.coerceAtLeast(safeBox.left + 1f),
+            safeBox.bottom,
+            intArrayOf(edge, baseColor, deep, adjustColor(baseColor, 0.58f)),
+            floatArrayOf(0f, 0.28f, 0.58f, 1f),
+            Shader.TileMode.CLAMP
+        )
         backgroundPaint.alpha = 255
-        backgroundPaint.shader = LinearGradient(box.left, box.top, box.right.coerceAtLeast(box.left + 1f), box.bottom, intArrayOf(edge, baseColor, deep, baseColor, deep), floatArrayOf(0f, 0.28f, 0.50f, 0.72f, 1f), Shader.TileMode.CLAMP)
-        canvas.drawRoundRect(box, radius, radius, backgroundPaint); backgroundPaint.shader = null
+        canvas.drawRoundRect(safeBox, radius, radius, backgroundPaint)
+        backgroundPaint.shader = null
+
+        glassPaint.color = Color.argb(46, 255, 255, 255)
+        canvas.drawRoundRect(safeBox, radius, radius, glassPaint)
+        glassPaint.color = Color.argb(52, 0, 0, 0)
+        canvas.drawRoundRect(safeBox, radius, radius, glassPaint)
+
+        borderPaint.color = Color.argb(155, 255, 255, 255)
+        borderPaint.strokeWidth = 1.2f.coerceAtLeast(width / 1080f)
+        canvas.drawRoundRect(safeBox, radius, radius, borderPaint)
     }
 
-    private fun darkenColor(color: Int): Int {
+    private fun frostBaseColor(color: Int): Int {
         val luminance = 0.2126f * Color.red(color) + 0.7152f * Color.green(color) + 0.0722f * Color.blue(color)
-        if (luminance < 45f) return color
-        return adjustColor(color, 0.62f)
+        val factor = if (luminance > 175f) 0.42f else 0.56f
+        return adjustColor(color, factor)
     }
 
     private fun chooseTextColor(effectiveColor: Int): Int {
         val luminance = 0.2126f * Color.red(effectiveColor) + 0.7152f * Color.green(effectiveColor) + 0.0722f * Color.blue(effectiveColor)
-        return if (luminance < 150f) Color.WHITE else Color.BLACK
+        return if (luminance < 145f) Color.WHITE else Color.BLACK
     }
 
     private fun adjustColor(color: Int, factor: Float): Int = Color.rgb((Color.red(color) * factor).roundToIntSafe(), (Color.green(color) * factor).roundToIntSafe(), (Color.blue(color) * factor).roundToIntSafe())
@@ -245,12 +254,7 @@ class TranslationOverlayView(context: Context) : View(context) {
         return if (result.isEmpty()) listOf("") else result
     }
 
-    private fun recyclePatches(items: List<RenderItem>) {
-        items.forEach { item -> item.item.blurredPatch?.let { if (!it.isRecycled) it.recycle() } }
-    }
-
     override fun onDetachedFromWindow() {
-        recyclePatches(renderItems)
         renderItems = emptyList(); groupColors = emptyList(); itemGroups = emptyList(); super.onDetachedFromWindow()
     }
 }
