@@ -43,7 +43,7 @@ class KlipResultOverlayView(
 
     init {
         setWillNotDraw(false)
-        addView(dimView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(dimView, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         buildPanel(translatedText)
         addView(panel)
         post { positionPanel() }
@@ -72,11 +72,11 @@ class KlipResultOverlayView(
                 setRenderEffect(RenderEffect.createBlurEffect(22f * density, 22f * density, Shader.TileMode.CLAMP))
             }
         }
-        panel.addView(blurImage, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        panel.addView(blurImage, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
 
         panel.addView(View(context).apply {
             setBackgroundColor(Color.argb(105, 15, 18, 24))
-        }, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
 
         val content = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -129,7 +129,7 @@ class KlipResultOverlayView(
         }
         scroll.addView(text, ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT))
         content.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
-        panel.addView(content, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        panel.addView(content, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
     }
 
     private fun positionPanel() {
@@ -157,7 +157,7 @@ class KlipResultOverlayView(
             else -> ((screenH - panelHeight) / 2).coerceAtLeast(horizontalMargin)
         }
 
-        panel.layoutParams = LayoutParams(panelWidth, panelHeight).apply {
+        panel.layoutParams = FrameLayout.LayoutParams(panelWidth, panelHeight).apply {
             leftMargin = x.coerceIn(0, max(0, screenW - panelWidth))
             topMargin = y.coerceIn(0, max(0, screenH - panelHeight))
         }
