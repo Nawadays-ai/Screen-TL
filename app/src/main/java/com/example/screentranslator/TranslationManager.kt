@@ -12,8 +12,8 @@ class TranslationManager(
     private val provider: TranslationProvider = createProvider(manualProvider)
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    fun prepare(onReady: () -> Unit, onFailure: (Exception) -> Unit, trace: ScreenTLPerformanceTrace? = null) {
-        val perfTrace = trace ?: ScreenTLPerformanceTrace.current()
+    fun prepare(onReady: () -> Unit, onFailure: (Exception) -> Unit) {
+        val perfTrace = ScreenTLPerformanceTrace.current()
         perfTrace?.mark("translation_prepare_start provider=${getProviderName()}")
         provider.prepare(
             onReady = {
@@ -27,8 +27,8 @@ class TranslationManager(
         )
     }
 
-    fun translate(text: String, onSuccess: (String) -> Unit, onFailure: (Exception) -> Unit, trace: ScreenTLPerformanceTrace? = null) {
-        val perfTrace = trace ?: ScreenTLPerformanceTrace.current()
+    fun translate(text: String, onSuccess: (String) -> Unit, onFailure: (Exception) -> Unit) {
+        val perfTrace = ScreenTLPerformanceTrace.current()
         perfTrace?.mark("translation_request provider=${getProviderName()} chars=${text.length}")
         provider.translate(
             text = text,
