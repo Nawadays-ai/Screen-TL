@@ -1,4 +1,4 @@
-package com.example.screentranslator
+package com.example.screentl
 
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -9,6 +9,11 @@ import kotlin.math.roundToInt
 
 /** Converts ML Kit paragraph/line geometry into rendering geometry for the Manual overlay. */
 object TextLayoutAnalyzer {
+    enum class WritingOrientation {
+        HORIZONTAL,
+        VERTICAL
+    }
+
     data class Result(
         val left: Int,
         val top: Int,
@@ -16,11 +21,57 @@ object TextLayoutAnalyzer {
         val bottom: Int,
         val sourceTextSizePx: Float,
         val backgroundColor: Int,
+        val orientation: WritingOrientation = WritingOrientation.HORIZONTAL,
         // Kept for source compatibility. Manual TL no longer copies screenshot pixels.
         val blurredPatch: Bitmap? = null
     )
 
+    /** Detects a single OCR line whose writing direction is predominantly vertical. */
+    fun isVerticalLine(line: Line): Boolean {
+        val box = line.boundingBox ?: return false
+        if (box.width() <= 0 || box.height() <= 0) return false
+        val aspectRatio = box.height().toFloat() / box.width().toFloat()
+        if (aspectRatio < 1.30f) return false
+
+        val elementBoxes = line.elements.mapNotNull { it.boundingBox }
+            .filter { it.width() > 0 && it.height() > 0 }
+        if (elementBoxes.size < 2) return aspectRatio >= 1.55f
+
+        val verticalSteps = elementBoxes.zipWithNext().count { (a, b) ->
+            kotlin.math.abs((b.centerX()) - a.centerX()) <= box.width() * 0.75f &&
+                b.centerY() >= a.centerY() - box.height() * 0.08f
+        }
+        val horizontalSteps = elementBoxes.zipWithNext().count { (a, b) ->
+            kotlin.math.abs(b.centerY() - a.centerY()) <= box.height() * 0.12f &&
+                b.centerX() >= a.centerX() - box.width() * 0.08f
+        }
+        return aspectRatio >= 1.30f && verticalSteps >= horizontalSteps
+    }
+
+    /** Detects a TextBlock containing vertical Japanese writing. */
+    fun isVerticalBlock(block: TextBlock): Boolean {
+        val lines = block.lines
+        if (lines.isEmpty()) return false
+        val verticalLines = lines.count(::isVerticalLine)
+        if (verticalLines == 0) return false
+        if (lines.size == 1) return true
+        return verticalLines.toFloat() / lines.size >= 0.5f
+    }
+
+    /**
+     * Reconstructs natural Japanese reading order for a vertical OCR block.
+     * Vertical columns are read top-to-bottom and columns right-to-left.
+     */
+    fun verticalBlockText(block: TextBlock): String {
+        return block.lines
+            .filter { it.text.isNotBlank() }
+            .sortedByDescending { it.boundingBox?.centerX() ?: 0 }
+            .joinToString(separator = "") { it.text.trim() }
+            .trim()
+    }
+
     fun shouldTreatAsParagraph(block: TextBlock): Boolean {
+        if (isVerticalBlock(block)) return false
         val lines = block.lines
         if (lines.size < 2) return false
         val boxes = lines.mapNotNull { it.boundingBox }.filter { it.width() > 0 && it.height() > 0 }
@@ -66,7 +117,8 @@ object TextLayoutAnalyzer {
         if (box.width() <= 0 || box.height() <= 0) return null
         val elementHeights = block.lines.flatMap { line -> line.elements.mapNotNull { it.boundingBox?.height()?.takeIf { height -> height > 0 } } }
         val glyphHeight = if (elementHeights.isNotEmpty()) elementHeights.sorted()[elementHeights.size / 2].toFloat() else box.height().toFloat() / block.lines.size.coerceAtLeast(1)
-        return buildResult(bitmap, box.left, box.top, box.right, box.bottom, glyphHeight)
+        val orientation = if (isVerticalBlock(block)) WritingOrientation.VERTICAL else WritingOrientation.HORIZONTAL
+        return buildResult(bitmap, box.left, box.top, box.right, box.bottom, glyphHeight, orientation)
     }
 
     fun analyze(bitmap: Bitmap, line: Line): Result? {
@@ -74,10 +126,19 @@ object TextLayoutAnalyzer {
         if (box.width() <= 0 || box.height() <= 0) return null
         val elementHeights = line.elements.mapNotNull { it.boundingBox?.height()?.takeIf { height -> height > 0 } }
         val glyphHeight = if (elementHeights.isNotEmpty()) elementHeights.sorted()[elementHeights.size / 2].toFloat() else box.height().toFloat()
-        return buildResult(bitmap, box.left, box.top, box.right, box.bottom, glyphHeight)
+        val orientation = if (isVerticalLine(line)) WritingOrientation.VERTICAL else WritingOrientation.HORIZONTAL
+        return buildResult(bitmap, box.left, box.top, box.right, box.bottom, glyphHeight, orientation)
     }
 
-    private fun buildResult(bitmap: Bitmap, rawLeft: Int, rawTop: Int, rawRight: Int, rawBottom: Int, glyphHeight: Float): Result? {
+    private fun buildResult(
+        bitmap: Bitmap,
+        rawLeft: Int,
+        rawTop: Int,
+        rawRight: Int,
+        rawBottom: Int,
+        glyphHeight: Float,
+        orientation: WritingOrientation
+    ): Result? {
         val sourceTextSizePx = (glyphHeight * 1.15f).coerceIn(8f, 96f)
         val horizontalPad = (glyphHeight * 0.20f).roundToInt().coerceIn(3, 18)
         val verticalPad = (glyphHeight * 0.18f).roundToInt().coerceIn(2, 12)
@@ -91,7 +152,8 @@ object TextLayoutAnalyzer {
             right,
             bottom,
             sourceTextSizePx,
-            estimateBackgroundColor(bitmap, left, top, right, bottom)
+            estimateBackgroundColor(bitmap, left, top, right, bottom),
+            orientation
         )
     }
 
