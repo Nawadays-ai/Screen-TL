@@ -32,15 +32,27 @@ class TranslationManager(
         val perfTrace = ScreenTLPerformanceTrace.current()
         val providerName = getProviderName()
         perfTrace?.mark("translation_request provider=$providerName chars=${text.length}")
+        perfTrace?.mark("translation_inference_start provider=$providerName")
         provider.translate(
             text = text,
-            onSuccess = { translated -> perfTrace?.mark("translation_response provider=$providerName chars=${translated.length}"); mainHandler.post { onSuccess(translated) } },
+            onSuccess = { translated ->
+                perfTrace?.mark("translation_response provider=$providerName chars=${translated.length}")
+                mainHandler.post { onSuccess(translated) }
+            },
             onFailure = { exception ->
                 perfTrace?.mark("translation_failed provider=$providerName")
-                perfTrace?.diagnostic("provider=$providerName; phase=translate; error=${diagnosticMessage(exception)}")
+                perfTrace?.diagnostic("provider=$providerName; phase=inference; error=${diagnosticMessage(exception)}")
                 mainHandler.post { onFailure(exception) }
             }
         )
+    }
+
+    /** Stops a running local/API operation and recreates a clean provider. */
+    fun cancelCurrentOperation(reason: String = "cancelled") {
+        val providerName = getProviderName()
+        ScreenTLPerformanceTrace.current()?.mark("translation_timeout provider=$providerName reason=$reason")
+        provider.close()
+        provider = createProvider()
     }
 
     fun getProviderName(): String = when (provider) {
