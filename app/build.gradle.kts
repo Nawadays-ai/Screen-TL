@@ -82,7 +82,10 @@ dependencies {
     // ML Kit Translation
     implementation("com.google.mlkit:translate:17.0.3")
 
-    // OkHttp untuk API DeepL & Gemini
+    // On-device Manga OCR (ONNX)
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.29.0")
+
+    // OkHttp untuk API DeepL & Gemini dan model download
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     // Coroutines untuk proses di latar belakang
