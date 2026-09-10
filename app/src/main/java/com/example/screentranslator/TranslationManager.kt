@@ -22,7 +22,7 @@ class TranslationManager(
             onReady = { perfTrace?.mark("translation_prepare_ready provider=$providerName"); mainHandler.post(onReady) },
             onFailure = { exception ->
                 perfTrace?.mark("translation_prepare_failed provider=$providerName")
-                perfTrace?.diagnostic("provider=$providerName; phase=prepare; error=${exception.message ?: exception::class.java.name}")
+                perfTrace?.diagnostic("provider=$providerName; phase=prepare; error=${diagnosticMessage(exception)}")
                 mainHandler.post { onFailure(exception) }
             }
         )
@@ -37,7 +37,7 @@ class TranslationManager(
             onSuccess = { translated -> perfTrace?.mark("translation_response provider=$providerName chars=${translated.length}"); mainHandler.post { onSuccess(translated) } },
             onFailure = { exception ->
                 perfTrace?.mark("translation_failed provider=$providerName")
-                perfTrace?.diagnostic("provider=$providerName; phase=translate; error=${exception.message ?: exception::class.java.name}")
+                perfTrace?.diagnostic("provider=$providerName; phase=translate; error=${diagnosticMessage(exception)}")
                 mainHandler.post { onFailure(exception) }
             }
         )
@@ -85,6 +85,14 @@ class TranslationManager(
                 else MissingApiProvider("DeepL API belum diaktifkan di Settings")
             }
             else -> MlKitTranslationProvider(sourceLanguage, targetLanguage)
+        }
+    }
+
+    private fun diagnosticMessage(exception: Exception): String = buildString {
+        append(exception.message ?: exception::class.java.name)
+        exception.suppressed.forEach { suppressed ->
+            append(" | suppressed=")
+            append(suppressed.message ?: suppressed::class.java.name)
         }
     }
 
