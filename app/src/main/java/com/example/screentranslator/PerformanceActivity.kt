@@ -47,6 +47,9 @@ class PerformanceActivity : AppCompatActivity() {
                 append("Tampilkan: ").append(formatMs(entry.displayMs)).append("\n")
                 append("Lainnya: ").append(entry.unaccountedMs).append(" ms\n")
                 append("TOTAL: ").append(entry.totalMs).append(" ms")
+                entry.diagnostic?.let {
+                    append("\nDiagnostik: ").append(it)
+                }
             }
         }
     }
