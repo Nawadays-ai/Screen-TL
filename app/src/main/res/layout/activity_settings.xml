@@ -1,132 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="#121212">
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="16dp">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="52dp"
-            android:gravity="center_vertical">
-            <Button
-                android:id="@+id/btnBackSettings"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="←"
-                android:textSize="22sp"
-                android:contentDescription="Kembali" />
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:text="Settings"
-                android:textColor="#FFFFFF"
-                android:textSize="22sp"
-                android:textStyle="bold" />
-        </LinearLayout>
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="Mesin Translation Manual"
-            android:textColor="#BBBBBB" />
-        <Spinner
-            android:id="@+id/spinnerManualProvider"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:background="#2A2A2A" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="28dp"
-            android:text="API Translation Manual"
-            android:textColor="#FFFFFF"
-            android:textSize="18sp"
-            android:textStyle="bold" />
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Pilih koneksi API sendiri. Gemini dan DeepL memakai key terpisah yang disimpan terenkripsi."
-            android:textColor="#888888"
-            android:textSize="12sp" />
-
-        <Spinner
-            android:id="@+id/spinnerApiProvider"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:layout_marginTop="8dp"
-            android:background="#2A2A2A" />
-
-        <EditText
-            android:id="@+id/etApiKey"
-            android:layout_width="match_parent"
-            android:layout_height="52dp"
-            android:layout_marginTop="8dp"
-            android:hint="Masukkan API key"
-            android:textColor="#FFFFFF"
-            android:textColorHint="#777777"
-            android:inputType="textPassword"
-            android:singleLine="true" />
-
-        <TextView
-            android:id="@+id/tvApiStatus"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:textColor="#BBBBBB"
-            android:textSize="12sp" />
-
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:orientation="horizontal">
-            <Button
-                android:id="@+id/btnApiCheck"
-                android:layout_width="wrap_content"
-                android:layout_height="44dp"
-                android:minWidth="0dp"
-                android:paddingStart="20dp"
-                android:paddingEnd="20dp"
-                android:text="Cek"
-                android:textAllCaps="false" />
-            <Button
-                android:id="@+id/btnApiUse"
-                android:layout_width="wrap_content"
-                android:layout_height="44dp"
-                android:layout_marginStart="8dp"
-                android:minWidth="0dp"
-                android:paddingStart="20dp"
-                android:paddingEnd="20dp"
-                android:text="Gunakan"
-                android:textAllCaps="false" />
-            <Button
-                android:id="@+id/btnApiDisable"
-                android:layout_width="wrap_content"
-                android:layout_height="44dp"
-                android:layout_marginStart="8dp"
-                android:minWidth="0dp"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp"
-                android:text="Nonaktifkan"
-                android:textAllCaps="false" />
-        </LinearLayout>
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:layout_marginBottom="24dp"
-            android:text="API aktif mengambil prioritas. Jika tidak ada API aktif, Google ML Kit digunakan sebagai mesin manual."
-            android:textColor="#777777"
-            android:textSize="12sp" />
-    </LinearLayout>
-</ScrollView>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#121212">
+<LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
+<LinearLayout android:layout_width="match_parent" android:layout_height="52dp" android:gravity="center_vertical"><Button android:id="@+id/btnBackSettings" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="←" android:textSize="22sp" android:contentDescription="Kembali"/><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:text="Settings" android:textColor="#FFFFFF" android:textSize="22sp" android:textStyle="bold"/></LinearLayout>
+<TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="20dp" android:text="Translation Engine" android:textColor="#FFFFFF" android:textSize="18sp" android:textStyle="bold"/>
+<TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Google ML Kit adalah engine default. Model lokal hanya masuk RAM ketika benar-benar dipakai." android:textColor="#888888" android:textSize="12sp"/>
+<Spinner android:id="@+id/spinnerLocalEngine" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="8dp" android:background="#2A2A2A"/>
+<TextView android:id="@+id/tvLocalEngineStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:textColor="#BBBBBB" android:textSize="12sp"/>
+<LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:orientation="horizontal">
+<Button android:id="@+id/btnLocalDownload" android:layout_width="wrap_content" android:layout_height="44dp" android:minWidth="0dp" android:text="Download" android:textAllCaps="false"/>
+<Button android:id="@+id/btnLocalUse" android:layout_width="wrap_content" android:layout_height="44dp" android:layout_marginStart="8dp" android:minWidth="0dp" android:text="Gunakan" android:textAllCaps="false"/>
+<Button android:id="@+id/btnLocalDisable" android:layout_width="wrap_content" android:layout_height="44dp" android:layout_marginStart="8dp" android:minWidth="0dp" android:text="Nonaktifkan" android:textAllCaps="false"/>
+<Button android:id="@+id/btnLocalDelete" android:layout_width="wrap_content" android:layout_height="44dp" android:layout_marginStart="8dp" android:minWidth="0dp" android:text="Hapus" android:textAllCaps="false"/></LinearLayout>
+<TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="Saat Qwen aktif, pilihan engine dikunci. Nonaktifkan akan kembali ke Google ML Kit dan me-release model dari RAM." android:textColor="#777777" android:textSize="12sp"/>
+<TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="28dp" android:text="Mesin Translation Manual" android:textColor="#BBBBBB"/>
+<Spinner android:id="@+id/spinnerManualProvider" android:layout_width="match_parent" android:layout_height="48dp" android:background="#2A2A2A"/>
+<TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="28dp" android:text="API Translation Manual" android:textColor="#FFFFFF" android:textSize="18sp" android:textStyle="bold"/>
+<TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Pilih koneksi API sendiri. Gemini dan DeepL memakai key terpisah yang disimpan terenkripsi." android:textColor="#888888" android:textSize="12sp"/>
+<Spinner android:id="@+id/spinnerApiProvider" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="8dp" android:background="#2A2A2A"/>
+<EditText android:id="@+id/etApiKey" android:layout_width="match_parent" android:layout_height="52dp" android:layout_marginTop="8dp" android:hint="Masukkan API key" android:textColor="#FFFFFF" android:textColorHint="#777777" android:inputType="textPassword" android:singleLine="true"/>
+<TextView android:id="@+id/tvApiStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:textColor="#BBBBBB" android:textSize="12sp"/>
+<LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:orientation="horizontal"><Button android:id="@+id/btnApiCheck" android:layout_width="wrap_content" android:layout_height="44dp" android:minWidth="0dp" android:text="Cek" android:textAllCaps="false"/><Button android:id="@+id/btnApiUse" android:layout_width="wrap_content" android:layout_height="44dp" android:layout_marginStart="8dp" android:minWidth="0dp" android:text="Gunakan" android:textAllCaps="false"/><Button android:id="@+id/btnApiDisable" android:layout_width="wrap_content" android:layout_height="44dp" android:layout_marginStart="8dp" android:minWidth="0dp" android:text="Nonaktifkan" android:textAllCaps="false"/></LinearLayout>
+<TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="20dp" android:layout_marginBottom="24dp" android:text="API aktif tetap mengikuti prioritas API yang sudah ada. Jika tidak ada API aktif dan tidak ada model lokal aktif, Google ML Kit digunakan." android:textColor="#777777" android:textSize="12sp"/>
+</LinearLayout></ScrollView>
