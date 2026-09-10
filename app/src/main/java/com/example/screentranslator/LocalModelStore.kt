@@ -10,10 +10,13 @@ import java.io.FileOutputStream
 import java.security.MessageDigest
 
 object LocalModelStore {
-    const val QWEN_FILE = "Qwen2.5-0.5B-Instruct-Q4_0_4_4.gguf"
-    const val QWEN_SIZE_BYTES = 352L * 1024L * 1024L
-    private const val QWEN_URL = "https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_0_4_4.gguf?download=true"
-    private const val QWEN_SHA256 = "9f2c0af1a4a2a1f1b4ad51d2aa3fb09913ba8821f3aef71541fef56b3c7da8d0"
+    // The UI name remains Q4_0_4_4 because that is the ARM execution target.
+    // Modern llama.cpp no longer accepts legacy Q4_0_4_4 tensor types in GGUF;
+    // it performs the same ARM repack at load time from a standard Q4_0 GGUF.
+    const val QWEN_FILE = "Qwen2.5-0.5B-Instruct-Q4_0.gguf"
+    const val QWEN_SIZE_BYTES = 352972352L
+    private const val QWEN_URL = "https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_0.gguf?download=true"
+    private const val QWEN_SHA256 = "c8cd5f37dd1235fb010c45316d4ff8af875e1a4e0ff368b4bf6cacb9053d4919"
 
     private lateinit var root: File
     private val client = OkHttpClient()
@@ -30,7 +33,16 @@ object LocalModelStore {
         return File(root, QWEN_FILE)
     }
 
-    fun isQwenInstalled(): Boolean = qwenFile().let { it.isFile && it.length() > 0L }
+    fun isQwenInstalled(): Boolean = qwenFile().let { it.isFile && it.length() == QWEN_SIZE_BYTES }
+
+    fun qwenDiagnostic(): String {
+        val file = qwenFile()
+        if (!file.exists()) return "Qwen file missing: ${file.absolutePath}"
+        if (!file.isFile) return "Qwen path is not a regular file: ${file.absolutePath}"
+        val size = file.length()
+        if (size != QWEN_SIZE_BYTES) return "Qwen file size mismatch: $size bytes; expected $QWEN_SIZE_BYTES bytes"
+        return "Qwen file present: ${file.name}, $size bytes"
+    }
 
     fun deleteQwen(): Boolean {
         val file = qwenFile()
@@ -72,7 +84,7 @@ object LocalModelStore {
         val actualSha = digest.digest().joinToString("") { "%02x".format(it) }
         if (!actualSha.equals(QWEN_SHA256, ignoreCase = true)) {
             partial.delete()
-            throw IllegalStateException("Checksum model tidak cocok")
+            throw IllegalStateException("Checksum model tidak cocok: $actualSha")
         }
         if (destination.exists()) destination.delete()
         if (!partial.renameTo(destination)) throw IllegalStateException("Model selesai diunduh tetapi gagal dipindahkan")
