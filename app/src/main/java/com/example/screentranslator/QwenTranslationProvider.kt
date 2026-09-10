@@ -15,23 +15,44 @@ class QwenTranslationProvider(
     private val targetLanguage: String
 ) : TranslationProvider {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private var model: LlamaModel? = null
+    @Volatile private var model: LlamaModel? = null
+    @Volatile private var loading = false
 
+    @Synchronized
     override fun prepare(onReady: () -> Unit, onFailure: (Exception) -> Unit) {
-        if (!LocalModelStore.isQwenInstalled()) {
-            onFailure(IllegalStateException("Model Qwen belum diunduh"))
+        model?.let {
+            onReady()
             return
         }
+        if (loading) {
+            onFailure(IllegalStateException("Model Qwen sedang dimuat"))
+            return
+        }
+        if (!LocalModelStore.isQwenInstalled()) {
+            onFailure(IllegalStateException("Model Qwen belum diunduh atau file model tidak valid"))
+            return
+        }
+
+        loading = true
         scope.launch {
             try {
+                // Keep the first device test deliberately conservative: the
+                // 0.5B model is small, but KV-cache/context memory is still real
+                // RAM. Two threads also avoid competing with OCR/UI on an
+                // Helio G96 while keeping the local engine strictly single-loaded.
                 val loaded = Llama.loadModel(
                     modelPath = LocalModelStore.qwenFile().absolutePath,
-                    config = LlamaConfig(contextSize = 2048, threads = 4)
+                    config = LlamaConfig(contextSize = 1024, threads = 2)
                 )
                 model = loaded
                 withContext(Dispatchers.Main) { onReady() }
             } catch (error: Exception) {
-                withContext(Dispatchers.Main) { onFailure(error) }
+                val diagnostic = runCatching { Llama.getSystemInfo() }.getOrDefault("system-info unavailable")
+                withContext(Dispatchers.Main) {
+                    onFailure(IllegalStateException("Qwen gagal memuat model: ${error.message ?: error::class.java.simpleName} | $diagnostic", error))
+                }
+            } finally {
+                loading = false
             }
         }
     }
@@ -59,9 +80,10 @@ class QwenTranslationProvider(
     }
 
     override fun close() {
-        val loaded = model ?: return
+        val loaded = model
         model = null
-        runCatching { Llama.releaseModel(loaded) }
+        loading = false
+        if (loaded != null) runCatching { Llama.releaseModel(loaded) }
         scope.cancel()
     }
 
