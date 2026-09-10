@@ -10,6 +10,8 @@ data class PerformanceLogEntry(
     val operation: String,
     val captureMs: Long?,
     val ocrMs: Long?,
+    val translationPrepareMs: Long?,
+    val translationInferenceMs: Long?,
     val translationMs: Long?,
     val displayMs: Long?,
     val totalMs: Long,
@@ -60,6 +62,8 @@ object PerformanceLogStore {
         put("operation", entry.operation)
         put("captureMs", entry.captureMs ?: JSONObject.NULL)
         put("ocrMs", entry.ocrMs ?: JSONObject.NULL)
+        put("translationPrepareMs", entry.translationPrepareMs ?: JSONObject.NULL)
+        put("translationInferenceMs", entry.translationInferenceMs ?: JSONObject.NULL)
         put("translationMs", entry.translationMs ?: JSONObject.NULL)
         put("displayMs", entry.displayMs ?: JSONObject.NULL)
         put("totalMs", entry.totalMs)
@@ -72,6 +76,8 @@ object PerformanceLogStore {
         operation = json.optString("operation", "TranslateFlow"),
         captureMs = json.optLongOrNull("captureMs"),
         ocrMs = json.optLongOrNull("ocrMs"),
+        translationPrepareMs = json.optLongOrNull("translationPrepareMs"),
+        translationInferenceMs = json.optLongOrNull("translationInferenceMs"),
         translationMs = json.optLongOrNull("translationMs"),
         displayMs = json.optLongOrNull("displayMs"),
         totalMs = json.optLong("totalMs"),
