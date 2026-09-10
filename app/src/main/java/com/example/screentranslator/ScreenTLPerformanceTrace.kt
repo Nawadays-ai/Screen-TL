@@ -34,7 +34,7 @@ class ScreenTLPerformanceTrace(private val operation: String) {
 
     /** Adds a sanitized diagnostic. Callers must not pass OCR or translated text. */
     fun diagnostic(message: String) {
-        diagnosticText = message.take(1200)
+        diagnosticText = message.take(2000)
         Log.e(TAG, "$operation | DIAGNOSTIC | ${diagnosticText}")
     }
 
@@ -48,7 +48,9 @@ class ScreenTLPerformanceTrace(private val operation: String) {
                 operation = operation,
                 captureMs = durationBetween(snapshot, "capture_request", "screenshot_ready"),
                 ocrMs = durationBetween(snapshot, "ocr_start", "ocr_complete"),
-                translationMs = durationBetweenFirstToLast(snapshot, "translation_request", setOf("translation_response", "translation_failed", "translation_prepare_failed")),
+                translationPrepareMs = durationBetweenFirstToLast(snapshot, "translation_prepare_start", setOf("translation_prepare_ready", "translation_prepare_failed")),
+                translationInferenceMs = durationBetweenFirstToLast(snapshot, "translation_inference_start", setOf("translation_response", "translation_failed", "translation_timeout")),
+                translationMs = durationBetweenFirstToLast(snapshot, "translation_request", setOf("translation_response", "translation_failed", "translation_prepare_failed", "translation_timeout")),
                 displayMs = durationBetween(snapshot, "display_start", "displayed"),
                 totalMs = elapsed,
                 result = result,
