@@ -4,14 +4,23 @@ import android.os.Bundle
 import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
+import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.Spinner
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 
 class SettingsActivity : AppCompatActivity() {
+    private lateinit var spinnerLocalEngine: Spinner
+    private lateinit var tvLocalEngineStatus: TextView
+    private lateinit var btnLocalDownload: Button
+    private lateinit var btnLocalUse: Button
+    private lateinit var btnLocalDisable: Button
+    private lateinit var btnLocalDelete: Button
     private lateinit var spinnerManualProvider: Spinner
     private lateinit var spinnerApiProvider: Spinner
     private lateinit var etApiKey: EditText
@@ -20,15 +29,25 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var btnApiUse: Button
     private lateinit var btnApiDisable: Button
 
+    private val localEngines = arrayOf(ApiSettings.PROVIDER_ML_KIT, ApiSettings.PROVIDER_QWEN)
     private val apiProviders = arrayOf("Gemini AI", "DeepL API")
+    private var selectedLocalEngine = ApiSettings.PROVIDER_ML_KIT
     private var selectedApiProvider = apiProviders[0]
     private var updatingApiField = false
+    private var localDownloadRunning = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
         ApiSettings.initialize(applicationContext)
+        LocalModelStore.initialize(applicationContext)
 
+        spinnerLocalEngine = findViewById(R.id.spinnerLocalEngine)
+        tvLocalEngineStatus = findViewById(R.id.tvLocalEngineStatus)
+        btnLocalDownload = findViewById(R.id.btnLocalDownload)
+        btnLocalUse = findViewById(R.id.btnLocalUse)
+        btnLocalDisable = findViewById(R.id.btnLocalDisable)
+        btnLocalDelete = findViewById(R.id.btnLocalDelete)
         spinnerManualProvider = findViewById(R.id.spinnerManualProvider)
         spinnerApiProvider = findViewById(R.id.spinnerApiProvider)
         etApiKey = findViewById(R.id.etApiKey)
@@ -37,6 +56,35 @@ class SettingsActivity : AppCompatActivity() {
         btnApiUse = findViewById(R.id.btnApiUse)
         btnApiDisable = findViewById(R.id.btnApiDisable)
         findViewById<Button>(R.id.btnBackSettings).setOnClickListener { finish() }
+
+        spinnerLocalEngine.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, localEngines)
+        selectedLocalEngine = ApiSettings.getLocalEngine()
+        spinnerLocalEngine.setSelection(localEngines.indexOf(selectedLocalEngine).coerceAtLeast(0))
+        spinnerLocalEngine.setOnItemSelectedListener(SimpleItemSelectedListener { position ->
+            if (position in localEngines.indices) {
+                selectedLocalEngine = localEngines[position]
+                renderLocalEngine()
+            }
+        })
+        btnLocalDownload.setOnClickListener { downloadSelectedLocalModel() }
+        btnLocalUse.setOnClickListener {
+            if (selectedLocalEngine == ApiSettings.PROVIDER_QWEN && LocalModelStore.isQwenInstalled()) {
+                ApiSettings.setLocalEngine(ApiSettings.PROVIDER_QWEN)
+                renderLocalEngine()
+            }
+        }
+        btnLocalDisable.setOnClickListener {
+            ApiSettings.setLocalEngine(ApiSettings.PROVIDER_ML_KIT)
+            selectedLocalEngine = ApiSettings.PROVIDER_ML_KIT
+            spinnerLocalEngine.setSelection(0)
+            renderLocalEngine()
+        }
+        btnLocalDelete.setOnClickListener {
+            if (selectedLocalEngine == ApiSettings.PROVIDER_QWEN && ApiSettings.getLocalEngine() != ApiSettings.PROVIDER_QWEN) {
+                LocalModelStore.deleteQwen()
+                renderLocalEngine()
+            }
+        }
 
         val manualProviders = arrayOf(ApiSettings.PROVIDER_ML_KIT)
         spinnerManualProvider.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, manualProviders)
@@ -66,7 +114,6 @@ class SettingsActivity : AppCompatActivity() {
             }
             override fun afterTextChanged(s: Editable?) = Unit
         })
-
         btnApiCheck.setOnClickListener { checkSelectedApi() }
         btnApiUse.setOnClickListener {
             if (selectedApiProvider == "Gemini AI") ApiSettings.setGeminiEnabled(true) else ApiSettings.setDeepLEnabled(true)
@@ -78,7 +125,67 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         loadSelectedApiKey()
+        renderLocalEngine()
         renderApi()
+    }
+
+    private fun renderLocalEngine(message: String? = null) {
+        val active = ApiSettings.getLocalEngine()
+        val qwenInstalled = LocalModelStore.isQwenInstalled()
+        val isQwen = selectedLocalEngine == ApiSettings.PROVIDER_QWEN
+        val activeQwen = active == ApiSettings.PROVIDER_QWEN
+
+        spinnerLocalEngine.isEnabled = !activeQwen && !localDownloadRunning
+        if (localDownloadRunning) {
+            tvLocalEngineStatus.text = message ?: "Mengunduh model..."
+            btnLocalDownload.visibility = View.VISIBLE
+            btnLocalDownload.isEnabled = false
+            btnLocalUse.visibility = View.GONE
+            btnLocalDisable.visibility = View.GONE
+            btnLocalDelete.visibility = View.GONE
+            return
+        }
+
+        if (selectedLocalEngine == ApiSettings.PROVIDER_ML_KIT) {
+            tvLocalEngineStatus.text = "Google ML Kit — engine default"
+            btnLocalDownload.visibility = View.GONE
+            btnLocalUse.visibility = View.GONE
+            btnLocalDisable.visibility = if (activeQwen) View.VISIBLE else View.GONE
+            btnLocalDelete.visibility = View.GONE
+            return
+        }
+
+        tvLocalEngineStatus.text = message ?: when {
+            activeQwen -> "Sedang aktif — model hanya di-load saat service menerjemahkan"
+            qwenInstalled -> "Model terpasang"
+            else -> "Belum diunduh · sekitar 350 MB"
+        }
+        btnLocalDownload.visibility = if (!qwenInstalled) View.VISIBLE else View.GONE
+        btnLocalUse.visibility = if (qwenInstalled && !activeQwen) View.VISIBLE else View.GONE
+        btnLocalDisable.visibility = if (activeQwen) View.VISIBLE else View.GONE
+        btnLocalDelete.visibility = if (qwenInstalled && !activeQwen) View.VISIBLE else View.GONE
+        btnLocalDownload.isEnabled = isQwen
+    }
+
+    private fun downloadSelectedLocalModel() {
+        if (selectedLocalEngine != ApiSettings.PROVIDER_QWEN || localDownloadRunning) return
+        localDownloadRunning = true
+        renderLocalEngine("Menyiapkan download Qwen...")
+        lifecycleScope.launch {
+            try {
+                LocalModelStore.downloadQwen { downloaded, total ->
+                    runOnUiThread {
+                        val percent = if (total > 0) ((downloaded * 100L) / total).toInt() else 0
+                        renderLocalEngine("Mengunduh model Qwen... $percent%")
+                    }
+                }
+                localDownloadRunning = false
+                renderLocalEngine("Model Qwen berhasil diunduh")
+            } catch (error: Exception) {
+                localDownloadRunning = false
+                renderLocalEngine("Download gagal: ${error.message ?: "error tidak diketahui"}")
+            }
+        }
     }
 
     private fun loadSelectedApiKey() {
