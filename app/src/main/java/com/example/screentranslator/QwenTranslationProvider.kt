@@ -2,9 +2,11 @@ package com.example.screentranslator
 
 import dev.ffmpegkit.llama.Llama
 import dev.ffmpegkit.llama.LlamaConfig
+import dev.ffmpegkit.llama.LlamaModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -13,7 +15,7 @@ class QwenTranslationProvider(
     private val targetLanguage: String
 ) : TranslationProvider {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private var model: Any? = null
+    private var model: LlamaModel? = null
 
     override fun prepare(onReady: () -> Unit, onFailure: (Exception) -> Unit) {
         if (!LocalModelStore.isQwenInstalled()) {
@@ -22,12 +24,10 @@ class QwenTranslationProvider(
         }
         scope.launch {
             try {
-                val loaded = withContext(Dispatchers.IO) {
-                    Llama.loadModel(
-                        modelPath = LocalModelStore.qwenFile().absolutePath,
-                        config = LlamaConfig(contextSize = 2048, threads = 4)
-                    )
-                }
+                val loaded = Llama.loadModel(
+                    modelPath = LocalModelStore.qwenFile().absolutePath,
+                    config = LlamaConfig(contextSize = 2048, threads = 4)
+                )
                 model = loaded
                 withContext(Dispatchers.Main) { onReady() }
             } catch (error: Exception) {
@@ -43,10 +43,9 @@ class QwenTranslationProvider(
         }
         scope.launch {
             try {
-                val prompt = buildPrompt(text)
                 val result = Llama.complete(
                     loaded,
-                    prompt = prompt,
+                    prompt = buildPrompt(text),
                     systemPrompt = "You are a translation engine. Translate only. Preserve meaning, names, numbers, punctuation and line breaks. Do not explain.",
                     maxTokens = 256
                 )
@@ -62,8 +61,8 @@ class QwenTranslationProvider(
     override fun close() {
         val loaded = model ?: return
         model = null
-        scope.coroutineContext.cancel()
-        runCatching { @Suppress("UNCHECKED_CAST") Llama.releaseModel(loaded as dev.ffmpegkit.llama.LlamaModel) }
+        runCatching { Llama.releaseModel(loaded) }
+        scope.cancel()
     }
 
     private fun buildPrompt(text: String): String = "Translate from $sourceLanguage to $targetLanguage. Return only the translation.\n\n$text"
