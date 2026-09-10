@@ -10,8 +10,14 @@ import android.widget.EditText
 import android.widget.Spinner
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 
 class SettingsActivity : AppCompatActivity() {
+    private lateinit var spinnerTranslationMode: Spinner
+    private lateinit var tvMangaOcrStatus: TextView
+    private lateinit var btnMangaOcrDownload: Button
+    private lateinit var btnMangaOcrDelete: Button
     private lateinit var spinnerManualProvider: Spinner
     private lateinit var spinnerApiProvider: Spinner
     private lateinit var etApiKey: EditText
@@ -23,12 +29,18 @@ class SettingsActivity : AppCompatActivity() {
     private val apiProviders = arrayOf("Gemini AI", "DeepL API")
     private var selectedApiProvider = apiProviders[0]
     private var updatingApiField = false
+    private lateinit var mangaOcrStore: MangaOcrModelStore
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
         ApiSettings.initialize(applicationContext)
+        mangaOcrStore = MangaOcrModelStore(applicationContext)
 
+        spinnerTranslationMode = findViewById(R.id.spinnerTranslationMode)
+        tvMangaOcrStatus = findViewById(R.id.tvMangaOcrStatus)
+        btnMangaOcrDownload = findViewById(R.id.btnMangaOcrDownload)
+        btnMangaOcrDelete = findViewById(R.id.btnMangaOcrDelete)
         spinnerManualProvider = findViewById(R.id.spinnerManualProvider)
         spinnerApiProvider = findViewById(R.id.spinnerApiProvider)
         etApiKey = findViewById(R.id.etApiKey)
@@ -37,6 +49,22 @@ class SettingsActivity : AppCompatActivity() {
         btnApiUse = findViewById(R.id.btnApiUse)
         btnApiDisable = findViewById(R.id.btnApiDisable)
         findViewById<Button>(R.id.btnBackSettings).setOnClickListener { finish() }
+
+        val modes = arrayOf(TranslationModeSettings.NORMAL, TranslationModeSettings.MANGA)
+        spinnerTranslationMode.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, modes)
+        spinnerTranslationMode.setSelection(modes.indexOf(TranslationModeSettings.getMode()).coerceAtLeast(0))
+        spinnerTranslationMode.setOnItemSelectedListener(SimpleItemSelectedListener { position ->
+            val mode = modes.getOrNull(position) ?: TranslationModeSettings.NORMAL
+            TranslationModeSettings.setMode(mode)
+            renderMangaOcr()
+        })
+        btnMangaOcrDownload.setOnClickListener { downloadMangaOcr() }
+        btnMangaOcrDelete.setOnClickListener {
+            if (TranslationModeSettings.isMangaMode()) TranslationModeSettings.setMode(TranslationModeSettings.NORMAL)
+            mangaOcrStore.delete()
+            renderMangaOcr()
+        }
+        renderMangaOcr()
 
         val manualProviders = arrayOf(ApiSettings.PROVIDER_ML_KIT)
         spinnerManualProvider.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, manualProviders)
@@ -79,6 +107,40 @@ class SettingsActivity : AppCompatActivity() {
 
         loadSelectedApiKey()
         renderApi()
+    }
+
+    private fun renderMangaOcr() {
+        val installed = mangaOcrStore.isInstalled()
+        val active = TranslationModeSettings.isMangaMode()
+        tvMangaOcrStatus.text = when {
+            installed && active -> "Manga OCR aktif dan siap. Model berada di storage lokal; dimuat saat OCR dipakai."
+            installed -> "Manga OCR siap digunakan. Model sudah diunduh."
+            active -> "Manga OCR belum diunduh. Download model sebelum Manual TL mode Manga."
+            else -> "Mode Normal aktif."
+        }
+        btnMangaOcrDownload.visibility = if (installed) Button.GONE else Button.VISIBLE
+        btnMangaOcrDelete.visibility = if (installed) Button.VISIBLE else Button.GONE
+        btnMangaOcrDownload.isEnabled = !installed
+    }
+
+    private fun downloadMangaOcr() {
+        btnMangaOcrDownload.isEnabled = false
+        btnMangaOcrDelete.isEnabled = false
+        tvMangaOcrStatus.text = "Menyiapkan download Manga OCR..."
+        lifecycleScope.launch {
+            try {
+                mangaOcrStore.download { name, percent ->
+                    runOnUiThread { tvMangaOcrStatus.text = "Mengunduh $name — ${if (percent >= 0) "$percent%" else "..."}" }
+                }
+                runOnUiThread { renderMangaOcr() }
+            } catch (exception: Exception) {
+                runOnUiThread {
+                    tvMangaOcrStatus.text = "Download gagal: ${exception.message ?: exception.javaClass.simpleName}"
+                    btnMangaOcrDownload.isEnabled = true
+                    btnMangaOcrDelete.isEnabled = true
+                }
+            }
+        }
     }
 
     private fun loadSelectedApiKey() {
