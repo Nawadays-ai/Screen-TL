@@ -5,7 +5,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 
-/** Lightweight stage timing for diagnostics; never records OCR/translation text. */
+/** Lightweight stage timing and persistent diagnostics; never records OCR/translation text. */
 class ScreenTLPerformanceTrace(private val operation: String) {
     companion object {
         private const val TAG = "ScreenTL-Perf"
@@ -24,11 +24,18 @@ class ScreenTLPerformanceTrace(private val operation: String) {
 
     private val startedAt = SystemClock.elapsedRealtime()
     private val events = mutableListOf<Pair<String, Long>>()
+    @Volatile private var diagnosticText: String? = null
 
     fun mark(stage: String) {
         val elapsed = SystemClock.elapsedRealtime() - startedAt
         synchronized(events) { events.add(stage to elapsed) }
         Log.i(TAG, "$operation | +${elapsed}ms | $stage")
+    }
+
+    /** Adds a sanitized diagnostic. Callers must not pass OCR or translated text. */
+    fun diagnostic(message: String) {
+        diagnosticText = message.take(1200)
+        Log.e(TAG, "$operation | DIAGNOSTIC | ${diagnosticText}")
     }
 
     fun finish(result: String = "completed") {
@@ -41,10 +48,11 @@ class ScreenTLPerformanceTrace(private val operation: String) {
                 operation = operation,
                 captureMs = durationBetween(snapshot, "capture_request", "screenshot_ready"),
                 ocrMs = durationBetween(snapshot, "ocr_start", "ocr_complete"),
-                translationMs = durationBetweenFirstToLast(snapshot, "translation_request", setOf("translation_response", "translation_failed")),
+                translationMs = durationBetweenFirstToLast(snapshot, "translation_request", setOf("translation_response", "translation_failed", "translation_prepare_failed")),
                 displayMs = durationBetween(snapshot, "display_start", "displayed"),
                 totalMs = elapsed,
-                result = result
+                result = result,
+                diagnostic = diagnosticText
             )
         )
         if (active === this) active = null
@@ -56,14 +64,7 @@ class ScreenTLPerformanceTrace(private val operation: String) {
         mainHandler.postDelayed(finishRunnable!!, delayMs)
     }
 
-    /**
-     * Stage markers may contain diagnostics after the stage name, for example
-     * "screenshot_ready 1080x2400" or "translation_request provider=DeepL".
-     * Match only the stable stage prefix so those details do not turn into a
-     * missing timing entry in the performance UI.
-     */
-    private fun isStage(event: String, stage: String): Boolean =
-        event == stage || event.startsWith("$stage ")
+    private fun isStage(event: String, stage: String): Boolean = event == stage || event.startsWith("$stage ")
 
     private fun durationBetween(events: List<Pair<String, Long>>, start: String, end: String): Long? {
         val startAt = events.firstOrNull { isStage(it.first, start) }?.second ?: return null
@@ -73,9 +74,7 @@ class ScreenTLPerformanceTrace(private val operation: String) {
 
     private fun durationBetweenFirstToLast(events: List<Pair<String, Long>>, start: String, ends: Set<String>): Long? {
         val startAt = events.firstOrNull { isStage(it.first, start) }?.second ?: return null
-        val endAt = events.lastOrNull { event ->
-            ends.any { end -> isStage(event.first, end) } && event.second >= startAt
-        }?.second ?: return null
+        val endAt = events.lastOrNull { event -> ends.any { end -> isStage(event.first, end) } && event.second >= startAt }?.second ?: return null
         return (endAt - startAt).coerceAtLeast(0L)
     }
 }
