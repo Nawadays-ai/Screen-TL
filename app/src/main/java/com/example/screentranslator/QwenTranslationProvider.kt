@@ -20,26 +20,21 @@ class QwenTranslationProvider(
 
     @Synchronized
     override fun prepare(onReady: () -> Unit, onFailure: (Exception) -> Unit) {
-        model?.let {
-            onReady()
-            return
-        }
+        model?.let { onReady(); return }
         if (loading) {
             onFailure(IllegalStateException("Model Qwen sedang dimuat"))
             return
         }
+
+        val fileDiagnostic = LocalModelStore.qwenDiagnostic()
         if (!LocalModelStore.isQwenInstalled()) {
-            onFailure(IllegalStateException("Model Qwen belum diunduh atau file model tidak valid"))
+            onFailure(IllegalStateException("Model Qwen belum siap: $fileDiagnostic"))
             return
         }
 
         loading = true
         scope.launch {
             try {
-                // Keep the first device test deliberately conservative: the
-                // 0.5B model is small, but KV-cache/context memory is still real
-                // RAM. Two threads also avoid competing with OCR/UI on an
-                // Helio G96 while keeping the local engine strictly single-loaded.
                 val loaded = Llama.loadModel(
                     modelPath = LocalModelStore.qwenFile().absolutePath,
                     config = LlamaConfig(contextSize = 1024, threads = 2)
@@ -47,9 +42,14 @@ class QwenTranslationProvider(
                 model = loaded
                 withContext(Dispatchers.Main) { onReady() }
             } catch (error: Exception) {
-                val diagnostic = runCatching { Llama.getSystemInfo() }.getOrDefault("system-info unavailable")
+                val systemInfo = runCatching { Llama.getSystemInfo() }.getOrDefault("system-info unavailable")
+                val diagnostic = "model=${LocalModelStore.qwenFile().name}; file=$fileDiagnostic; context=1024; threads=2; error=${error.message ?: error::class.java.name}; llama=$systemInfo"
                 withContext(Dispatchers.Main) {
-                    onFailure(IllegalStateException("Qwen gagal memuat model: ${error.message ?: error::class.java.simpleName} | $diagnostic", error))
+                    onFailure(IllegalStateException("Qwen gagal memuat model: ${error.message ?: error::class.java.simpleName}", error).also {
+                        // TranslationManager records the exception message in the persistent performance log.
+                        // Keep the complete diagnostic available as the cause message as well.
+                        it.addSuppressed(IllegalStateException(diagnostic))
+                    })
                 }
             } finally {
                 loading = false
