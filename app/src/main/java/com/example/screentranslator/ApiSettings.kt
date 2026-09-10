@@ -9,9 +9,12 @@ object ApiSettings {
     private const val KEY_GEMINI_VERIFIED = "gemini_verified"
     private const val KEY_DEEPL_ENABLED = "deepl_enabled"
     private const val KEY_DEEPL_VERIFIED = "deepl_verified"
+    private const val KEY_LOCAL_ENGINE = "local_engine"
 
     const val PROVIDER_ML_KIT = "Google ML Kit"
     const val PROVIDER_DEEPL = "DeepL API"
+    const val PROVIDER_QWEN = "Qwen 0.5B Q4_0_4_4"
+    const val PROVIDER_FIREFOX = "Firefox Translation"
 
     private lateinit var preferences: android.content.SharedPreferences
     private lateinit var keyStore: SecureApiKeyStore
@@ -27,8 +30,6 @@ object ApiSettings {
 
     fun getManualProvider(): String {
         ensureInitialized()
-        // DeepL is an API-only connection now. If an older install stored it as
-        // the manual provider, transparently migrate that selection to ML Kit.
         val stored = preferences.getString(KEY_MANUAL_PROVIDER, PROVIDER_ML_KIT) ?: PROVIDER_ML_KIT
         return if (stored == PROVIDER_ML_KIT) stored else PROVIDER_ML_KIT
     }
@@ -38,10 +39,22 @@ object ApiSettings {
         preferences.edit().putString(KEY_MANUAL_PROVIDER, PROVIDER_ML_KIT).apply()
     }
 
-    fun getGeminiKey(): String? {
-        ensureInitialized()
-        return keyStore.get("gemini_api_key")
+    fun getLocalEngine(): String = initialized().let {
+        preferences.getString(KEY_LOCAL_ENGINE, PROVIDER_ML_KIT) ?: PROVIDER_ML_KIT
     }
+
+    fun setLocalEngine(provider: String) {
+        ensureInitialized()
+        val value = when (provider) {
+            PROVIDER_QWEN, PROVIDER_FIREFOX -> provider
+            else -> PROVIDER_ML_KIT
+        }
+        preferences.edit().putString(KEY_LOCAL_ENGINE, value).apply()
+    }
+
+    fun isLocalModelActive(): Boolean = getLocalEngine() != PROVIDER_ML_KIT
+
+    fun getGeminiKey(): String? { ensureInitialized(); return keyStore.get("gemini_api_key") }
 
     fun setGeminiKey(key: String) {
         ensureInitialized()
@@ -56,24 +69,15 @@ object ApiSettings {
     }
 
     fun isGeminiVerified(): Boolean = initialized().let { preferences.getBoolean(KEY_GEMINI_VERIFIED, false) }
-
-    fun setGeminiVerified(value: Boolean) {
-        ensureInitialized()
-        preferences.edit().putBoolean(KEY_GEMINI_VERIFIED, value).apply()
-    }
-
+    fun setGeminiVerified(value: Boolean) { ensureInitialized(); preferences.edit().putBoolean(KEY_GEMINI_VERIFIED, value).apply() }
     fun isGeminiEnabled(): Boolean = initialized().let { preferences.getBoolean(KEY_GEMINI_ENABLED, false) }
-
     fun setGeminiEnabled(value: Boolean) {
         ensureInitialized()
         preferences.edit().putBoolean(KEY_GEMINI_ENABLED, value).apply()
         if (value) preferences.edit().putBoolean(KEY_DEEPL_ENABLED, false).apply()
     }
 
-    fun getDeepLKey(): String? {
-        ensureInitialized()
-        return keyStore.get("deepl_api_key")
-    }
+    fun getDeepLKey(): String? { ensureInitialized(); return keyStore.get("deepl_api_key") }
 
     fun setDeepLKey(key: String) {
         ensureInitialized()
@@ -88,14 +92,8 @@ object ApiSettings {
     }
 
     fun isDeepLVerified(): Boolean = initialized().let { preferences.getBoolean(KEY_DEEPL_VERIFIED, false) }
-
-    fun setDeepLVerified(value: Boolean) {
-        ensureInitialized()
-        preferences.edit().putBoolean(KEY_DEEPL_VERIFIED, value).apply()
-    }
-
+    fun setDeepLVerified(value: Boolean) { ensureInitialized(); preferences.edit().putBoolean(KEY_DEEPL_VERIFIED, value).apply() }
     fun isDeepLEnabled(): Boolean = initialized().let { preferences.getBoolean(KEY_DEEPL_ENABLED, false) }
-
     fun setDeepLEnabled(value: Boolean) {
         ensureInitialized()
         preferences.edit().putBoolean(KEY_DEEPL_ENABLED, value).apply()
