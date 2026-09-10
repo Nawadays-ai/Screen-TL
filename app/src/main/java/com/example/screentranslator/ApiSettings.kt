@@ -22,13 +22,12 @@ object ApiSettings {
             val appContext = context.applicationContext
             preferences = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             keyStore = SecureApiKeyStore(appContext)
+            TranslationModeSettings.initialize(appContext)
         }
     }
 
     fun getManualProvider(): String {
         ensureInitialized()
-        // DeepL is an API-only connection now. If an older install stored it as
-        // the manual provider, transparently migrate that selection to ML Kit.
         val stored = preferences.getString(KEY_MANUAL_PROVIDER, PROVIDER_ML_KIT) ?: PROVIDER_ML_KIT
         return if (stored == PROVIDER_ML_KIT) stored else PROVIDER_ML_KIT
     }
