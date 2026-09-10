@@ -16,20 +16,30 @@ class TranslationManager(
 
     fun prepare(onReady: () -> Unit, onFailure: (Exception) -> Unit) {
         val perfTrace = ScreenTLPerformanceTrace.current()
-        perfTrace?.mark("translation_prepare_start provider=${getProviderName()}")
+        val providerName = getProviderName()
+        perfTrace?.mark("translation_prepare_start provider=$providerName")
         provider.prepare(
-            onReady = { perfTrace?.mark("translation_prepare_ready"); mainHandler.post(onReady) },
-            onFailure = { exception -> perfTrace?.mark("translation_prepare_failed"); mainHandler.post { onFailure(exception) } }
+            onReady = { perfTrace?.mark("translation_prepare_ready provider=$providerName"); mainHandler.post(onReady) },
+            onFailure = { exception ->
+                perfTrace?.mark("translation_prepare_failed provider=$providerName")
+                perfTrace?.diagnostic("provider=$providerName; phase=prepare; error=${exception.message ?: exception::class.java.name}")
+                mainHandler.post { onFailure(exception) }
+            }
         )
     }
 
     fun translate(text: String, onSuccess: (String) -> Unit, onFailure: (Exception) -> Unit) {
         val perfTrace = ScreenTLPerformanceTrace.current()
-        perfTrace?.mark("translation_request provider=${getProviderName()} chars=${text.length}")
+        val providerName = getProviderName()
+        perfTrace?.mark("translation_request provider=$providerName chars=${text.length}")
         provider.translate(
             text = text,
-            onSuccess = { translated -> perfTrace?.mark("translation_response chars=${translated.length}"); mainHandler.post { onSuccess(translated) } },
-            onFailure = { exception -> perfTrace?.mark("translation_failed"); mainHandler.post { onFailure(exception) } }
+            onSuccess = { translated -> perfTrace?.mark("translation_response provider=$providerName chars=${translated.length}"); mainHandler.post { onSuccess(translated) } },
+            onFailure = { exception ->
+                perfTrace?.mark("translation_failed provider=$providerName")
+                perfTrace?.diagnostic("provider=$providerName; phase=translate; error=${exception.message ?: exception::class.java.name}")
+                mainHandler.post { onFailure(exception) }
+            }
         )
     }
 
