@@ -43,13 +43,13 @@ class PerformanceActivity : AppCompatActivity() {
                 append(entry.operation).append(" — ").append(entry.result).append("\n")
                 append("SS: ").append(formatMs(entry.captureMs)).append("\n")
                 append("OCR: ").append(formatMs(entry.ocrMs)).append("\n")
+                append("Prepare: ").append(formatMs(entry.translationPrepareMs)).append("\n")
+                append("Inference: ").append(formatMs(entry.translationInferenceMs)).append("\n")
                 append("Terjemahan: ").append(formatMs(entry.translationMs)).append("\n")
                 append("Tampilkan: ").append(formatMs(entry.displayMs)).append("\n")
                 append("Lainnya: ").append(entry.unaccountedMs).append(" ms\n")
+                if (!entry.diagnostic.isNullOrBlank()) append("Diagnostik: ").append(entry.diagnostic).append("\n")
                 append("TOTAL: ").append(entry.totalMs).append(" ms")
-                entry.diagnostic?.let {
-                    append("\nDiagnostik: ").append(it)
-                }
             }
         }
     }
