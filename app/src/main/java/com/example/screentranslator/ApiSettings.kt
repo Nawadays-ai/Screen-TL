@@ -39,9 +39,7 @@ object ApiSettings {
         preferences.edit().putString(KEY_MANUAL_PROVIDER, PROVIDER_ML_KIT).apply()
     }
 
-    fun getLocalEngine(): String = initialized().let {
-        preferences.getString(KEY_LOCAL_ENGINE, PROVIDER_ML_KIT) ?: PROVIDER_ML_KIT
-    }
+    fun getLocalEngine(): String = initialized().let { preferences.getString(KEY_LOCAL_ENGINE, PROVIDER_ML_KIT) ?: PROVIDER_ML_KIT }
 
     fun setLocalEngine(provider: String) {
         ensureInitialized()
@@ -50,55 +48,25 @@ object ApiSettings {
             else -> PROVIDER_ML_KIT
         }
         preferences.edit().putString(KEY_LOCAL_ENGINE, value).apply()
+        TranslationEngineRuntime.releaseActiveLocalEngines()
     }
 
     fun isLocalModelActive(): Boolean = getLocalEngine() != PROVIDER_ML_KIT
 
     fun getGeminiKey(): String? { ensureInitialized(); return keyStore.get("gemini_api_key") }
-
-    fun setGeminiKey(key: String) {
-        ensureInitialized()
-        keyStore.put("gemini_api_key", key.trim())
-        preferences.edit().putBoolean(KEY_GEMINI_VERIFIED, false).apply()
-    }
-
-    fun clearGeminiKey() {
-        ensureInitialized()
-        keyStore.clear("gemini_api_key")
-        preferences.edit().putBoolean(KEY_GEMINI_VERIFIED, false).putBoolean(KEY_GEMINI_ENABLED, false).apply()
-    }
-
+    fun setGeminiKey(key: String) { ensureInitialized(); keyStore.put("gemini_api_key", key.trim()); preferences.edit().putBoolean(KEY_GEMINI_VERIFIED, false).apply() }
+    fun clearGeminiKey() { ensureInitialized(); keyStore.clear("gemini_api_key"); preferences.edit().putBoolean(KEY_GEMINI_VERIFIED, false).putBoolean(KEY_GEMINI_ENABLED, false).apply() }
     fun isGeminiVerified(): Boolean = initialized().let { preferences.getBoolean(KEY_GEMINI_VERIFIED, false) }
     fun setGeminiVerified(value: Boolean) { ensureInitialized(); preferences.edit().putBoolean(KEY_GEMINI_VERIFIED, value).apply() }
     fun isGeminiEnabled(): Boolean = initialized().let { preferences.getBoolean(KEY_GEMINI_ENABLED, false) }
-    fun setGeminiEnabled(value: Boolean) {
-        ensureInitialized()
-        preferences.edit().putBoolean(KEY_GEMINI_ENABLED, value).apply()
-        if (value) preferences.edit().putBoolean(KEY_DEEPL_ENABLED, false).apply()
-    }
-
+    fun setGeminiEnabled(value: Boolean) { ensureInitialized(); preferences.edit().putBoolean(KEY_GEMINI_ENABLED, value).apply(); if (value) preferences.edit().putBoolean(KEY_DEEPL_ENABLED, false).apply() }
     fun getDeepLKey(): String? { ensureInitialized(); return keyStore.get("deepl_api_key") }
-
-    fun setDeepLKey(key: String) {
-        ensureInitialized()
-        keyStore.put("deepl_api_key", key.trim())
-        preferences.edit().putBoolean(KEY_DEEPL_VERIFIED, false).apply()
-    }
-
-    fun clearDeepLKey() {
-        ensureInitialized()
-        keyStore.clear("deepl_api_key")
-        preferences.edit().putBoolean(KEY_DEEPL_VERIFIED, false).putBoolean(KEY_DEEPL_ENABLED, false).apply()
-    }
-
+    fun setDeepLKey(key: String) { ensureInitialized(); keyStore.put("deepl_api_key", key.trim()); preferences.edit().putBoolean(KEY_DEEPL_VERIFIED, false).apply() }
+    fun clearDeepLKey() { ensureInitialized(); keyStore.clear("deepl_api_key"); preferences.edit().putBoolean(KEY_DEEPL_VERIFIED, false).putBoolean(KEY_DEEPL_ENABLED, false).apply() }
     fun isDeepLVerified(): Boolean = initialized().let { preferences.getBoolean(KEY_DEEPL_VERIFIED, false) }
     fun setDeepLVerified(value: Boolean) { ensureInitialized(); preferences.edit().putBoolean(KEY_DEEPL_VERIFIED, value).apply() }
     fun isDeepLEnabled(): Boolean = initialized().let { preferences.getBoolean(KEY_DEEPL_ENABLED, false) }
-    fun setDeepLEnabled(value: Boolean) {
-        ensureInitialized()
-        preferences.edit().putBoolean(KEY_DEEPL_ENABLED, value).apply()
-        if (value) preferences.edit().putBoolean(KEY_GEMINI_ENABLED, false).apply()
-    }
+    fun setDeepLEnabled(value: Boolean) { ensureInitialized(); preferences.edit().putBoolean(KEY_DEEPL_ENABLED, value).apply(); if (value) preferences.edit().putBoolean(KEY_GEMINI_ENABLED, false).apply() }
 
     private fun initialized(): Boolean { ensureInitialized(); return true }
     private fun ensureInitialized() { check(::preferences.isInitialized) { "ApiSettings.initialize(context) must be called first" } }
