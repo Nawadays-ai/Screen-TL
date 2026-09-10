@@ -1,4 +1,4 @@
-package com.example.screentl
+package com.example.screentranslator
 
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -9,177 +9,14 @@ import kotlin.math.roundToInt
 
 /** Converts ML Kit paragraph/line geometry into rendering geometry for the Manual overlay. */
 object TextLayoutAnalyzer {
-    enum class WritingOrientation {
-        HORIZONTAL,
-        VERTICAL
-    }
-
-    data class Result(
-        val left: Int,
-        val top: Int,
-        val right: Int,
-        val bottom: Int,
-        val sourceTextSizePx: Float,
-        val backgroundColor: Int,
-        val orientation: WritingOrientation = WritingOrientation.HORIZONTAL,
-        // Kept for source compatibility. Manual TL no longer copies screenshot pixels.
-        val blurredPatch: Bitmap? = null
-    )
-
-    /** Detects a single OCR line whose writing direction is predominantly vertical. */
-    fun isVerticalLine(line: Line): Boolean {
-        val box = line.boundingBox ?: return false
-        if (box.width() <= 0 || box.height() <= 0) return false
-        val aspectRatio = box.height().toFloat() / box.width().toFloat()
-        if (aspectRatio < 1.30f) return false
-
-        val elementBoxes = line.elements.mapNotNull { it.boundingBox }
-            .filter { it.width() > 0 && it.height() > 0 }
-        if (elementBoxes.size < 2) return aspectRatio >= 1.55f
-
-        val verticalSteps = elementBoxes.zipWithNext().count { (a, b) ->
-            kotlin.math.abs((b.centerX()) - a.centerX()) <= box.width() * 0.75f &&
-                b.centerY() >= a.centerY() - box.height() * 0.08f
-        }
-        val horizontalSteps = elementBoxes.zipWithNext().count { (a, b) ->
-            kotlin.math.abs(b.centerY() - a.centerY()) <= box.height() * 0.12f &&
-                b.centerX() >= a.centerX() - box.width() * 0.08f
-        }
-        return aspectRatio >= 1.30f && verticalSteps >= horizontalSteps
-    }
-
-    /** Detects a TextBlock containing vertical Japanese writing. */
-    fun isVerticalBlock(block: TextBlock): Boolean {
-        val lines = block.lines
-        if (lines.isEmpty()) return false
-        val verticalLines = lines.count(::isVerticalLine)
-        if (verticalLines == 0) return false
-        if (lines.size == 1) return true
-        return verticalLines.toFloat() / lines.size >= 0.5f
-    }
-
-    /**
-     * Reconstructs natural Japanese reading order for a vertical OCR block.
-     * Vertical columns are read top-to-bottom and columns right-to-left.
-     */
-    fun verticalBlockText(block: TextBlock): String {
-        return block.lines
-            .filter { it.text.isNotBlank() }
-            .sortedByDescending { it.boundingBox?.centerX() ?: 0 }
-            .joinToString(separator = "") { it.text.trim() }
-            .trim()
-    }
-
-    fun shouldTreatAsParagraph(block: TextBlock): Boolean {
-        if (isVerticalBlock(block)) return false
-        val lines = block.lines
-        if (lines.size < 2) return false
-        val boxes = lines.mapNotNull { it.boundingBox }.filter { it.width() > 0 && it.height() > 0 }
-        if (boxes.size < 2) return false
-        val medianHeight = boxes.map { it.height() }.sorted()[boxes.size / 2].toFloat().coerceAtLeast(1f)
-        val sortedByTop = boxes.sortedBy { it.top }
-        val gaps = sortedByTop.zipWithNext().map { (a, b) -> (b.top - a.bottom).coerceAtLeast(0) }
-        val medianGap = gaps.takeIf { it.isNotEmpty() }?.sorted()?.get(gaps.size / 2)?.toFloat() ?: 0f
-        val compactSpacing = medianGap <= medianHeight * 0.65f
-        val lefts = boxes.map { it.left.toFloat() }
-        val leftMean = lefts.average().toFloat()
-        val leftDeviation = lefts.map { abs(it - leftMean) }.average().toFloat()
-        val aligned = leftDeviation <= medianHeight * 0.85f
-        val text = block.text.trim()
-        val charCount = text.count { !it.isWhitespace() }
-        if (charCount < 30) return false
-        val digitCount = text.count { it.isDigit() }
-        val digitRatio = digitCount.toFloat() / charCount.coerceAtLeast(1)
-        val terminalCount = lines.count { line ->
-            val value = line.text.trimEnd()
-            value.endsWith("。") || value.endsWith("！") || value.endsWith("？") || value.endsWith(".") || value.endsWith("!") || value.endsWith("?")
-        }
-        val prefixes = lines.mapNotNull { line -> line.text.trim().takeIf { it.length >= 4 }?.take(6) }
-        val repeatedPrefix = prefixes.groupingBy { it }.eachCount().values.any { it >= 2 }
-        val widths = boxes.map { it.width().toFloat() }
-        val widthMean = widths.average().toFloat().coerceAtLeast(1f)
-        val widthDeviation = widths.map { abs(it - widthMean) }.average().toFloat()
-        val veryUniformWidths = widthDeviation / widthMean < 0.10f
-        var score = 0
-        if (compactSpacing) score++
-        if (aligned) score++
-        if (charCount >= 45) score++
-        if (terminalCount <= lines.size / 2) score++
-        if (digitRatio < 0.18f) score++
-        if (veryUniformWidths) score--
-        if (repeatedPrefix) score -= 2
-        if (digitRatio >= 0.28f) score -= 2
-        return score >= 3
-    }
-
-    fun analyze(bitmap: Bitmap, block: TextBlock): Result? {
-        val box = block.boundingBox ?: return null
-        if (box.width() <= 0 || box.height() <= 0) return null
-        val elementHeights = block.lines.flatMap { line -> line.elements.mapNotNull { it.boundingBox?.height()?.takeIf { height -> height > 0 } } }
-        val glyphHeight = if (elementHeights.isNotEmpty()) elementHeights.sorted()[elementHeights.size / 2].toFloat() else box.height().toFloat() / block.lines.size.coerceAtLeast(1)
-        val orientation = if (isVerticalBlock(block)) WritingOrientation.VERTICAL else WritingOrientation.HORIZONTAL
-        return buildResult(bitmap, box.left, box.top, box.right, box.bottom, glyphHeight, orientation)
-    }
-
-    fun analyze(bitmap: Bitmap, line: Line): Result? {
-        val box = line.boundingBox ?: return null
-        if (box.width() <= 0 || box.height() <= 0) return null
-        val elementHeights = line.elements.mapNotNull { it.boundingBox?.height()?.takeIf { height -> height > 0 } }
-        val glyphHeight = if (elementHeights.isNotEmpty()) elementHeights.sorted()[elementHeights.size / 2].toFloat() else box.height().toFloat()
-        val orientation = if (isVerticalLine(line)) WritingOrientation.VERTICAL else WritingOrientation.HORIZONTAL
-        return buildResult(bitmap, box.left, box.top, box.right, box.bottom, glyphHeight, orientation)
-    }
-
-    private fun buildResult(
-        bitmap: Bitmap,
-        rawLeft: Int,
-        rawTop: Int,
-        rawRight: Int,
-        rawBottom: Int,
-        glyphHeight: Float,
-        orientation: WritingOrientation
-    ): Result? {
-        val sourceTextSizePx = (glyphHeight * 1.15f).coerceIn(8f, 96f)
-        val horizontalPad = (glyphHeight * 0.20f).roundToInt().coerceIn(3, 18)
-        val verticalPad = (glyphHeight * 0.18f).roundToInt().coerceIn(2, 12)
-        val left = (rawLeft - horizontalPad).coerceIn(0, bitmap.width - 1)
-        val top = (rawTop - verticalPad).coerceIn(0, bitmap.height - 1)
-        val right = (rawRight + horizontalPad).coerceIn(left + 1, bitmap.width)
-        val bottom = (rawBottom + verticalPad).coerceIn(top + 1, bitmap.height)
-        return Result(
-            left,
-            top,
-            right,
-            bottom,
-            sourceTextSizePx,
-            estimateBackgroundColor(bitmap, left, top, right, bottom),
-            orientation
-        )
-    }
-
-    /**
-     * Samples only the pixels immediately outside the OCR box. No screenshot patch
-     * is retained or drawn, so the original text cannot bleed through the overlay.
-     */
-    private fun estimateBackgroundColor(bitmap: Bitmap, left: Int, top: Int, right: Int, bottom: Int): Int {
-        val samples = ArrayList<Int>(64)
-        val width = right - left
-        val height = bottom - top
-        val stepX = (width / 12).coerceAtLeast(1)
-        val stepY = (height / 6).coerceAtLeast(1)
-        for (x in left until right step stepX) {
-            if (top > 0) samples.add(bitmap.getPixel(x.coerceIn(0, bitmap.width - 1), (top - 1).coerceIn(0, bitmap.height - 1)))
-            if (bottom < bitmap.height) samples.add(bitmap.getPixel(x.coerceIn(0, bitmap.width - 1), bottom.coerceIn(0, bitmap.height - 1)))
-        }
-        for (y in top until bottom step stepY) {
-            if (left > 0) samples.add(bitmap.getPixel((left - 1).coerceIn(0, bitmap.width - 1), y.coerceIn(0, bitmap.height - 1)))
-            if (right < bitmap.width) samples.add(bitmap.getPixel(right.coerceIn(0, bitmap.width - 1), y.coerceIn(0, bitmap.height - 1)))
-        }
-        if (samples.isEmpty()) return Color.BLACK
-        val sortedR = samples.map { Color.red(it) }.sorted()
-        val sortedG = samples.map { Color.green(it) }.sorted()
-        val sortedB = samples.map { Color.blue(it) }.sorted()
-        val middle = samples.size / 2
-        return Color.rgb(sortedR[middle], sortedG[middle], sortedB[middle])
-    }
+    enum class WritingOrientation { HORIZONTAL, VERTICAL }
+    data class Result(val left:Int,val top:Int,val right:Int,val bottom:Int,val sourceTextSizePx:Float,val backgroundColor:Int,val orientation:WritingOrientation=WritingOrientation.HORIZONTAL,val blurredPatch:Bitmap?=null)
+    fun isVerticalLine(line:Line):Boolean{val box=line.boundingBox?:return false;if(box.width()<=0||box.height()<=0)return false;val ratio=box.height().toFloat()/box.width().toFloat();if(ratio<1.30f)return false;val e=line.elements.mapNotNull{it.boundingBox}.filter{it.width()>0&&it.height()>0};if(e.size<2)return ratio>=1.55f;val v=e.zipWithNext().count{(a,b)->abs(b.centerX()-a.centerX())<=box.width()*0.75f&&b.centerY()>=a.centerY()-box.height()*0.08f};val h=e.zipWithNext().count{(a,b)->abs(b.centerY()-a.centerY())<=box.height()*0.12f&&b.centerX()>=a.centerX()-box.width()*0.08f};return v>=h}
+    fun isVerticalBlock(block:TextBlock):Boolean{val l=block.lines;if(l.isEmpty())return false;val v=l.count(::isVerticalLine);return v>0&&(l.size==1||v.toFloat()/l.size>=0.5f)}
+    fun verticalBlockText(block:TextBlock):String=block.lines.filter{it.text.isNotBlank()}.sortedByDescending{it.boundingBox?.centerX()?:0}.joinToString(""){it.text.trim()}.trim()
+    fun shouldTreatAsParagraph(block:TextBlock):Boolean{if(isVerticalBlock(block))return false;val l=block.lines;if(l.size<2)return false;val b=l.mapNotNull{it.boundingBox}.filter{it.width()>0&&it.height()>0};if(b.size<2)return false;val mh=b.map{it.height()}.sorted()[b.size/2].toFloat().coerceAtLeast(1f);val g=b.sortedBy{it.top}.zipWithNext().map{(a,c)->(c.top-a.bottom).coerceAtLeast(0)};val compact=(g.takeIf{it.isNotEmpty()}?.sorted()?.let{it[it.size/2]}?.toFloat()?:0f)<=mh*0.65f;val lm=b.map{it.left.toFloat()}.average().toFloat();val aligned=b.map{abs(it.left-lm)}.average().toFloat()<=mh*0.85f;val text=block.text.trim();val chars=text.count{!it.isWhitespace()};if(chars<30)return false;val dr=text.count{it.isDigit()}.toFloat()/chars.coerceAtLeast(1);val terminal=l.count{val s=it.text.trimEnd();s.endsWith("。")||s.endsWith("！")||s.endsWith("？")||s.endsWith(".")||s.endsWith("!")||s.endsWith("?")};val p=l.mapNotNull{it.text.trim().takeIf{s->s.length>=4}?.take(6)};val repeated=p.groupingBy{it}.eachCount().values.any{it>=2};val w=b.map{it.width().toFloat()};val wm=w.average().toFloat().coerceAtLeast(1f);var score=0;if(compact)score++;if(aligned)score++;if(chars>=45)score++;if(terminal<=l.size/2)score++;if(dr<0.18f)score++;if(w.map{abs(it-wm)}.average()/wm<0.10f)score--;if(repeated)score-=2;if(dr>=0.28f)score-=2;return score>=3}
+    fun analyze(bitmap:Bitmap,block:TextBlock):Result?{val box=block.boundingBox?:return null;if(box.width()<=0||box.height()<=0)return null;val hs=block.lines.flatMap{it.elements.mapNotNull{e->e.boundingBox?.height()?.takeIf{h->h>0}}};val glyph=if(hs.isNotEmpty())hs.sorted()[hs.size/2].toFloat()else box.height().toFloat()/block.lines.size.coerceAtLeast(1);return build(bitmap,box.left,box.top,box.right,box.bottom,glyph,if(isVerticalBlock(block))WritingOrientation.VERTICAL else WritingOrientation.HORIZONTAL)}
+    fun analyze(bitmap:Bitmap,line:Line):Result?{val box=line.boundingBox?:return null;if(box.width()<=0||box.height()<=0)return null;val hs=line.elements.mapNotNull{it.boundingBox?.height()?.takeIf{h->h>0}};val glyph=if(hs.isNotEmpty())hs.sorted()[hs.size/2].toFloat()else box.height().toFloat();return build(bitmap,box.left,box.top,box.right,box.bottom,glyph,if(isVerticalLine(line))WritingOrientation.VERTICAL else WritingOrientation.HORIZONTAL)}
+    private fun build(bitmap:Bitmap,l:Int,t:Int,r:Int,b:Int,glyph:Float,o:WritingOrientation):Result{val hp=(glyph*.20f).roundToInt().coerceIn(3,18);val vp=(glyph*.18f).roundToInt().coerceIn(2,12);val left=(l-hp).coerceIn(0,bitmap.width-1);val top=(t-vp).coerceIn(0,bitmap.height-1);val right=(r+hp).coerceIn(left+1,bitmap.width);val bottom=(b+vp).coerceIn(top+1,bitmap.height);return Result(left,top,right,bottom,(glyph*1.15f).coerceIn(8f,96f),estimate(bitmap,left,top,right,bottom),o)}
+    private fun estimate(bitmap:Bitmap,left:Int,top:Int,right:Int,bottom:Int):Int{val s=ArrayList<Int>(64);val sx=((right-left)/12).coerceAtLeast(1);val sy=((bottom-top)/6).coerceAtLeast(1);for(x in left until right step sx){if(top>0)s.add(bitmap.getPixel(x.coerceIn(0,bitmap.width-1),(top-1).coerceIn(0,bitmap.height-1)));if(bottom<bitmap.height)s.add(bitmap.getPixel(x.coerceIn(0,bitmap.width-1),bottom.coerceIn(0,bitmap.height-1)))};for(y in top until bottom step sy){if(left>0)s.add(bitmap.getPixel((left-1).coerceIn(0,bitmap.width-1),y.coerceIn(0,bitmap.height-1)));if(right<bitmap.width)s.add(bitmap.getPixel(right.coerceIn(0,bitmap.width-1),y.coerceIn(0,bitmap.height-1)))};if(s.isEmpty())return Color.BLACK;val rs=s.map(Color::red).sorted();val gs=s.map(Color::green).sorted();val bs=s.map(Color::blue).sorted();val m=s.size/2;return Color.rgb(rs[m],gs[m],bs[m])}
 }
