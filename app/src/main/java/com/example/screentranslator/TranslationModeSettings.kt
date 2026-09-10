@@ -10,11 +10,18 @@ object TranslationModeSettings {
     private const val KEY_MODE = "translation_mode"
 
     private lateinit var preferences: android.content.SharedPreferences
+    private lateinit var applicationContext: Context
 
     fun initialize(context: Context) {
         if (!::preferences.isInitialized) {
-            preferences = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            applicationContext = context.applicationContext
+            preferences = applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         }
+    }
+
+    fun context(): Context {
+        ensureInitialized()
+        return applicationContext
     }
 
     fun getMode(): String {
