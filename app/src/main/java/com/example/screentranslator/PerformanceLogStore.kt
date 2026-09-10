@@ -4,7 +4,7 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Stores timing metadata only; never stores OCR or translation text. */
+/** Stores timing metadata and sanitized diagnostics; never stores OCR or translation text. */
 data class PerformanceLogEntry(
     val timestamp: Long,
     val operation: String,
@@ -13,14 +13,12 @@ data class PerformanceLogEntry(
     val translationMs: Long?,
     val displayMs: Long?,
     val totalMs: Long,
-    val result: String
+    val result: String,
+    val diagnostic: String? = null
 ) {
-    /** Time not covered by the named stages; useful for finding hidden waits/overhead. */
     val unaccountedMs: Long
         get() {
-            val measured = listOf(captureMs, ocrMs, translationMs, displayMs)
-                .filterNotNull()
-                .sum()
+            val measured = listOf(captureMs, ocrMs, translationMs, displayMs).filterNotNull().sum()
             return (totalMs - measured).coerceAtLeast(0L)
         }
 }
@@ -41,9 +39,7 @@ object PerformanceLogStore {
         val current = JSONArray(target.getString(KEY_ENTRIES, "[]"))
         val next = JSONArray()
         next.put(toJson(entry))
-        for (i in 0 until minOf(current.length(), MAX_ENTRIES - 1)) {
-            next.put(current.getJSONObject(i))
-        }
+        for (i in 0 until minOf(current.length(), MAX_ENTRIES - 1)) next.put(current.getJSONObject(i))
         target.edit().putString(KEY_ENTRIES, next.toString()).apply()
     }
 
@@ -52,16 +48,12 @@ object PerformanceLogStore {
         val target = prefs ?: return emptyList()
         val array = JSONArray(target.getString(KEY_ENTRIES, "[]"))
         return buildList(array.length()) {
-            for (i in 0 until array.length()) {
-                add(fromJson(array.getJSONObject(i)))
-            }
+            for (i in 0 until array.length()) add(fromJson(array.getJSONObject(i)))
         }
     }
 
     @Synchronized
-    fun clear() {
-        prefs?.edit()?.remove(KEY_ENTRIES)?.apply()
-    }
+    fun clear() { prefs?.edit()?.remove(KEY_ENTRIES)?.apply() }
 
     private fun toJson(entry: PerformanceLogEntry): JSONObject = JSONObject().apply {
         put("timestamp", entry.timestamp)
@@ -72,6 +64,7 @@ object PerformanceLogStore {
         put("displayMs", entry.displayMs ?: JSONObject.NULL)
         put("totalMs", entry.totalMs)
         put("result", entry.result)
+        put("diagnostic", entry.diagnostic ?: JSONObject.NULL)
     }
 
     private fun fromJson(json: JSONObject): PerformanceLogEntry = PerformanceLogEntry(
@@ -82,9 +75,10 @@ object PerformanceLogStore {
         translationMs = json.optLongOrNull("translationMs"),
         displayMs = json.optLongOrNull("displayMs"),
         totalMs = json.optLong("totalMs"),
-        result = json.optString("result", "completed")
+        result = json.optString("result", "completed"),
+        diagnostic = json.optStringOrNull("diagnostic")
     )
 
-    private fun JSONObject.optLongOrNull(name: String): Long? =
-        if (isNull(name) || !has(name)) null else optLong(name)
+    private fun JSONObject.optLongOrNull(name: String): Long? = if (isNull(name) || !has(name)) null else optLong(name)
+    private fun JSONObject.optStringOrNull(name: String): String? = if (isNull(name) || !has(name)) null else optString(name).takeIf { it.isNotBlank() }
 }
