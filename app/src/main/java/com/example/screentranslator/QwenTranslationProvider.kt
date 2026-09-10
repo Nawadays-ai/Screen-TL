@@ -9,11 +9,19 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 class QwenTranslationProvider(
     private val sourceLanguage: String,
     private val targetLanguage: String
 ) : TranslationProvider {
+    companion object {
+        private const val CONTEXT_SIZE = 1024
+        private const val THREADS = 4
+        private const val MAX_TOKENS = 96
+        private const val INFERENCE_TIMEOUT_MS = 8_000L
+    }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     @Volatile private var model: LlamaModel? = null
     @Volatile private var loading = false
@@ -37,13 +45,13 @@ class QwenTranslationProvider(
             try {
                 val loaded = Llama.loadModel(
                     modelPath = LocalModelStore.qwenFile().absolutePath,
-                    config = LlamaConfig(contextSize = 1024, threads = 4)
+                    config = LlamaConfig(contextSize = CONTEXT_SIZE, threads = THREADS)
                 )
                 model = loaded
                 withContext(Dispatchers.Main) { onReady() }
             } catch (error: Exception) {
                 val systemInfo = runCatching { Llama.getSystemInfo() }.getOrDefault("system-info unavailable")
-                val diagnostic = "model=${LocalModelStore.qwenFile().name}; file=$fileDiagnostic; context=1024; threads=4; maxTokens=96; error=${error.message ?: error::class.java.name}; llama=$systemInfo"
+                val diagnostic = "model=${LocalModelStore.qwenFile().name}; file=$fileDiagnostic; context=$CONTEXT_SIZE; threads=$THREADS; maxTokens=$MAX_TOKENS; inferenceTimeoutMs=$INFERENCE_TIMEOUT_MS; error=${error.message ?: error::class.java.name}; llama=$systemInfo"
                 withContext(Dispatchers.Main) {
                     onFailure(IllegalStateException("Qwen gagal memuat model: ${error.message ?: error::class.java.simpleName}", error).also {
                         it.addSuppressed(IllegalStateException(diagnostic))
@@ -62,17 +70,26 @@ class QwenTranslationProvider(
         }
         scope.launch {
             try {
-                val result = Llama.complete(
-                    loaded,
-                    prompt = buildPrompt(text),
-                    systemPrompt = "Translate only. Preserve meaning, names, numbers, punctuation and line breaks. No explanation.",
-                    maxTokens = 96
-                )
+                val result = withTimeout(INFERENCE_TIMEOUT_MS) {
+                    Llama.complete(
+                        loaded,
+                        prompt = buildPrompt(text),
+                        systemPrompt = "Translate only. Preserve meaning, names, numbers, punctuation and line breaks. No explanation.",
+                        maxTokens = MAX_TOKENS
+                    )
+                }
                 val translated = result.text.trim()
                 if (translated.isBlank()) throw IllegalStateException("Qwen menghasilkan terjemahan kosong")
                 withContext(Dispatchers.Main) { onSuccess(translated) }
             } catch (error: Exception) {
-                withContext(Dispatchers.Main) { onFailure(error) }
+                val detail = if (error is kotlinx.coroutines.TimeoutCancellationException) {
+                    "Qwen inference timeout setelah ${INFERENCE_TIMEOUT_MS} ms; context=$CONTEXT_SIZE; threads=$THREADS; maxTokens=$MAX_TOKENS; model=${LocalModelStore.qwenFile().name}"
+                } else {
+                    "Qwen inference error=${error.message ?: error::class.java.name}; context=$CONTEXT_SIZE; threads=$THREADS; maxTokens=$MAX_TOKENS; model=${LocalModelStore.qwenFile().name}"
+                }
+                withContext(Dispatchers.Main) {
+                    onFailure(IllegalStateException(detail, error))
+                }
             }
         }
     }
