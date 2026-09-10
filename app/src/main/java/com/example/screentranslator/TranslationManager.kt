@@ -6,10 +6,13 @@ import android.os.Looper
 class TranslationManager(
     private val sourceLanguage: String,
     private val targetLanguage: String,
-    manualProvider: String = ApiSettings.PROVIDER_ML_KIT
+    private val manualProvider: String = ApiSettings.PROVIDER_ML_KIT
 ) {
-    private val provider: TranslationProvider = createProvider(manualProvider)
+    @Volatile private var provider: TranslationProvider = createProvider()
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val releaseCloser: () -> Unit = { switchProvider() }
+
+    init { TranslationEngineRuntime.registerCloser(releaseCloser) }
 
     fun prepare(onReady: () -> Unit, onFailure: (Exception) -> Unit) {
         val perfTrace = ScreenTLPerformanceTrace.current()
@@ -25,14 +28,8 @@ class TranslationManager(
         perfTrace?.mark("translation_request provider=${getProviderName()} chars=${text.length}")
         provider.translate(
             text = text,
-            onSuccess = { translated ->
-                perfTrace?.mark("translation_response chars=${translated.length}")
-                mainHandler.post { onSuccess(translated) }
-            },
-            onFailure = { exception ->
-                perfTrace?.mark("translation_failed")
-                mainHandler.post { onFailure(exception) }
-            }
+            onSuccess = { translated -> perfTrace?.mark("translation_response chars=${translated.length}"); mainHandler.post { onSuccess(translated) } },
+            onFailure = { exception -> perfTrace?.mark("translation_failed"); mainHandler.post { onFailure(exception) } }
         )
     }
 
@@ -44,11 +41,18 @@ class TranslationManager(
         else -> provider::class.java.simpleName
     }
 
-    fun close() { provider.close() }
+    fun close() {
+        TranslationEngineRuntime.unregisterCloser(releaseCloser)
+        provider.close()
+    }
 
-    private fun createProvider(manualProvider: String): TranslationProvider {
-        // A selected local model is the manual engine. API settings retain their
-        // existing priority only when no local model is selected.
+    @Synchronized
+    private fun switchProvider() {
+        provider.close()
+        provider = createProvider()
+    }
+
+    private fun createProvider(): TranslationProvider {
         if (ApiSettings.isLocalModelActive()) {
             return when (ApiSettings.getLocalEngine()) {
                 ApiSettings.PROVIDER_QWEN -> QwenTranslationProvider(sourceLanguage, targetLanguage)
