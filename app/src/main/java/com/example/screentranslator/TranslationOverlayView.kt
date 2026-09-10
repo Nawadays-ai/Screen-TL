@@ -60,7 +60,6 @@ class TranslationOverlayView(context: Context) : View(context) {
         setTranslations(translations, sourceWidth, sourceHeight, 1f)
     }
 
-    /** toleranceRatio=1.0 is normal Manual TL; Klip starts at 1.80x. */
     fun setTranslations(translations: List<TranslationOverlayItem>, sourceWidth: Int, sourceHeight: Int, toleranceRatio: Float) {
         this.sourceWidth = sourceWidth.coerceAtLeast(1)
         this.sourceHeight = sourceHeight.coerceAtLeast(1)
@@ -82,6 +81,7 @@ class TranslationOverlayView(context: Context) : View(context) {
         val scaleX = width.toFloat() / sourceWidth.toFloat()
         val scaleY = height.toFloat() / sourceHeight.toFloat()
         val coordinateOffsetY = if (toleranceRatio > 1.5f) klipStatusBarOffsetPx() else 0f
+        val mangaMode = TranslationModeSettings.isMangaMode()
 
         renderItems.forEachIndexed { index, renderItem ->
             val left = renderItem.left * scaleX
@@ -90,14 +90,24 @@ class TranslationOverlayView(context: Context) : View(context) {
             val bottom = renderItem.bottom * scaleY + coordinateOffsetY
             if (right <= left || bottom <= top) return@forEachIndexed
             val box = RectF(left, top, right, bottom)
-            val fillBox = RectF(left, top, renderItem.fillRight * scaleX, bottom)
-            val radius = ((bottom - top) * 0.10f).coerceIn(5f, 12f)
             val groupId = itemGroups.getOrElse(index) { index }
-            val effectiveColor = groupColors.getOrElse(groupId) { frostBaseColor(renderItem.item.backgroundColor) }
+            val effectiveColor = if (mangaMode) renderItem.item.backgroundColor else groupColors.getOrElse(groupId) { frostBaseColor(renderItem.item.backgroundColor) }
 
             canvas.save()
             canvas.clipRect(box)
-            drawFrostGlass(canvas, fillBox, effectiveColor, radius)
+            if (mangaMode) {
+                // Manga mode deliberately has no visible translation boundary.
+                // This flat local fill is the first inpainting pass: it removes the
+                // source glyph area using the bubble/background color sampled by OCR.
+                backgroundPaint.shader = null
+                backgroundPaint.color = effectiveColor
+                backgroundPaint.alpha = 255
+                canvas.drawRect(box, backgroundPaint)
+            } else {
+                val fillBox = RectF(left, top, renderItem.fillRight * scaleX, bottom)
+                val radius = ((bottom - top) * 0.10f).coerceIn(5f, 12f)
+                drawFrostGlass(canvas, fillBox, effectiveColor, radius)
+            }
             canvas.restore()
         }
 
@@ -108,7 +118,7 @@ class TranslationOverlayView(context: Context) : View(context) {
             val bottom = renderItem.bottom * scaleY + coordinateOffsetY
             if (right <= left || bottom <= top) return@forEachIndexed
             val groupId = itemGroups.getOrElse(index) { index }
-            val effectiveColor = groupColors.getOrElse(groupId) { frostBaseColor(renderItem.item.backgroundColor) }
+            val effectiveColor = if (mangaMode) renderItem.item.backgroundColor else groupColors.getOrElse(groupId) { frostBaseColor(renderItem.item.backgroundColor) }
             textPaint.textScaleX = 1f
             textPaint.textSize = renderItem.textSize * scaleY
             textPaint.color = chooseTextColor(effectiveColor)
@@ -151,10 +161,10 @@ class TranslationOverlayView(context: Context) : View(context) {
         renderItems.forEachIndexed { index, item ->
             val group = itemGroups[index]
             val color = frostBaseColor(item.item.backgroundColor)
-            sums[group][0] = sums[group][0] + Color.red(color)
-            sums[group][1] = sums[group][1] + Color.green(color)
-            sums[group][2] = sums[group][2] + Color.blue(color)
-            sums[group][3] = sums[group][3] + 1f
+            sums[group][0] += Color.red(color)
+            sums[group][1] += Color.green(color)
+            sums[group][2] += Color.blue(color)
+            sums[group][3] += 1f
         }
         groupColors = sums.map { sum ->
             val count = sum[3].coerceAtLeast(1f)
@@ -198,9 +208,10 @@ class TranslationOverlayView(context: Context) : View(context) {
         val baseRight = item.right.coerceIn(baseLeft.toInt() + 1, width).toFloat(); val baseBottom = item.bottom.coerceIn(baseTop.toInt() + 1, height).toFloat()
         if (baseRight <= baseLeft || baseBottom <= baseTop) return null
         val originalWidth = baseRight - baseLeft; val originalHeight = baseBottom - baseTop
+        val mangaMode = TranslationModeSettings.isMangaMode()
         val isBubble = item.orientation == TextLayoutAnalyzer.WritingOrientation.VERTICAL
-        val boxHeight = (originalHeight * toleranceRatio).coerceAtLeast(originalHeight)
-        val toleranceTop = (baseTop - (boxHeight - originalHeight) / 2f).coerceAtLeast(0f)
+        val boxHeight = if (mangaMode) originalHeight else (originalHeight * toleranceRatio).coerceAtLeast(originalHeight)
+        val toleranceTop = if (mangaMode) baseTop else (baseTop - (boxHeight - originalHeight) / 2f).coerceAtLeast(0f)
         val toleranceBottom = (toleranceTop + boxHeight).coerceAtMost(height.toFloat())
         val horizontalPadding = (boxHeight * if (isBubble) 0.08f else horizontalPaddingRatio).coerceIn(3f, if (isBubble) 22f else 16f)
         val verticalPadding = (boxHeight * verticalPaddingRatio).coerceIn(2f, 8f)
@@ -212,7 +223,12 @@ class TranslationOverlayView(context: Context) : View(context) {
         val measuredWidth = normalized.split('\n').maxOfOrNull { textPaint.measureText(it) } ?: 0f
         val availableScreenWidth = (width - 8f).coerceAtLeast(originalWidth)
         val desiredBubbleWidth = maxOf(originalWidth * bubbleWidthRatio, measuredWidth + horizontalPadding * 2f)
-        val allowedWidth = if (isBubble) desiredBubbleWidth.coerceAtMost(availableScreenWidth) else if (toleranceRatio > 1f) (originalWidth * toleranceRatio).coerceAtMost(availableScreenWidth) else originalWidth * maxWidthRatio
+        val allowedWidth = when {
+            mangaMode -> originalWidth
+            isBubble -> desiredBubbleWidth.coerceAtMost(availableScreenWidth)
+            toleranceRatio > 1f -> (originalWidth * toleranceRatio).coerceAtMost(availableScreenWidth)
+            else -> originalWidth * maxWidthRatio
+        }
         val boxWidth = allowedWidth.coerceAtLeast(originalWidth).coerceAtMost(availableScreenWidth)
         val centerX = baseLeft + originalWidth / 2f
         val left = (centerX - boxWidth / 2f).coerceIn(0f, (width - boxWidth).coerceAtLeast(0f))
@@ -223,7 +239,7 @@ class TranslationOverlayView(context: Context) : View(context) {
         var lines = wrapText(normalized, maxTextWidth, finalTextSize)
         val availableHeight = (boxHeight - verticalPadding * 2f).coerceAtLeast(1f)
         var lineSpacing = finalTextSize * 1.16f
-        var totalHeight = lineSpacing * lines.size
+        val totalHeight = lineSpacing * lines.size
         if (totalHeight > availableHeight && totalHeight > 0f) {
             val fitScale = (availableHeight / totalHeight).coerceAtLeast(minFontScale)
             finalTextSize = (finalTextSize * fitScale).coerceIn(minTextSizePx, baseTextSize)
