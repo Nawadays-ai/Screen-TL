@@ -82,10 +82,17 @@ class QwenTranslationProvider(
                 if (translated.isBlank()) throw IllegalStateException("Qwen menghasilkan terjemahan kosong")
                 withContext(Dispatchers.Main) { onSuccess(translated) }
             } catch (error: Exception) {
-                val detail = if (error is kotlinx.coroutines.TimeoutCancellationException) {
+                val timedOut = error is kotlinx.coroutines.TimeoutCancellationException
+                val detail = if (timedOut) {
                     "Qwen inference timeout setelah ${INFERENCE_TIMEOUT_MS} ms; context=$CONTEXT_SIZE; threads=$THREADS; maxTokens=$MAX_TOKENS; model=${LocalModelStore.qwenFile().name}"
                 } else {
                     "Qwen inference error=${error.message ?: error::class.java.name}; context=$CONTEXT_SIZE; threads=$THREADS; maxTokens=$MAX_TOKENS; model=${LocalModelStore.qwenFile().name}"
+                }
+                if (timedOut) {
+                    // Do not leave a slow native inference/model alive after a timeout.
+                    // The next manual operation will load a clean model again.
+                    if (model === loaded) model = null
+                    runCatching { Llama.releaseModel(loaded) }
                 }
                 withContext(Dispatchers.Main) {
                     onFailure(IllegalStateException(detail, error))
