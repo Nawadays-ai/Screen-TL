@@ -37,17 +37,15 @@ class QwenTranslationProvider(
             try {
                 val loaded = Llama.loadModel(
                     modelPath = LocalModelStore.qwenFile().absolutePath,
-                    config = LlamaConfig(contextSize = 1024, threads = 2)
+                    config = LlamaConfig(contextSize = 1024, threads = 4)
                 )
                 model = loaded
                 withContext(Dispatchers.Main) { onReady() }
             } catch (error: Exception) {
                 val systemInfo = runCatching { Llama.getSystemInfo() }.getOrDefault("system-info unavailable")
-                val diagnostic = "model=${LocalModelStore.qwenFile().name}; file=$fileDiagnostic; context=1024; threads=2; error=${error.message ?: error::class.java.name}; llama=$systemInfo"
+                val diagnostic = "model=${LocalModelStore.qwenFile().name}; file=$fileDiagnostic; context=1024; threads=4; maxTokens=96; error=${error.message ?: error::class.java.name}; llama=$systemInfo"
                 withContext(Dispatchers.Main) {
                     onFailure(IllegalStateException("Qwen gagal memuat model: ${error.message ?: error::class.java.simpleName}", error).also {
-                        // TranslationManager records the exception message in the persistent performance log.
-                        // Keep the complete diagnostic available as the cause message as well.
                         it.addSuppressed(IllegalStateException(diagnostic))
                     })
                 }
@@ -67,8 +65,8 @@ class QwenTranslationProvider(
                 val result = Llama.complete(
                     loaded,
                     prompt = buildPrompt(text),
-                    systemPrompt = "You are a translation engine. Translate only. Preserve meaning, names, numbers, punctuation and line breaks. Do not explain.",
-                    maxTokens = 256
+                    systemPrompt = "Translate only. Preserve meaning, names, numbers, punctuation and line breaks. No explanation.",
+                    maxTokens = 96
                 )
                 val translated = result.text.trim()
                 if (translated.isBlank()) throw IllegalStateException("Qwen menghasilkan terjemahan kosong")
