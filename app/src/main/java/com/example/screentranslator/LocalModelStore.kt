@@ -7,11 +7,13 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
+import java.security.MessageDigest
 
 object LocalModelStore {
     const val QWEN_FILE = "Qwen2.5-0.5B-Instruct-Q4_0_4_4.gguf"
-    const val QWEN_SIZE_BYTES = 350L * 1024L * 1024L
+    const val QWEN_SIZE_BYTES = 352L * 1024L * 1024L
     private const val QWEN_URL = "https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_0_4_4.gguf?download=true"
+    private const val QWEN_SHA256 = "9f2c0af1a4a2a1f1b4ad51d2aa3fb09913ba8821f3aef71541fef56b3c7da8d0"
 
     private lateinit var root: File
     private val client = OkHttpClient()
@@ -57,8 +59,22 @@ object LocalModelStore {
                     output.fd.sync()
                 }
             }
-            if (destination.exists()) destination.delete()
-            if (!partial.renameTo(destination)) throw IllegalStateException("Model selesai diunduh tetapi gagal dipindahkan")
         }
+        val digest = MessageDigest.getInstance("SHA-256")
+        partial.inputStream().use { input ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        val actualSha = digest.digest().joinToString("") { "%02x".format(it) }
+        if (!actualSha.equals(QWEN_SHA256, ignoreCase = true)) {
+            partial.delete()
+            throw IllegalStateException("Checksum model tidak cocok")
+        }
+        if (destination.exists()) destination.delete()
+        if (!partial.renameTo(destination)) throw IllegalStateException("Model selesai diunduh tetapi gagal dipindahkan")
     }
 }
