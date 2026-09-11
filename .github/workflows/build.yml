@@ -50,8 +50,19 @@ jobs:
         SCREEN_TL_KEY_PASSWORD: ${{ secrets.SCREEN_TL_KEY_PASSWORD }}
       run: gradle assembleDebug --stacktrace
 
+    - name: Verify APK output
+      run: |
+        set -euo pipefail
+        APK="app/build/outputs/apk/debug/app-debug.apk"
+        test -f "$APK"
+        test -s "$APK"
+        echo "APK ready: $APK"
+        ls -lh "$APK"
+
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
         name: ScreenTranslator-APK
         path: app/build/outputs/apk/debug/app-debug.apk
+        if-no-files-found: error
+        retention-days: 14
