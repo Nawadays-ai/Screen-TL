@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import hashlib
 import os
+import re
 from pathlib import Path
 
 from telethon import TelegramClient
@@ -16,6 +17,27 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def normalize_target(raw_target: str):
+    """Accept normal Telegram usernames/links and internal numeric chat IDs."""
+    target = raw_target.strip()
+
+    # A private channel/group message link looks like:
+    # https://t.me/c/3801981603/2
+    # The internal ID must be represented to Telethon as -1003801981603.
+    match = re.fullmatch(r"(?:https?://)?t\.me/c/(\d+)(?:/\d+)?/?", target)
+    if match:
+        return int(f"-100{match.group(1)}")
+
+    if re.fullmatch(r"\d+", target):
+        # Allow the convenient value copied from the /c/<id>/<message> URL.
+        # Already-prefixed -100... values should be entered with the minus sign.
+        if len(target) >= 9:
+            return int(f"-100{target}")
+        return int(target)
+
+    return target
+
+
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Upload a Screen-TL APK to Telegram.")
     parser.add_argument("apk", type=Path)
@@ -27,9 +49,9 @@ async def main() -> None:
     api_id = os.environ.get("TELEGRAM_API_ID")
     api_hash = os.environ.get("TELEGRAM_API_HASH")
     session = os.environ.get("TELEGRAM_SESSION")
-    target = os.environ.get("TELEGRAM_CHAT_ID")
+    target_raw = os.environ.get("TELEGRAM_CHAT_ID")
 
-    if not api_id or not api_hash or not session or not target:
+    if not api_id or not api_hash or not session or not target_raw:
         raise SystemExit(
             "Missing Telegram configuration. Required secrets: "
             "TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION, TELEGRAM_CHAT_ID"
@@ -37,6 +59,9 @@ async def main() -> None:
 
     if not args.apk.is_file() or args.apk.stat().st_size == 0:
         raise SystemExit(f"APK does not exist or is empty: {args.apk}")
+
+    target = normalize_target(target_raw)
+    print("Telegram destination normalized successfully.")
 
     digest = sha256(args.apk)
     size_mb = args.apk.stat().st_size / (1024 * 1024)
