@@ -28,9 +28,13 @@ def normalize_target(raw_target: str):
     if match:
         return int(f"-100{match.group(1)}")
 
+    # Telethon expects numeric peer IDs as integers, not strings.
+    # This also fixes the common -100... format used for private channels/groups.
+    if re.fullmatch(r"-100\d+", target):
+        return int(target)
+
     if re.fullmatch(r"\d+", target):
         # Allow the convenient value copied from the /c/<id>/<message> URL.
-        # Already-prefixed -100... values should be entered with the minus sign.
         if len(target) >= 9:
             return int(f"-100{target}")
         return int(target)
@@ -77,6 +81,10 @@ async def main() -> None:
     client = TelegramClient(StringSession(session), int(api_id), api_hash)
     await client.start()
     try:
+        # Resolve the peer before uploading so access/entity problems are reported
+        # separately from the actual file upload.
+        await client.get_input_entity(target)
+        print("Telegram destination resolved successfully.")
         print(f"Uploading {args.apk} ({size_mb:.1f} MiB) to Telegram...")
         await client.send_file(
             target,
