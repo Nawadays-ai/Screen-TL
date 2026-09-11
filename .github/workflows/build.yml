@@ -1,14 +1,10 @@
 name: Build Android APK
 
-# Build otomatis setiap push ke main atau branch eksperimen.
+# Build hanya dijalankan saat diminta secara manual.
 # CI sengaja gagal jika signing secret belum tersedia, agar tidak pernah
 # menghasilkan APK dengan debug keystore ephemeral yang berbeda-beda.
 
 on:
-  push:
-    branches:
-      - main
-      - 'experiment/**'
   workflow_dispatch:
 
 jobs:
@@ -58,11 +54,25 @@ jobs:
         test -s "$APK"
         echo "APK ready: $APK"
         ls -lh "$APK"
+        sha256sum "$APK"
 
-    - name: Upload APK Artifact
-      uses: actions/upload-artifact@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
       with:
-        name: ScreenTranslator-APK
-        path: app/build/outputs/apk/debug/app-debug.apk
-        if-no-files-found: error
-        retention-days: 14
+        python-version: '3.12'
+
+    - name: Install Telegram uploader
+      run: python -m pip install -r tools/telegram_uploader/requirements.txt
+
+    - name: Send APK to Telegram
+      env:
+        TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+        TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+        TELEGRAM_SESSION: ${{ secrets.TELEGRAM_SESSION }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      run: |
+        python tools/telegram_uploader/upload_apk.py \
+          app/build/outputs/apk/debug/app-debug.apk \
+          --branch "$GITHUB_REF_NAME" \
+          --commit "$GITHUB_SHA" \
+          --run "$GITHUB_RUN_NUMBER"
