@@ -3,10 +3,14 @@ import asyncio
 import hashlib
 import os
 import re
+import time
 from pathlib import Path
 
 from telethon import TelegramClient
 from telethon.sessions import StringSession
+
+
+UPLOAD_TIMEOUT_SECONDS = 10 * 60
 
 
 def sha256(path: Path) -> str:
@@ -65,7 +69,7 @@ async def main() -> None:
         raise SystemExit(f"APK does not exist or is empty: {args.apk}")
 
     target = normalize_target(target_raw)
-    print("Telegram destination normalized successfully.")
+    print("Telegram destination normalized successfully.", flush=True)
 
     digest = sha256(args.apk)
     size_mb = args.apk.stat().st_size / (1024 * 1024)
@@ -84,16 +88,48 @@ async def main() -> None:
         # Resolve the peer before uploading so access/entity problems are reported
         # separately from the actual file upload.
         await client.get_input_entity(target)
-        print("Telegram destination resolved successfully.")
-        print(f"Uploading {args.apk} ({size_mb:.1f} MiB) to Telegram...")
-        await client.send_file(
-            target,
-            str(args.apk),
-            caption=caption,
-            force_document=True,
-            supports_streaming=False,
+        print("Telegram destination resolved successfully.", flush=True)
+        print(
+            f"Uploading {args.apk} ({size_mb:.1f} MiB) to Telegram "
+            f"(timeout: {UPLOAD_TIMEOUT_SECONDS // 60} minutes)...",
+            flush=True,
         )
-        print("Telegram upload completed.")
+
+        last_reported_percent = -1
+        started_at = time.monotonic()
+
+        def progress_callback(current: int, total: int) -> None:
+            nonlocal last_reported_percent
+            if total <= 0:
+                return
+            percent = int(current * 100 / total)
+            bucket = percent // 5 * 5
+            if bucket != last_reported_percent:
+                last_reported_percent = bucket
+                elapsed = time.monotonic() - started_at
+                print(
+                    f"Telegram upload progress: {percent}% "
+                    f"({current / (1024 * 1024):.1f}/{total / (1024 * 1024):.1f} MiB, "
+                    f"{elapsed:.0f}s elapsed)",
+                    flush=True,
+                )
+
+        await asyncio.wait_for(
+            client.send_file(
+                target,
+                str(args.apk),
+                caption=caption,
+                force_document=True,
+                supports_streaming=False,
+                progress_callback=progress_callback,
+            ),
+            timeout=UPLOAD_TIMEOUT_SECONDS,
+        )
+        print("Telegram upload completed.", flush=True)
+    except asyncio.TimeoutError:
+        raise SystemExit(
+            f"Telegram upload timed out after {UPLOAD_TIMEOUT_SECONDS // 60} minutes."
+        )
     finally:
         await client.disconnect()
 
