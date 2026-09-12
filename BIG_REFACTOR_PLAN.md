@@ -8,24 +8,24 @@ Dokumen ini menjadi catatan utama pengerjaan. Setiap tahap harus ditandai `[x]` 
 
 - [x] Branch kerja menggunakan `experiment/drive-test-big-change`.
 - [x] Titik awal branch berasal dari `experiment/telegram-test-upload`.
-- [ ] **Jangan membuat GitHub Release otomatis.**
-- [ ] Jangan mengandalkan GitHub Actions Artifact sebagai hasil utama karena keterbatasan kuota.
-- [ ] Kembalikan mekanisme upload Telegram seperti pada `experiment/telegram-test-upload`.
-- [ ] Sebelum dikirim ke Telegram, APK dikemas menjadi arsip ZIP. Jangan mengirim APK mentah sebagai hasil utama.
-- [ ] Branch `experiment/telegram-test-upload` harus diperlakukan sebagai referensi dan tidak diubah.
-- [ ] README lama, catatan AI lama, dan panduan lama boleh diabaikan atau dihapus bila mengganggu; dokumen ini menjadi catatan kerja utama.
-- [ ] Semua perubahan besar dikerjakan terlebih dahulu, kemudian satu kali build dan pengujian terpadu.
+- [x] **Tidak membuat GitHub Release otomatis.** Workflow saat ini hanya memakai `workflow_dispatch` dan tidak memiliki langkah Release.
+- [x] Tidak mengandalkan GitHub Actions Artifact sebagai hasil utama karena keterbatasan kuota.
+- [x] Mekanisme upload Telegram digunakan sebagai jalur distribusi utama.
+- [x] Sebelum dikirim ke Telegram, APK dikemas menjadi arsip ZIP.
+- [x] Branch `experiment/telegram-test-upload` diperlakukan sebagai referensi dan tidak diubah.
+- [x] README lama, catatan AI lama, dan panduan lama boleh diabaikan atau dihapus bila mengganggu; dokumen ini menjadi catatan kerja utama.
+- [x] Semua perubahan besar dikerjakan terlebih dahulu, kemudian satu kali build dan pengujian terpadu.
 - [ ] Jangan menyatakan fitur selesai hanya berdasarkan pemeriksaan kode; status penuh harus mempertimbangkan hasil build dan pengujian pada perangkat.
 
 ## Urutan pengerjaan
 
 ### 1. Audit workflow build dan upload Telegram
-- [ ] Periksa workflow saat ini.
-- [ ] Hapus atau nonaktifkan seluruh langkah GitHub Release otomatis.
-- [ ] Pulihkan upload Telegram dari branch referensi.
-- [ ] Tambahkan pengemasan APK menjadi ZIP sebelum upload.
-- [ ] Pastikan token/secret yang digunakan hanya dibaca dari GitHub Secrets.
-- [ ] Tandai tahap ini selesai setelah workflow diperiksa ulang.
+- [x] Periksa workflow saat ini.
+- [x] Hapus atau nonaktifkan seluruh langkah GitHub Release otomatis.
+- [x] Pulihkan/periksa upload Telegram dari branch referensi.
+- [x] Pastikan APK dikemas menjadi ZIP sebelum upload.
+- [x] Pastikan token/secret hanya dibaca dari GitHub Secrets.
+- [x] Tahap audit workflow selesai setelah workflow diperiksa ulang.
 
 ### 2. Audit dan perbaikan OCR
 - [ ] Periksa dependensi Google ML Kit melalui Google Play Services.
@@ -86,6 +86,7 @@ Dokumen ini menjadi catatan utama pengerjaan. Setiap tahap harus ditandai `[x]` 
 
 ## Status saat dokumen dibuat
 
-- Audit awal menemukan bahwa Manga OCR memakai ML Kit untuk menemukan wilayah teks lalu ONNX untuk mengenali teks.
+- Audit workflow selesai diperiksa.
+- Manga OCR memakai ML Kit untuk menemukan wilayah teks lalu ONNX untuk mengenali teks.
 - Kesiapan Manga OCR **belum terverifikasi penuh**; jangan menganggapnya sudah siap digunakan sebelum input model, decoder, tokenizer, model download, build, dan pengujian perangkat diperiksa.
 - Tidak ada build terpadu yang dijalankan pada tahap pembuatan catatan ini.
