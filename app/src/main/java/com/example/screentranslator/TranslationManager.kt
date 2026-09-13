@@ -46,6 +46,7 @@ class TranslationManager(
     }
 
     fun getProviderName(): String = when (provider) {
+        is OpenRouterTranslationProvider -> ApiSettings.PROVIDER_OPENROUTER
         is GeminiTranslationProvider -> "Gemini AI"
         is DeepLTranslationProvider -> ApiSettings.PROVIDER_DEEPL
         is MlKitTranslationProvider -> ApiSettings.PROVIDER_ML_KIT
