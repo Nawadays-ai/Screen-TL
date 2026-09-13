@@ -77,6 +77,50 @@
             android:singleLine="true" />
 
         <TextView
+    android:id="@+id/labelBaseUrl"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="8dp"
+    android:text="Base URL"
+    android:textColor="#BBBBBB"
+    android:textSize="12sp"
+    android:visibility="gone" />
+
+<EditText
+    android:id="@+id/etBaseUrl"
+    android:layout_width="match_parent"
+    android:layout_height="52dp"
+    android:layout_marginTop="4dp"
+    android:hint="https://openrouter.ai/api/v1"
+    android:textColor="#FFFFFF"
+    android:textColorHint="#777777"
+    android:inputType="textUri"
+    android:singleLine="true"
+    android:visibility="gone" />
+
+<TextView
+    android:id="@+id/labelModel"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="8dp"
+    android:text="Model"
+    android:textColor="#BBBBBB"
+    android:textSize="12sp"
+    android:visibility="gone" />
+
+<EditText
+    android:id="@+id/etModel"
+    android:layout_width="match_parent"
+    android:layout_height="52dp"
+    android:layout_marginTop="4dp"
+    android:hint="deepseek/deepseek-chat-v3.1:free"
+    android:textColor="#FFFFFF"
+    android:textColorHint="#777777"
+    android:inputType="text"
+    android:singleLine="true"
+    android:visibility="gone" />
+
+        <TextView
             android:id="@+id/tvApiStatus"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
