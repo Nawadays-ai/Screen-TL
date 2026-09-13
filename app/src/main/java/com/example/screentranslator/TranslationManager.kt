@@ -57,6 +57,18 @@ class TranslationManager(
     }
 
     private fun createProvider(manualProvider: String): TranslationProvider {
+       if (ApiSettings.isOpenRouterEnabled()) {                    // ← TAMBAHAN BARU
+        val key = ApiSettings.getOpenRouterKey()
+        if (!key.isNullOrBlank()) {
+            return OpenRouterTranslationProvider(
+                apiKey = key,
+                baseUrl = ApiSettings.getOpenRouterBaseUrl(),
+                model = ApiSettings.getOpenRouterModel(),
+                sourceLanguage = sourceLanguage,
+                targetLanguage = targetLanguage
+                )
+        }
+       }
         if (ApiSettings.isGeminiEnabled()) {
             val key = ApiSettings.getGeminiKey()
             if (!key.isNullOrBlank()) return GeminiTranslationProvider(key, sourceLanguage, targetLanguage)
