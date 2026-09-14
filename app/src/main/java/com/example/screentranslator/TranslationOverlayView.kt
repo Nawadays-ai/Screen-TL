@@ -34,6 +34,7 @@ class TranslationOverlayView(context: Context) : View(context) {
     private val maxTextSizePx = 96f
     private val minFontScale = 0.62f
     private val maxWidthRatio = 1.55f
+    private val bubbleWidthRatio = 2.80f
 
     private data class RenderItem(
         val item: TranslationOverlayItem,
@@ -119,7 +120,9 @@ class TranslationOverlayView(context: Context) : View(context) {
             val metrics = textPaint.fontMetrics
             val firstBaseline = startTop - metrics.ascent
             renderItem.lines.forEachIndexed { lineIndex, line ->
-                canvas.drawText(line, left + padding, firstBaseline + lineIndex * lineHeight, textPaint)
+                val lineWidth = textPaint.measureText(line)
+                val lineLeft = left + ((right - left - lineWidth) / 2f).coerceAtLeast(padding)
+                canvas.drawText(line, lineLeft, firstBaseline + lineIndex * lineHeight, textPaint)
             }
         }
         textPaint.textScaleX = 1f; textPaint.color = Color.WHITE; textPaint.alpha = 255
@@ -159,32 +162,18 @@ class TranslationOverlayView(context: Context) : View(context) {
         }
     }
 
-    /**
-     * Frosted-glass treatment based only on the sampled background color.
-     * No source screenshot pixels are retained or drawn behind the translation.
-     */
     private fun drawFrostGlass(canvas: Canvas, box: RectF, baseColor: Int, radius: Float) {
         val safeBox = RectF(box)
         val edge = adjustColor(baseColor, 0.92f)
         val deep = adjustColor(baseColor, 0.48f)
-        backgroundPaint.shader = LinearGradient(
-            safeBox.left,
-            safeBox.top,
-            safeBox.right.coerceAtLeast(safeBox.left + 1f),
-            safeBox.bottom,
-            intArrayOf(edge, baseColor, deep, adjustColor(baseColor, 0.58f)),
-            floatArrayOf(0f, 0.28f, 0.58f, 1f),
-            Shader.TileMode.CLAMP
-        )
+        backgroundPaint.shader = LinearGradient(safeBox.left, safeBox.top, safeBox.right.coerceAtLeast(safeBox.left + 1f), safeBox.bottom, intArrayOf(edge, baseColor, deep, adjustColor(baseColor, 0.58f)), floatArrayOf(0f, 0.28f, 0.58f, 1f), Shader.TileMode.CLAMP)
         backgroundPaint.alpha = 255
         canvas.drawRoundRect(safeBox, radius, radius, backgroundPaint)
         backgroundPaint.shader = null
-
         glassPaint.color = Color.argb(46, 255, 255, 255)
         canvas.drawRoundRect(safeBox, radius, radius, glassPaint)
         glassPaint.color = Color.argb(52, 0, 0, 0)
         canvas.drawRoundRect(safeBox, radius, radius, glassPaint)
-
         borderPaint.color = Color.argb(155, 255, 255, 255)
         borderPaint.strokeWidth = 1.2f.coerceAtLeast(width / 1080f)
         canvas.drawRoundRect(safeBox, radius, radius, borderPaint)
@@ -209,31 +198,41 @@ class TranslationOverlayView(context: Context) : View(context) {
         val baseRight = item.right.coerceIn(baseLeft.toInt() + 1, width).toFloat(); val baseBottom = item.bottom.coerceIn(baseTop.toInt() + 1, height).toFloat()
         if (baseRight <= baseLeft || baseBottom <= baseTop) return null
         val originalWidth = baseRight - baseLeft; val originalHeight = baseBottom - baseTop
-        val baseWidth = (originalWidth * toleranceRatio).coerceAtLeast(originalWidth); val boxHeight = (originalHeight * toleranceRatio).coerceAtLeast(originalHeight)
-        val toleranceLeft = baseLeft
+        val isBubble = item.orientation == TextLayoutAnalyzer.WritingOrientation.VERTICAL
+        val boxHeight = (originalHeight * toleranceRatio).coerceAtLeast(originalHeight)
         val toleranceTop = (baseTop - (boxHeight - originalHeight) / 2f).coerceAtLeast(0f)
-        val toleranceRight = (baseLeft + baseWidth).coerceAtMost(width.toFloat())
         val toleranceBottom = (toleranceTop + boxHeight).coerceAtMost(height.toFloat())
-        val horizontalPadding = (boxHeight * horizontalPaddingRatio).coerceIn(3f, 16f); val verticalPadding = (boxHeight * verticalPaddingRatio).coerceIn(2f, 8f)
+        val horizontalPadding = (boxHeight * if (isBubble) 0.08f else horizontalPaddingRatio).coerceIn(3f, if (isBubble) 22f else 16f)
+        val verticalPadding = (boxHeight * verticalPaddingRatio).coerceIn(2f, 8f)
         val baseTextSize = (if (item.sourceTextSizePx > 0f) item.sourceTextSizePx else originalHeight * 0.72f).coerceIn(minTextSizePx, maxTextSizePx)
         val normalized = normalizeParagraph(item.translatedText); if (normalized.isEmpty()) return null
-        textPaint.textScaleX = 1f; textPaint.textSize = baseTextSize
+
+        textPaint.textScaleX = 1f
+        textPaint.textSize = baseTextSize
         val measuredWidth = normalized.split('\n').maxOfOrNull { textPaint.measureText(it) } ?: 0f
-        val allowedWidth = if (toleranceRatio > 1f) baseWidth else originalWidth * maxWidthRatio
-        val maxBoxWidth = minOf(allowedWidth, (width - toleranceLeft - 4f).coerceAtLeast(originalWidth))
-        val desiredWidth = (measuredWidth + horizontalPadding * 2f).coerceAtLeast(originalWidth)
-        val boxWidth = desiredWidth.coerceAtMost(maxBoxWidth)
-        val left = toleranceLeft; val right = (left + boxWidth).coerceAtMost(toleranceRight.coerceAtLeast(left + 1f)); val maxTextWidth = (right - left - horizontalPadding * 2f).coerceAtLeast(1f)
-        var finalTextSize = baseTextSize; var lines = wrapText(normalized, maxTextWidth, finalTextSize); val lineSpacing = finalTextSize * 1.16f
-        val availableHeight = (boxHeight - verticalPadding * 2f).coerceAtLeast(1f); val totalHeight = lineSpacing * lines.size
+        val availableScreenWidth = (width - 8f).coerceAtLeast(originalWidth)
+        val desiredBubbleWidth = maxOf(originalWidth * bubbleWidthRatio, measuredWidth + horizontalPadding * 2f)
+        val allowedWidth = if (isBubble) desiredBubbleWidth.coerceAtMost(availableScreenWidth) else if (toleranceRatio > 1f) (originalWidth * toleranceRatio).coerceAtMost(availableScreenWidth) else originalWidth * maxWidthRatio
+        val boxWidth = allowedWidth.coerceAtLeast(originalWidth).coerceAtMost(availableScreenWidth)
+        val centerX = baseLeft + originalWidth / 2f
+        val left = (centerX - boxWidth / 2f).coerceIn(0f, (width - boxWidth).coerceAtLeast(0f))
+        val right = (left + boxWidth).coerceAtMost(width.toFloat())
+        val maxTextWidth = (right - left - horizontalPadding * 2f).coerceAtLeast(1f)
+
+        var finalTextSize = baseTextSize
+        var lines = wrapText(normalized, maxTextWidth, finalTextSize)
+        val availableHeight = (boxHeight - verticalPadding * 2f).coerceAtLeast(1f)
+        var lineSpacing = finalTextSize * 1.16f
+        var totalHeight = lineSpacing * lines.size
         if (totalHeight > availableHeight && totalHeight > 0f) {
             val fitScale = (availableHeight / totalHeight).coerceAtLeast(minFontScale)
             finalTextSize = (finalTextSize * fitScale).coerceIn(minTextSizePx, baseTextSize)
             lines = wrapText(normalized, maxTextWidth, finalTextSize)
         }
-        textPaint.textSize = finalTextSize; val finalLineSpacing = finalTextSize * 1.16f; lines = wrapText(normalized, maxTextWidth, finalTextSize)
-        val finalMeasuredWidth = lines.maxOfOrNull { textPaint.measureText(it) } ?: 0f; val fillWidth = (finalMeasuredWidth + horizontalPadding * 2f).coerceAtLeast(originalWidth).coerceAtMost(right - left)
-        return RenderItem(item, left, toleranceTop, right, toleranceBottom, left + fillWidth, finalTextSize, horizontalPadding, lines, finalLineSpacing)
+        textPaint.textSize = finalTextSize
+        lineSpacing = finalTextSize * 1.16f
+        lines = wrapText(normalized, maxTextWidth, finalTextSize)
+        return RenderItem(item, left, toleranceTop, right, toleranceBottom, right, finalTextSize, horizontalPadding, lines, lineSpacing)
     }
 
     private fun normalizeParagraph(text: String): String = text.replace("\r\n", "\n").replace('\r', '\n').split('\n').joinToString("\n") { it.replace(Regex("[ \\t]+"), " ").trim() }.trim()
@@ -267,5 +266,6 @@ data class TranslationOverlayItem(
     val bottom: Int,
     val sourceTextSizePx: Float = 0f,
     val backgroundColor: Int = Color.BLACK,
-    var blurredPatch: Bitmap? = null
+    var blurredPatch: Bitmap? = null,
+    val orientation: TextLayoutAnalyzer.WritingOrientation = TextLayoutAnalyzer.WritingOrientation.HORIZONTAL
 )
