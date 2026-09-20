@@ -214,7 +214,7 @@ object KlipSelectionController {
     }
 
     private fun translateKlip(
-        owner: Context,
+        owner: FloatingService,
         translator: TranslationManager,
         sourceText: String,
         selection: Rect,
