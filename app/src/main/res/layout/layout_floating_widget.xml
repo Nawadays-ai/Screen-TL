@@ -7,7 +7,7 @@
     android:clipToPadding="false">
 
     <!-- Sub Menu -->
-    <androidx.cardview.widget.CardView
+    <com.google.android.material.card.MaterialCardView
         android:id="@+id/layoutSubMenu"
         android:layout_width="180dp"
         android:layout_height="wrap_content"
@@ -78,7 +78,7 @@
                 android:insetTop="0dp"
                 android:insetBottom="0dp" />
         </LinearLayout>
-    </androidx.cardview.widget.CardView>
+    </com.google.android.material.card.MaterialCardView>
 
     <!-- Main FAB -->
     <com.google.android.material.floatingactionbutton.FloatingActionButton

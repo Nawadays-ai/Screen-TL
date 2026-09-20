@@ -66,7 +66,7 @@
     </style>
 
     <!-- Spinner style -->
-    <style name="Widget.ScreenTranslator.Spinner" parent="Widget.Material3.Spinner">
+    <style name="Widget.ScreenTranslator.Spinner">
         <item name="android:background">@drawable/spinner_background</item>
         <item name="android:paddingHorizontal">16dp</item>
         <item name="android:paddingVertical">12dp</item>

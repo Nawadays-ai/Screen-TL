@@ -65,7 +65,7 @@
         android:layout_weight="1" />
 
     <!-- Language Selection Card -->
-    <androidx.cardview.widget.CardView
+    <com.google.android.material.card.MaterialCardView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         style="@style/Widget.ScreenTranslator.Card"
@@ -116,7 +116,7 @@
                     style="@style/Widget.ScreenTranslator.Spinner" />
             </LinearLayout>
         </LinearLayout>
-    </androidx.cardview.widget.CardView>
+    </com.google.android.material.card.MaterialCardView>
 
     <!-- Play Button -->
     <ImageButton

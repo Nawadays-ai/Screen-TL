@@ -37,7 +37,7 @@
         </LinearLayout>
 
         <!-- Section: Manual Translation Engine -->
-        <androidx.cardview.widget.CardView
+        <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             style="@style/Widget.ScreenTranslator.Card"
@@ -72,10 +72,10 @@
                     android:layout_height="wrap_content"
                     style="@style/Widget.ScreenTranslator.Spinner" />
             </LinearLayout>
-        </androidx.cardview.widget.CardView>
+        </com.google.android.material.card.MaterialCardView>
 
         <!-- Section: API Translation -->
-        <androidx.cardview.widget.CardView
+        <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             style="@style/Widget.ScreenTranslator.Card"
@@ -209,7 +209,7 @@
                         android:visibility="gone" />
                 </LinearLayout>
             </LinearLayout>
-        </androidx.cardview.widget.CardView>
+        </com.google.android.material.card.MaterialCardView>
 
         <!-- Info text -->
         <TextView
