@@ -95,6 +95,10 @@ This is a **build verification only**. The user has not yet tested Klip on-devic
 - After code changes, the user will commit and manually trigger or observe the GitHub Actions build.
 - Agents may perform static checks that do not invoke Gradle, such as XML validation and `git diff --check`.
 
+## Work Log Policy
+- Record every investigation, code change, verification result, blocker, and next action in `WORK_LOG.md`.
+- Read the latest entry in `WORK_LOG.md` before continuing work so a later agent can resume without reconstructing context.
+
 ## Development Rules
 - Inspect actual files before editing.
 - Keep experiments off `main` unless explicitly promoted.

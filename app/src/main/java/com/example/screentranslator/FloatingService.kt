@@ -19,7 +19,6 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.FrameLayout
-import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import com.google.android.material.floatingactionbutton.FloatingActionButton
@@ -44,7 +43,7 @@ class FloatingService : Service() {
     private lateinit var windowManager: WindowManager
     private lateinit var floatingView: View
     private lateinit var fabMain: FloatingActionButton
-    private lateinit var layoutSubMenu: LinearLayout
+    private lateinit var layoutSubMenu: View
     private lateinit var btnRealtime: Button
     private lateinit var btnManual: Button
     private lateinit var btnRemoveOverlay: Button

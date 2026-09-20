@@ -1,0 +1,31 @@
+# Screen-TL Work Log
+
+This file is the chronological handoff log for ongoing work. Add an entry for every investigation, change, verification, blocker, and next action.
+
+## 2026-09-20 — Build policy and start-button crash investigation
+
+### Completed
+- Added the build policy to `AI_HANDOFF.md`: Android/Gradle builds must run only through GitHub Actions; the user commits and manually triggers or observes those builds.
+- Added this work-log policy to `AI_HANDOFF.md`.
+- Performed static inspection of the start-button flow: `MainActivity` requests overlay permission, requests MediaProjection consent, stores the consent result in `ScreenCaptureSession`, then starts `FloatingService`.
+- Inspected `FloatingService`, `ScreenCaptureManager`, manifest permissions, and floating-widget layout without running Gradle or an Android build locally.
+
+### Current blocker
+- The app crashes after the user presses **Mulai**, but no device crash stack trace has been supplied. Source inspection alone cannot identify the failing Android framework call safely.
+
+### Next action
+- Obtain the `FATAL EXCEPTION` / `AndroidRuntime` stack trace from Android Studio Logcat immediately after reproducing the crash.
+- Use the stack trace to identify the exact failing class and line, make the smallest targeted fix, record it here, then let the user commit and verify through GitHub Actions.
+
+## 2026-09-20 — Start-button crash: floating menu view type
+
+### Evidence
+- Device Logcat reported: `ClassCastException: MaterialCardView cannot be cast to LinearLayout` in `FloatingService.onCreate` at line 99.
+- The minimal UI redesign changed `layoutSubMenu` in `layout_floating_widget.xml` to `MaterialCardView`.
+
+### Change
+- Changed `FloatingService.layoutSubMenu` from `LinearLayout` to its common base type, `View`. The service only uses this reference for visibility, measurement, and `FrameLayout.LayoutParams`, all of which are available on `View`.
+
+### Verification and next action
+- Static inspection confirms every `layoutSubMenu` use is compatible with `View`.
+- The user should commit this change and run the GitHub Actions build. After installing that APK, test **Mulai** again and capture a fresh Logcat trace only if it still crashes.
