@@ -317,7 +317,7 @@ class FloatingService : Service() {
                 cacheHits > 0 -> "Cache: sebagian kalimat dari cache ($cacheHits/${texts.size})"
                 else -> "Cache: tidak ada kalimat dari cache (0/${texts.size})"
             }
-            val historyEntry = buildString { append("[").append(time).append("]\n"); append("TL: ").append(translator.getProviderName()).append("\n"); append(cacheStatus).append("\n"); append(sourceLanguage).append(" → ").append(targetLanguage).append("\n\n"); append(resultText) }
+            val historyEntry = buildString { append("[").append(time).append("]\n"); append("TL: ").append(translator.getProviderName()).append("\n"); append(cacheStatus).append("\n"); append("Unit OCR: ").append(texts.size).append(" | Request provider: ").append(texts.size - cacheHits).append("\n"); append(sourceLanguage).append(" → ").append(targetLanguage).append("\n\n"); append(resultText) }
             try {
                 TranslationHistory.add(historyEntry)
                 val trace = ScreenTLPerformanceTrace.current()
@@ -340,7 +340,7 @@ class FloatingService : Service() {
 
     private fun DetectedText.toOverlayItem(translatedText: String): TranslationOverlayItem = TranslationOverlayItem(translatedText = translatedText, left = left, top = top, right = right, bottom = bottom, sourceTextSizePx = sourceTextSizePx, backgroundColor = backgroundColor, blurredPatch = blurredPatch).also { blurredPatch = null }
     private fun releaseBlurPatches(texts: List<DetectedText>) { texts.forEach { item -> item.blurredPatch?.let { if (!it.isRecycled) it.recycle() } } }
-    private fun finishManualTranslation(message: String) { cancelManualCaptureTimeout(); cancelManualProcessTimeout(); manualTranslationPending = false; if (ScreenTLPerformanceTrace.current() != null && (message.contains("gagal", true) || message.contains("terlalu lama", true) || message.contains("tidak", true))) ScreenTLPerformanceTrace.current()?.finish("manual failed"); showToast(message) }
+    private fun finishManualTranslation(message: String) { cancelManualCaptureTimeout(); cancelManualProcessTimeout(); manualTranslationPending = false; val trace = ScreenTLPerformanceTrace.current(); if (message.contains("terlalu lama", true)) trace?.mark("timeout manual process"); if (trace != null && (message.contains("gagal", true) || message.contains("terlalu lama", true) || message.contains("tidak", true))) trace.finish("manual failed"); showToast(message) }
     private fun updateRemoveOverlayButton() { if (::btnRemoveOverlay.isInitialized) btnRemoveOverlay.visibility = if (manualOverlayVisible && overlayView != null) View.VISIBLE else View.GONE }
     private fun cancelManualCaptureTimeout() { manualCaptureTimeout?.let(mainHandler::removeCallbacks); manualCaptureTimeout = null }
     private fun cancelManualProcessTimeout() { manualProcessTimeout?.let(mainHandler::removeCallbacks); manualProcessTimeout = null }

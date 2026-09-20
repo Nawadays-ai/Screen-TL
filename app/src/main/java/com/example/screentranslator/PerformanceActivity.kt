@@ -46,6 +46,15 @@ class PerformanceActivity : AppCompatActivity() {
                 append("OCR: ").append(formatMs(entry.ocrMs)).append("\n")
                 append("Terjemahan: ").append(formatMs(entry.translationMs)).append("\n")
                 append("Tampilkan: ").append(formatMs(entry.displayMs)).append("\n")
+                entry.ocrUnits?.let { append("Unit OCR: ").append(it).append("\n") }
+                if (entry.cacheHits != null || entry.providerRequests != null) {
+                    append("Cache hit / request provider: ")
+                        .append(entry.cacheHits ?: 0)
+                        .append(" / ")
+                        .append(entry.providerRequests ?: 0)
+                        .append("\n")
+                }
+                entry.timeoutStage?.let { append("Timeout: ").append(it).append("\n") }
                 append("Lainnya: ").append(entry.unaccountedMs).append(" ms\n")
                 append("TOTAL: ").append(entry.totalMs).append(" ms")
             }

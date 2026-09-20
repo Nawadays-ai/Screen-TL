@@ -72,3 +72,30 @@ This file is the chronological handoff log for ongoing work. Add an entry for ev
 
 ### Next action
 - The user should commit this change and verify it through GitHub Actions.
+
+## 2026-09-21 — Prioritas 1: diagnostik performa Manual TL dan Klip
+
+### Tujuan dan investigasi
+- Prioritas 1 adalah menambah diagnostik yang dapat dilihat pengguna sebelum mengubah perilaku OCR, cache key, jumlah request provider, batching, atau concurrency.
+- Existing `ScreenTLPerformanceTrace` sudah mencatat waktu antar-stage. Metadata diagnostik diekstrak dari marker trace yang sudah ada agar teks OCR maupun hasil translation tidak disimpan pada performance log.
+
+### Perubahan selesai
+- `PerformanceLogEntry` yang dipersisten melalui `PerformanceLogStore` sekarang secara backward-compatible dapat memuat jumlah unit OCR, cache hit, jumlah request provider, dan tahap timeout. Field JSON baru opsional sehingga entry Performance lama tetap dapat dibaca.
+- `ScreenTLPerformanceTrace` mengekstrak marker `detected=N`, marker cache hit, marker request provider, dan marker timeout ke metadata terstruktur tersebut.
+- `PerformanceActivity` menampilkan metadata ketika tersedia, di samping durasi stage yang telah ada.
+- Manual TL mencatat marker timeout proses secara eksplisit sebelum trace gagal diselesaikan.
+- Klip sekarang membuat trace `Klip` eksplisit dan meneruskannya sepanjang lifecycle capture, OCR, translation, display, cancel, dan failure.
+- History Manual TL dan Klip sekarang menampilkan ringkasan jumlah unit OCR dan jumlah request provider. Untuk Klip, nilai OCR-unit memakai jumlah hasil OCR aktual; Klip tetap menggunakan satu key/request translation gabungan sesuai perilaku sebelumnya.
+- Tidak ada perubahan terhadap provider, cache key, filtering OCR, grouping/batching, concurrency, urutan translation, atau mapping overlay.
+
+### Verifikasi dan batasan
+- `git diff --check` lulus; tidak ada whitespace error.
+- Telah dilakukan static review pada call site Klip dan Manual TL, termasuk penerusan trace serta perbedaan antara jumlah OCR unit dan request provider Klip.
+- Sesuai kebijakan repository dan instruksi pengguna, jangan menjalankan Gradle, compile Android, atau build APK secara lokal. Build hanya diverifikasi melalui GitHub Actions.
+- Status CI dan uji perangkat untuk perubahan ini: belum tersedia. Jangan menyatakan fitur stabil atau build lulus sebelum ada hasil GitHub Actions dan pengujian perangkat yang sesuai.
+
+### Next action
+- User commit perubahan ini dan verifikasi APK melalui GitHub Actions.
+- Di perangkat, bandingkan entry Performance Manual TL dan Klip: capture, OCR, translation, display, total, unit OCR, cache hit/request provider, serta timeout stage bila terjadi.
+- Verifikasi format History untuk cache hit dan request count.
+- Gunakan trace perangkat tersebut untuk memilih optimasi berikutnya secara terukur. Kandidat pertama hanya filtering noise OCR yang konservatif atau grouping meaningful-unit untuk Manual TL; batching atau parallelism tidak boleh dilakukan sebelum batas provider dan bottleneck translation terukur.

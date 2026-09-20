@@ -41,6 +41,7 @@ object KlipSelectionController {
     private var service: FloatingService? = null
     private var clipOverlayView: KlipResultOverlayView? = null
     private var selectionExists = false
+    private var performanceTrace: ScreenTLPerformanceTrace? = null
 
     fun start(context: Context, sourceView: View) {
         if (isActive) return
@@ -62,6 +63,7 @@ object KlipSelectionController {
         selectionExists = false
         hasClipOverlay = false
         isActive = true
+        performanceTrace = null
         service = owner
         windowManager = wm
         hostRoot = root
@@ -115,6 +117,8 @@ object KlipSelectionController {
         val owner = service ?: return
 
         owner.getScreenCaptureManager()?.cancelPendingCapture()
+        performanceTrace?.finish("klip cancelled")
+        performanceTrace = null
 
         clipOverlayView?.let { view ->
             runCatching { windowManager?.removeView(view) }
@@ -153,7 +157,9 @@ object KlipSelectionController {
         mainHandler.postDelayed({
             if (!isActive) return@postDelayed
 
-            val requested = capture.captureOnce { bitmap ->
+            val trace = ScreenTLPerformanceTrace.start("Klip")
+            performanceTrace = trace
+            val requested = capture.captureOnce({ bitmap ->
                 try {
                     val crop = cropBitmap(bitmap, selection)
                     bitmap.recycle()
@@ -167,7 +173,7 @@ object KlipSelectionController {
                     toast(owner, "Memproses OCR area Klip…")
 
                     ocr.recognize(
-                        crop,
+                        bitmap = crop,
                         onSuccess = { detected ->
                             Log.i(TAG, "Klip OCR completed; blocks=${detected.size}")
 
@@ -192,6 +198,7 @@ object KlipSelectionController {
                                 owner = owner,
                                 translator = translator,
                                 sourceText = combinedSource,
+                                ocrUnitCount = detected.size,
                                 selection = selection,
                                 crop = crop
                             )
@@ -199,13 +206,14 @@ object KlipSelectionController {
                         onFailure = { exception ->
                             runCatching { crop.recycle() }
                             fail("OCR Klip gagal: ${exception.message ?: "Unknown error"}")
-                        }
+                        },
+                        trace = trace
                     )
                 } catch (e: Exception) {
                     runCatching { bitmap.recycle() }
                     fail("Gagal memproses area Klip: ${e.message ?: "Unknown error"}")
                 }
-            }
+            }, trace)
 
             if (!requested) {
                 fail("Gagal mengambil screenshot")
@@ -217,6 +225,7 @@ object KlipSelectionController {
         owner: FloatingService,
         translator: TranslationManager,
         sourceText: String,
+        ocrUnitCount: Int,
         selection: Rect,
         crop: Bitmap
     ) {
@@ -244,6 +253,7 @@ object KlipSelectionController {
                             append("[").append(time).append("]\n")
                             append("TL: ").append(translator.getProviderName()).append(" (Klip)\n")
                             append(if (wasCached) "Cache: semua kalimat dari cache (1/1)" else "Cache: tidak ada kalimat dari cache (0/1)").append("\n")
+                            append("Unit OCR: ").append(ocrUnitCount).append(" | Request provider: ").append(if (wasCached) 0 else 1).append("\n")
                             append(source).append(" → ").append(target).append("\n\n")
                             append(sourceText)
                             append("\n→ ")
@@ -296,7 +306,8 @@ object KlipSelectionController {
     ) {
         val wm = windowManager ?: run {
             crop.recycle()
-            ScreenTLPerformanceTrace.current()?.finish("klip result window unavailable")
+            performanceTrace?.finish("klip result window unavailable")
+            performanceTrace = null
             return
         }
 
@@ -333,17 +344,19 @@ object KlipSelectionController {
         }
 
         runCatching {
-            ScreenTLPerformanceTrace.current()?.mark("display_start")
+            performanceTrace?.mark("display_start")
             wm.addView(view, params)
             // Remove the mask only after the result window has been attached.
             cleanupMaskOnly()
-            ScreenTLPerformanceTrace.current()?.mark("displayed")
-            ScreenTLPerformanceTrace.current()?.finish("klip displayed")
+            performanceTrace?.mark("displayed")
+            performanceTrace?.finish("klip displayed")
+            performanceTrace = null
         }.onFailure {
             clipOverlayView = null
             crop.recycle()
             Log.e(TAG, "Failed to show Klip result overlay", it)
-            ScreenTLPerformanceTrace.current()?.finish("klip display failed")
+            performanceTrace?.finish("klip display failed")
+            performanceTrace = null
             cleanupMaskOnly()
         }
     }
@@ -394,7 +407,8 @@ object KlipSelectionController {
 
     private fun fail(message: String) {
         val owner = service
-        ScreenTLPerformanceTrace.current()?.finish("klip failed")
+        performanceTrace?.finish("klip failed")
+        performanceTrace = null
 
         clipOverlayView?.let { view ->
             runCatching { windowManager?.removeView(view) }

@@ -44,7 +44,12 @@ class ScreenTLPerformanceTrace(private val operation: String) {
                 translationMs = durationBetweenFirstToLast(snapshot, "translation_request", setOf("translation_response", "translation_failed")),
                 displayMs = durationBetween(snapshot, "display_start", "displayed"),
                 totalMs = elapsed,
-                result = result
+                result = result,
+                ocrUnits = metadataInt(snapshot, "ocr_geometry_complete", "detected"),
+                cacheHits = snapshot.count { isStage(it.first, "translation_cache_hit") },
+                providerRequests = snapshot.count { isStage(it.first, "translation_request") },
+                timeoutStage = snapshot.lastOrNull { isStage(it.first, "timeout") }
+                    ?.first?.substringAfter("timeout ")
             )
         )
         if (active === this) active = null
@@ -78,4 +83,9 @@ class ScreenTLPerformanceTrace(private val operation: String) {
         }?.second ?: return null
         return (endAt - startAt).coerceAtLeast(0L)
     }
+
+    private fun metadataInt(events: List<Pair<String, Long>>, stage: String, name: String): Int? =
+        events.lastOrNull { isStage(it.first, stage) }
+            ?.first
+            ?.let { Regex("\\b$name=(\\d+)").find(it)?.groupValues?.getOrNull(1)?.toIntOrNull() }
 }
