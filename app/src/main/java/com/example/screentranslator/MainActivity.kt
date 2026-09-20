@@ -51,6 +51,7 @@ class MainActivity : AppCompatActivity() {
         TranslationHistory.initialize(applicationContext)
         ApiSettings.initialize(applicationContext)
         PerformanceLogStore.initialize(applicationContext)
+        TranslationCache.initialize(applicationContext)
 
         spinnerSourceLang = findViewById(R.id.spinnerSourceLang)
         spinnerTargetLang = findViewById(R.id.spinnerTargetLang)

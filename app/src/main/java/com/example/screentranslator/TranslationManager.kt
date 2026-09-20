@@ -30,10 +30,20 @@ class TranslationManager(
 
     fun translate(text: String, onSuccess: (String) -> Unit, onFailure: (Exception) -> Unit) {
         val perfTrace = ScreenTLPerformanceTrace.current()
-        perfTrace?.mark("translation_request provider=${getProviderName()} chars=${text.length}")
+        val providerName = getProviderName()
+        val cacheScope = getCacheScope()
+        val cachedTranslation = TranslationCache.get(cacheScope, sourceLanguage, targetLanguage, text)
+        if (cachedTranslation != null) {
+            perfTrace?.mark("translation_cache_hit provider=$providerName chars=${text.length}")
+            mainHandler.post { onSuccess(cachedTranslation) }
+            return
+        }
+
+        perfTrace?.mark("translation_request provider=$providerName chars=${text.length}")
         provider.translate(
             text = text,
             onSuccess = { translated ->
+                TranslationCache.put(getCacheScope(), sourceLanguage, targetLanguage, text, translated)
                 perfTrace?.mark("translation_response chars=${translated.length}")
                 // The caller owns the final display point. This prevents the
                 // performance log from ending before the overlay is actually visible.
@@ -52,6 +62,12 @@ class TranslationManager(
         is DeepLTranslationProvider -> ApiSettings.PROVIDER_DEEPL
         is MlKitTranslationProvider -> ApiSettings.PROVIDER_ML_KIT
         else -> provider::class.java.simpleName
+    }
+
+    private fun getCacheScope(): String = when (provider) {
+        is GeminiTranslationProvider -> "Gemini AI:${GeminiTranslationProvider.getCurrentModel()}"
+        is OpenRouterTranslationProvider -> "${ApiSettings.PROVIDER_OPENROUTER}:${ApiSettings.getOpenRouterBaseUrl()}:${ApiSettings.getOpenRouterModel()}"
+        else -> getProviderName()
     }
 
     fun close() {

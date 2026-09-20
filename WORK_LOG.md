@@ -2,6 +2,23 @@
 
 This file is the chronological handoff log for ongoing work. Add an entry for every investigation, change, verification, blocker, and next action.
 
+## 2026-09-20 — Persistent translation cache
+
+### Investigation and design
+- Read the repository README/handoff documents and inspected the active translation call sites. Manual TL, Real-Time, and Klip all delegate requests through `TranslationManager.translate()`.
+- Added the cache at that single boundary so no pipeline duplicates cache logic and no OCR/overlay/history lifecycle changes are needed.
+- Cache identity is SHA-256 of a schema version, effective provider scope (including non-secret Gemini/OpenRouter model configuration), source language, target language, and Unicode/whitespace-normalized source text. API credentials are excluded.
+
+### Change
+- Added `TranslationCache.kt`: app-private `SharedPreferences` persistent LRU, bounded to 500 entries / approximately 256 KiB, with a 100-entry in-memory LRU front cache.
+- `TranslationManager` now returns a cached successful translation before calling ML Kit, DeepL, Gemini, or OpenRouter; successful non-empty provider responses are cached. Failures are never cached.
+- Initialized the cache from both `MainActivity` and `FloatingService`, matching the existing persistent-store pattern.
+- Cache diagnostics only record hit metadata and character counts through the existing performance trace; source/translation text is not logged.
+
+### Verification and next action
+- Per user instruction and repository policy, no Gradle/Android build was run locally. Static diff validation remains required before commit.
+- The user should commit, let GitHub Actions build the APK, then verify repeated Manual TL, Klip, and (when applicable) Real-Time text no longer consumes provider requests while provider/language changes still produce distinct results.
+
 ## 2026-09-20 — Build policy and start-button crash investigation
 
 ### Completed

@@ -89,6 +89,7 @@ class FloatingService : Service() {
         ApiSettings.initialize(applicationContext)
         TranslationHistory.initialize(applicationContext)
         PerformanceLogStore.initialize(applicationContext)
+        TranslationCache.initialize(applicationContext)
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         val themedContext = ContextThemeWrapper(this, R.style.ScreenTranslatorOverlayTheme)

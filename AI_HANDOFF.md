@@ -29,6 +29,14 @@ Package: `com.example.screentranslator`
 - `ApiSettings.kt` + `SecureApiKeyStore.kt`: custom API selection/state and Android Keystore AES-GCM credential storage.
 - `TranslationOverlayView.kt`: non-touchable overlay renderer, left-anchored normal Manual TL box, local blur-like background, paragraph wrapping, and explicit tolerance ratio support.
 - `TranslationHistory.kt`: persistent translation history including provider name.
+- `TranslationCache.kt`: cache LRU persisten hasil translation sukses, dipusatkan di `TranslationManager` untuk Manual TL, Real-Time, dan Klip.
+
+## Translation Cache — 2026-09-20
+- Cache lookup terjadi sebelum provider dipanggil di `TranslationManager.translate()`; hit tetap mengembalikan callback di main thread.
+- Key SHA-256 mencakup versi skema, scope provider efektif (termasuk model Gemini/OpenRouter non-rahasia), bahasa sumber/target, dan source text yang dinormalisasi. API key tidak pernah disimpan di cache atau key.
+- Hanya response sukses dan tidak kosong yang disimpan. Cache tidak menyimpan failure, sehingga request gagal selalu dapat dicoba lagi.
+- Penyimpanan memakai satu `SharedPreferences` app-private dengan LRU maksimal 500 entri / sekitar 256 KiB serta cache RAM maksimal 100 entri. Tidak ada teks cache yang dicatat ke Logcat.
+- Status: implementasi statis selesai; belum diverifikasi oleh GitHub Actions atau uji perangkat.
 
 ## Manual TL Baseline
 Accepted behavior before Klip:

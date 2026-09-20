@@ -10,6 +10,7 @@ Screen-TL adalah aplikasi Android untuk menerjemahkan teks yang terlihat di laya
 - OCR: ML Kit menghasilkan line + bounding box; metadata layout tambahan sudah diterapkan.
 - Google ML Kit Translation: pipeline Manual TL sudah berjalan sampai History dan overlay pada pengujian sebelumnya.
 - Translation History: persisten dan service-safe.
+- Translation cache: cache LRU persisten untuk hasil sukses telah dipasang di `TranslationManager`; belum diverifikasi CI/perangkat.
 - Manual overlay: coordinate space diperbaiki; sizing/fitting terbaru menghindari text stretch.
 - Eksperimen blur + bounding box sekarang berada di branch `experiment/blur-bounding-box`; belum boleh dianggap siap merge ke `main` sebelum build dan device test.
 - Hapus Overlay: tersedia di menu; perlu uji ulang pengguna.

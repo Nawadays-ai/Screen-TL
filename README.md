@@ -106,7 +106,7 @@ Window overlay Manual TL sekarang dibuat pada ukuran pixel yang sama dengan fram
 - [x] Update overlay.
 - [~] Hilangkan flicker — ditunda.
 - [ ] Change detection.
-- [ ] Translation cache.
+- [~] Translation cache — cache persisten LRU untuk hasil sukses telah diimplementasikan; menunggu build CI dan uji perangkat.
 - [ ] Optimasi CPU/baterai.
 
 ### Milestone 5 — Translation Engine
