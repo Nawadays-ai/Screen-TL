@@ -89,6 +89,12 @@ GitHub Actions run **#187**, run ID `34150633062`, commit `2ad4632f2b28285f19cae
 
 This is a **build verification only**. The user has not yet tested Klip on-device and will test later.
 
+## Build Policy
+- Do **not** run Android/Gradle builds on the user's PC.
+- Build verification is performed exclusively through GitHub Actions.
+- After code changes, the user will commit and manually trigger or observe the GitHub Actions build.
+- Agents may perform static checks that do not invoke Gradle, such as XML validation and `git diff --check`.
+
 ## Development Rules
 - Inspect actual files before editing.
 - Keep experiments off `main` unless explicitly promoted.
