@@ -123,8 +123,9 @@ $text
                     onSuccess(result)
                 },
                 onFailure = { ex, httpCode ->
-                    if (httpCode == 429) {
-                        val msg = "Limit di $model (429), rotasi ke model berikutnya..."
+                    if (httpCode == 429 || httpCode == 503) {
+                        val reason = if (httpCode == 429) "limit tercapai" else "sedang sibuk"
+                        val msg = "Model $model $reason ($httpCode), rotasi ke model berikutnya..."
                         log(msg)
                         onRotationEvent?.invoke(msg)
                         attempts++

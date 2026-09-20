@@ -2,6 +2,7 @@ package com.example.screentranslator
 
 import android.os.Handler
 import android.os.Looper
+import kotlin.concurrent.thread
 
 class TranslationManager(
     private val sourceLanguage: String,
@@ -54,7 +55,11 @@ class TranslationManager(
     }
 
     fun close() {
-        provider.close()
+        // OkHttp may close TLS sockets while evicting its connection pool. This must
+        // not run from Service.onDestroy(), which Android invokes on the main thread.
+        thread(name = "ScreenTL-ProviderClose", isDaemon = true) {
+            runCatching { provider.close() }
+        }
     }
 
     private fun createProvider(manualProvider: String): TranslationProvider {
