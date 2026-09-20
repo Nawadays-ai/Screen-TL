@@ -295,7 +295,7 @@ class FloatingService : Service() {
             cancelManualCaptureTimeout(); showToast("Screenshot didapat. Memproses OCR..."); startManualProcessTimeout(manager)
             try { ocr.recognize(bitmap, onSuccess = { detectedTexts ->
                 if (detectedTexts.isEmpty()) { finishManualTranslation("OCR tidak menemukan teks"); return@recognize }
-                try { translator.prepare(onReady = { translateTexts(translator, detectedTexts, 0, mutableListOf(), mutableListOf(), bitmap.width, bitmap.height) }, onFailure = { exception -> releaseBlurPatches(detectedTexts); finishManualTranslation("Model/API terjemahan gagal: ${exception.message ?: "Unknown error"}") }) }
+                try { translator.prepare(onReady = { translateTexts(translator, detectedTexts, 0, mutableListOf(), mutableListOf(), 0, bitmap.width, bitmap.height) }, onFailure = { exception -> releaseBlurPatches(detectedTexts); finishManualTranslation("Model/API terjemahan gagal: ${exception.message ?: "Unknown error"}") }) }
                 catch (exception: Exception) { releaseBlurPatches(detectedTexts); finishManualTranslation("Gagal menyiapkan translator: ${exception.message ?: "Unknown error"}") }
             }, onFailure = { exception -> finishManualTranslation("OCR gagal: ${exception.message ?: "Unknown error"}") }) }
             catch (exception: Exception) { Log.e(TAG, "OCR invocation threw", exception); finishManualTranslation("Proses OCR gagal: ${exception.message ?: "Unknown error"}") }
@@ -309,10 +309,15 @@ class FloatingService : Service() {
         cancelManualProcessTimeout(); manualProcessTimeout = Runnable { if (manualTranslationPending) { manager.cancelPendingCapture(); manualTranslationPending = false; ScreenTLPerformanceTrace.current()?.finish("manual process timeout"); showToast("Proses terjemahan terlalu lama. Coba lagi.") } }; mainHandler.postDelayed(manualProcessTimeout!!, MANUAL_PROCESS_TIMEOUT_MS)
     }
 
-    private fun translateTexts(translator: TranslationManager, texts: List<DetectedText>, index: Int, results: MutableList<String>, overlayResults: MutableList<TranslationOverlayItem>, sourceWidth: Int, sourceHeight: Int) {
+    private fun translateTexts(translator: TranslationManager, texts: List<DetectedText>, index: Int, results: MutableList<String>, overlayResults: MutableList<TranslationOverlayItem>, cacheHits: Int, sourceWidth: Int, sourceHeight: Int) {
         if (index >= texts.size) {
             val resultText = results.joinToString("\n\n"); val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-            val historyEntry = buildString { append("[").append(time).append("]\n"); append("TL: ").append(translator.getProviderName()).append("\n"); append(sourceLanguage).append(" → ").append(targetLanguage).append("\n\n"); append(resultText) }
+            val cacheStatus = when {
+                cacheHits == texts.size -> "Cache: semua kalimat dari cache ($cacheHits/${texts.size})"
+                cacheHits > 0 -> "Cache: sebagian kalimat dari cache ($cacheHits/${texts.size})"
+                else -> "Cache: tidak ada kalimat dari cache (0/${texts.size})"
+            }
+            val historyEntry = buildString { append("[").append(time).append("]\n"); append("TL: ").append(translator.getProviderName()).append("\n"); append(cacheStatus).append("\n"); append(sourceLanguage).append(" → ").append(targetLanguage).append("\n\n"); append(resultText) }
             try {
                 TranslationHistory.add(historyEntry)
                 val trace = ScreenTLPerformanceTrace.current()
@@ -328,8 +333,9 @@ class FloatingService : Service() {
             return
         }
         val currentText = texts[index]
-        try { translator.translate(currentText.text, onSuccess = { translatedText -> results.add("${currentText.text}\n→ $translatedText"); overlayResults.add(currentText.toOverlayItem(translatedText)); translateTexts(translator, texts, index + 1, results, overlayResults, sourceWidth, sourceHeight) }, onFailure = { exception -> currentText.blurredPatch?.let { if (!it.isRecycled) it.recycle() }; results.add("${currentText.text}\n→ [Gagal diterjemahkan: ${exception.message ?: "Unknown error"}]"); translateTexts(translator, texts, index + 1, results, overlayResults, sourceWidth, sourceHeight) }) }
-        catch (exception: Exception) { currentText.blurredPatch?.let { if (!it.isRecycled) it.recycle() }; results.add("${currentText.text}\n→ [Gagal diterjemahkan: ${exception.message ?: "Unknown error"}]"); translateTexts(translator, texts, index + 1, results, overlayResults, sourceWidth, sourceHeight) }
+        var currentWasCached = false
+        try { translator.translate(currentText.text, onSuccess = { translatedText -> results.add("${currentText.text}\n→ $translatedText"); overlayResults.add(currentText.toOverlayItem(translatedText)); translateTexts(translator, texts, index + 1, results, overlayResults, cacheHits + if (currentWasCached) 1 else 0, sourceWidth, sourceHeight) }, onFailure = { exception -> currentText.blurredPatch?.let { if (!it.isRecycled) it.recycle() }; results.add("${currentText.text}\n→ [Gagal diterjemahkan: ${exception.message ?: "Unknown error"}]"); translateTexts(translator, texts, index + 1, results, overlayResults, cacheHits, sourceWidth, sourceHeight) }, onCacheHit = { currentWasCached = true }) }
+        catch (exception: Exception) { currentText.blurredPatch?.let { if (!it.isRecycled) it.recycle() }; results.add("${currentText.text}\n→ [Gagal diterjemahkan: ${exception.message ?: "Unknown error"}]"); translateTexts(translator, texts, index + 1, results, overlayResults, cacheHits, sourceWidth, sourceHeight) }
     }
 
     private fun DetectedText.toOverlayItem(translatedText: String): TranslationOverlayItem = TranslationOverlayItem(translatedText = translatedText, left = left, top = top, right = right, bottom = bottom, sourceTextSizePx = sourceTextSizePx, backgroundColor = backgroundColor, blurredPatch = blurredPatch).also { blurredPatch = null }

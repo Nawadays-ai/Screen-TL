@@ -28,14 +28,22 @@ class TranslationManager(
         )
     }
 
-    fun translate(text: String, onSuccess: (String) -> Unit, onFailure: (Exception) -> Unit) {
+    fun translate(
+        text: String,
+        onSuccess: (String) -> Unit,
+        onFailure: (Exception) -> Unit,
+        onCacheHit: (() -> Unit)? = null
+    ) {
         val perfTrace = ScreenTLPerformanceTrace.current()
         val providerName = getProviderName()
         val cacheScope = getCacheScope()
         val cachedTranslation = TranslationCache.get(cacheScope, sourceLanguage, targetLanguage, text)
         if (cachedTranslation != null) {
             perfTrace?.mark("translation_cache_hit provider=$providerName chars=${text.length}")
-            mainHandler.post { onSuccess(cachedTranslation) }
+            mainHandler.post {
+                onCacheHit?.invoke()
+                onSuccess(cachedTranslation)
+            }
             return
         }
 

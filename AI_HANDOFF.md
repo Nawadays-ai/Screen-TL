@@ -36,6 +36,7 @@ Package: `com.example.screentranslator`
 - Key SHA-256 mencakup versi skema, scope provider efektif (termasuk model Gemini/OpenRouter non-rahasia), bahasa sumber/target, dan source text yang dinormalisasi. API key tidak pernah disimpan di cache atau key.
 - Hanya response sukses dan tidak kosong yang disimpan. Cache tidak menyimpan failure, sehingga request gagal selalu dapat dicoba lagi.
 - Penyimpanan memakai satu `SharedPreferences` app-private dengan LRU maksimal 500 entri / sekitar 256 KiB serta cache RAM maksimal 100 entri. Tidak ada teks cache yang dicatat ke Logcat.
+- Setiap entri History Manual TL dan Klip menampilkan status cache eksplisit: semua, sebagian, atau tidak ada kalimat dari cache, berikut jumlah `cache-hit/total` untuk verifikasi perangkat.
 - Status: implementasi statis selesai; belum diverifikasi oleh GitHub Actions atau uji perangkat.
 
 ## Manual TL Baseline

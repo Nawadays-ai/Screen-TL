@@ -14,6 +14,7 @@ This file is the chronological handoff log for ongoing work. Add an entry for ev
 - `TranslationManager` now returns a cached successful translation before calling ML Kit, DeepL, Gemini, or OpenRouter; successful non-empty provider responses are cached. Failures are never cached.
 - Initialized the cache from both `MainActivity` and `FloatingService`, matching the existing persistent-store pattern.
 - Cache diagnostics only record hit metadata and character counts through the existing performance trace; source/translation text is not logged.
+- History Manual TL dan Klip menampilkan `Cache: semua/sebagian/tidak ada kalimat dari cache (hit/total)` agar pengujian perangkat dapat membuktikan cache hit tanpa mengandalkan Logcat atau metrik provider.
 
 ### Verification and next action
 - Per user instruction and repository policy, no Gradle/Android build was run locally. Static diff validation remains required before commit.

@@ -225,6 +225,7 @@ object KlipSelectionController {
             return
         }
 
+        var wasCached = false
         try {
             translator.translate(
                 sourceText,
@@ -242,6 +243,7 @@ object KlipSelectionController {
                         buildString {
                             append("[").append(time).append("]\n")
                             append("TL: ").append(translator.getProviderName()).append(" (Klip)\n")
+                            append(if (wasCached) "Cache: semua kalimat dari cache (1/1)" else "Cache: tidak ada kalimat dari cache (0/1)").append("\n")
                             append(source).append(" → ").append(target).append("\n\n")
                             append(sourceText)
                             append("\n→ ")
@@ -277,7 +279,8 @@ object KlipSelectionController {
                     hasClipOverlay = true
                     hostRoot?.let { setClipCancelVisible(it, true) }
                     toast(owner, "Klip selesai dengan error terjemahan")
-                }
+                },
+                onCacheHit = { wasCached = true }
             )
         } catch (e: Exception) {
             runCatching { crop.recycle() }
