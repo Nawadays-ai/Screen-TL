@@ -150,7 +150,7 @@ class SettingsActivity : AppCompatActivity() {
             else -> ""
         }
         etApiKey.setText(key)
-        etApiKey.setSelection(etApiKey.text.length)
+        etApiKey.setSelection(key.length)
 
         if (selectedApiProvider == "OpenRouter") {
             etBaseUrl.setText(ApiSettings.getOpenRouterBaseUrl())
