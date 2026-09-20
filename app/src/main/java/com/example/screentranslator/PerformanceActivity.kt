@@ -2,6 +2,7 @@ package com.example.screentranslator
 
 import android.os.Bundle
 import android.widget.Button
+import android.widget.ImageButton
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import java.text.SimpleDateFormat
@@ -15,7 +16,7 @@ class PerformanceActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_performance)
         PerformanceLogStore.initialize(applicationContext)
-        findViewById<Button>(R.id.btnBackPerformance).setOnClickListener { finish() }
+        findViewById<ImageButton>(R.id.btnBackPerformance).setOnClickListener { finish() }
         findViewById<Button>(R.id.btnClearPerformance).setOnClickListener {
             PerformanceLogStore.clear()
             updatePerformance()

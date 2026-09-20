@@ -72,8 +72,19 @@ class TranslationOverlayView(context: Context) : View(context) {
     }
 
     fun clearTranslations() {
-        renderItems = emptyList(); groupColors = emptyList(); itemGroups = emptyList()
-        visibility = View.GONE; invalidate()
+        // Recycle blurred patches before clearing
+        renderItems.forEach { item ->
+            item.item.blurredPatch?.let { if (!it.isRecycled) it.recycle() }
+        }
+        renderItems = emptyList()
+        groupColors = emptyList()
+        itemGroups = emptyList()
+        visibility = View.GONE
+        invalidate()
+    }
+
+    fun clearTranslationsAndRecycle() {
+        clearTranslations()
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -254,7 +265,14 @@ class TranslationOverlayView(context: Context) : View(context) {
     }
 
     override fun onDetachedFromWindow() {
-        renderItems = emptyList(); groupColors = emptyList(); itemGroups = emptyList(); super.onDetachedFromWindow()
+        // Recycle blurred patches to prevent memory leaks
+        renderItems.forEach { item ->
+            item.item.blurredPatch?.let { if (!it.isRecycled) it.recycle() }
+        }
+        renderItems = emptyList()
+        groupColors = emptyList()
+        itemGroups = emptyList()
+        super.onDetachedFromWindow()
     }
 }
 

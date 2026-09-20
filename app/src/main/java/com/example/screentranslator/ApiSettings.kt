@@ -41,7 +41,7 @@ object ApiSettings {
 
     fun setManualProvider(provider: String) {
         ensureInitialized()
-        preferences.edit().putString(KEY_MANUAL_PROVIDER, PROVIDER_ML_KIT).apply()
+        preferences.edit().putString(KEY_MANUAL_PROVIDER, provider).apply()
     }
 
     // ---------- Gemini ----------

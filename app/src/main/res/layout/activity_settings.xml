@@ -1,176 +1,225 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#121212">
+    android:background="@color/surface"
+    android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp">
+        android:padding="24dp">
 
+        <!-- Header -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="52dp"
+            android:layout_height="56dp"
             android:gravity="center_vertical">
-            <Button
+            <ImageButton
                 android:id="@+id/btnBackSettings"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="←"
-                android:textSize="22sp"
-                android:contentDescription="Kembali" />
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="@drawable/btn_icon_background"
+                android:contentDescription="@string/settings"
+                android:src="@android:drawable/ic_menu_close_clear_cancel"
+                android:tint="@color/on_surface_variant"
+                android:padding="10dp" />
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
-                android:text="Settings"
-                android:textColor="#FFFFFF"
+                android:layout_marginStart="12dp"
+                android:text="Pengaturan"
+                android:textColor="@color/on_surface"
                 android:textSize="22sp"
                 android:textStyle="bold" />
         </LinearLayout>
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="Mesin Translation Manual"
-            android:textColor="#BBBBBB" />
-        <Spinner
-            android:id="@+id/spinnerManualProvider"
+        <!-- Section: Manual Translation Engine -->
+        <androidx.cardview.widget.CardView
             android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:background="#2A2A2A" />
+            android:layout_height="wrap_content"
+            style="@style/Widget.ScreenTranslator.Card"
+            android:layout_marginBottom="24dp">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="28dp"
-            android:text="API Translation Manual"
-            android:textColor="#FFFFFF"
-            android:textSize="18sp"
-            android:textStyle="bold" />
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Pilih koneksi API sendiri. Gemini dan DeepL memakai key terpisah yang disimpan terenkripsi."
-            android:textColor="#888888"
-            android:textSize="12sp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="20dp">
 
-        <Spinner
-            android:id="@+id/spinnerApiProvider"
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Mesin Terjemahan Manual"
+                    android:textColor="@color/on_surface"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="8dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Pilih penyedia terjemahan untuk mode Manual TL"
+                    android:textColor="@color/on_surface_variant"
+                    android:textSize="13sp"
+                    android:layout_marginBottom="16dp" />
+
+                <Spinner
+                    android:id="@+id/spinnerManualProvider"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    style="@style/Widget.ScreenTranslator.Spinner" />
+            </LinearLayout>
+        </androidx.cardview.widget.CardView>
+
+        <!-- Section: API Translation -->
+        <androidx.cardview.widget.CardView
             android:layout_width="match_parent"
-            android:layout_height="48dp"
+            android:layout_height="wrap_content"
+            style="@style/Widget.ScreenTranslator.Card"
+            android:layout_marginBottom="24dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="API Terjemahan Manual"
+                    android:textColor="@color/on_surface"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="8dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Gunakan API eksternal untuk kualitas terjemahan lebih baik. Key disimpan terenkripsi."
+                    android:textColor="@color/on_surface_variant"
+                    android:textSize="13sp"
+                    android:layout_marginBottom="16dp" />
+
+                <Spinner
+                    android:id="@+id/spinnerApiProvider"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    style="@style/Widget.ScreenTranslator.Spinner"
+                    android:layout_marginBottom="16dp" />
+
+                <com.google.android.material.textfield.TextInputLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    style="@style/Widget.ScreenTranslator.EditText"
+                    android:layout_marginBottom="12dp"
+                    android:hint="API Key">
+
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etApiKey"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/on_surface"
+                        android:textColorHint="@color/on_surface_variant"
+                        android:textSize="14sp"
+                        android:inputType="textPassword"
+                        android:singleLine="true" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.textfield.TextInputLayout
+                    android:id="@+id/tilBaseUrl"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    style="@style/Widget.ScreenTranslator.EditText"
+                    android:layout_marginBottom="12dp"
+                    android:hint="Base URL"
+                    android:visibility="gone">
+
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etBaseUrl"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/on_surface"
+                        android:textColorHint="@color/on_surface_variant"
+                        android:textSize="14sp"
+                        android:inputType="textUri"
+                        android:singleLine="true" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+<com.google.android.material.textfield.TextInputLayout
+                    android:id="@+id/tilModel"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    style="@style/Widget.ScreenTranslator.EditText"
+                    android:layout_marginBottom="12dp"
+                    android:hint="Model"
+                    android:visibility="gone">
+
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etModel"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/on_surface"
+                        android:textColorHint="@color/on_surface_variant"
+                        android:textSize="14sp"
+                        android:inputType="text"
+                        android:singleLine="true" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <TextView
+                    android:id="@+id/tvApiStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="12dp"
+                    android:textColor="@color/on_surface_variant"
+                    android:textSize="12sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center">
+
+                    <Button
+                        android:id="@+id/btnApiCheck"
+                        android:layout_width="wrap_content"
+                        android:layout_height="44dp"
+                        style="@style/Widget.ScreenTranslator.Button.Secondary"
+                        android:text="Cek" />
+
+                    <Button
+                        android:id="@+id/btnApiUse"
+                        android:layout_width="wrap_content"
+                        android:layout_height="44dp"
+                        android:layout_marginStart="12dp"
+                        style="@style/Widget.ScreenTranslator.Button.Primary"
+                        android:text="Gunakan"
+                        android:visibility="gone" />
+
+                    <Button
+                        android:id="@+id/btnApiDisable"
+                        android:layout_width="wrap_content"
+                        android:layout_height="44dp"
+                        android:layout_marginStart="12dp"
+                        style="@style/Widget.ScreenTranslator.Button.Danger"
+                        android:text="Nonaktifkan"
+                        android:visibility="gone" />
+                </LinearLayout>
+            </LinearLayout>
+        </androidx.cardview.widget.CardView>
+
+        <!-- Info text -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:background="#2A2A2A" />
-
-        <EditText
-            android:id="@+id/etApiKey"
-            android:layout_width="match_parent"
-            android:layout_height="52dp"
-            android:layout_marginTop="8dp"
-            android:hint="Masukkan API key"
-            android:textColor="#FFFFFF"
-            android:textColorHint="#777777"
-            android:inputType="textPassword"
-            android:singleLine="true" />
-
-        <TextView
-    android:id="@+id/labelBaseUrl"
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:layout_marginTop="8dp"
-    android:text="Base URL"
-    android:textColor="#BBBBBB"
-    android:textSize="12sp"
-    android:visibility="gone" />
-
-<EditText
-    android:id="@+id/etBaseUrl"
-    android:layout_width="match_parent"
-    android:layout_height="52dp"
-    android:layout_marginTop="4dp"
-    android:hint="https://openrouter.ai/api/v1"
-    android:textColor="#FFFFFF"
-    android:textColorHint="#777777"
-    android:inputType="textUri"
-    android:singleLine="true"
-    android:visibility="gone" />
-
-<TextView
-    android:id="@+id/labelModel"
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:layout_marginTop="8dp"
-    android:text="Model"
-    android:textColor="#BBBBBB"
-    android:textSize="12sp"
-    android:visibility="gone" />
-
-<EditText
-    android:id="@+id/etModel"
-    android:layout_width="match_parent"
-    android:layout_height="52dp"
-    android:layout_marginTop="4dp"
-    android:hint="deepseek/deepseek-chat-v3.1:free"
-    android:textColor="#FFFFFF"
-    android:textColorHint="#777777"
-    android:inputType="text"
-    android:singleLine="true"
-    android:visibility="gone" />
-
-        <TextView
-            android:id="@+id/tvApiStatus"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:textColor="#BBBBBB"
-            android:textSize="12sp" />
-
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:orientation="horizontal">
-            <Button
-                android:id="@+id/btnApiCheck"
-                android:layout_width="wrap_content"
-                android:layout_height="44dp"
-                android:minWidth="0dp"
-                android:paddingStart="20dp"
-                android:paddingEnd="20dp"
-                android:text="Cek"
-                android:textAllCaps="false" />
-            <Button
-                android:id="@+id/btnApiUse"
-                android:layout_width="wrap_content"
-                android:layout_height="44dp"
-                android:layout_marginStart="8dp"
-                android:minWidth="0dp"
-                android:paddingStart="20dp"
-                android:paddingEnd="20dp"
-                android:text="Gunakan"
-                android:textAllCaps="false" />
-            <Button
-                android:id="@+id/btnApiDisable"
-                android:layout_width="wrap_content"
-                android:layout_height="44dp"
-                android:layout_marginStart="8dp"
-                android:minWidth="0dp"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp"
-                android:text="Nonaktifkan"
-                android:textAllCaps="false" />
-        </LinearLayout>
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
             android:layout_marginBottom="24dp"
             android:text="API aktif mengambil prioritas. Jika tidak ada API aktif, Google ML Kit digunakan sebagai mesin manual."
-            android:textColor="#777777"
-            android:textSize="12sp" />
+            android:textColor="@color/on_surface_variant"
+            android:textSize="12sp"
+            android:gravity="center" />
     </LinearLayout>
 </ScrollView>

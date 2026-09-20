@@ -50,15 +50,15 @@ object KlipSelectionController {
         }
         val root = sourceView.rootView ?: return
         val wm = owner.getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return
-        val capture = readField<ScreenCaptureManager>(owner, "screenCaptureManager")
-        val ocr = readField<OcrManager>(owner, "ocrManager")
-        val translator = readField<TranslationManager>(owner, "translationManager")
+        val capture = owner.getScreenCaptureManager()
+        val ocr = owner.getOcrManager()
+        val translator = owner.getTranslationManager()
         if (capture == null || ocr == null || translator == null) {
             toast(owner, "Klip belum siap. Pastikan Translator aktif.")
             return
         }
 
-        runCatching { invokePrivate(owner, "removeTranslationOverlay") }
+        runCatching { owner.removeTranslationOverlayPublic() }
         selectionExists = false
         hasClipOverlay = false
         isActive = true
@@ -114,7 +114,7 @@ object KlipSelectionController {
         if (!isActive && !hasClipOverlay) return
         val owner = service ?: return
 
-        readField<ScreenCaptureManager>(owner, "screenCaptureManager")?.cancelPendingCapture()
+        owner.getScreenCaptureManager()?.cancelPendingCapture()
 
         clipOverlayView?.let { view ->
             runCatching { windowManager?.removeView(view) }
@@ -235,8 +235,8 @@ object KlipSelectionController {
                     }
 
                     val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-                    val source = readField<String>(owner, "sourceLanguage") ?: "Jepang"
-                    val target = readField<String>(owner, "targetLanguage") ?: "Indonesia"
+                    val source = owner.getSourceLanguage()
+                    val target = owner.getTargetLanguage()
 
                     TranslationHistory.add(
                         buildString {
@@ -381,7 +381,7 @@ object KlipSelectionController {
         }
         maskView = null
         hostRoot?.let { root -> setClipCancelVisible(root, false) }
-        service?.let { runCatching { invokePrivate(it, "updateRemoveOverlayButton") } }
+        service?.let { it.updateRemoveOverlayButtonPublic() }
     }
 
     private fun setClipCancelVisible(root: View, visible: Boolean) {
@@ -418,20 +418,6 @@ object KlipSelectionController {
             }
         }
         return null
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    private inline fun <reified T> readField(target: Any, name: String): T? =
-        runCatching {
-            val field = target.javaClass.getDeclaredField(name)
-            field.isAccessible = true
-            field.get(target) as? T
-        }.getOrNull()
-
-    private fun invokePrivate(target: Any, name: String) {
-        val method = target.javaClass.getDeclaredMethod(name)
-        method.isAccessible = true
-        method.invoke(target)
     }
 
     private fun Context.findViewByIdRoot(): View =

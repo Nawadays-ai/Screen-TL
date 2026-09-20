@@ -6,67 +6,92 @@
     android:clipChildren="false"
     android:clipToPadding="false">
 
-    <LinearLayout
+    <!-- Sub Menu -->
+    <androidx.cardview.widget.CardView
         android:id="@+id/layoutSubMenu"
-        android:layout_width="176dp"
+        android:layout_width="180dp"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:background="#E91E1E1E"
-        android:padding="6dp"
+        android:layout_gravity="center"
+        android:layout_marginBottom="72dp"
         android:visibility="gone"
-        android:elevation="8dp">
+        app:cardBackgroundColor="#E61A1A2E"
+        app:cardCornerRadius="16dp"
+        app:cardElevation="12dp"
+        app:strokeColor="@color/outline"
+        app:strokeWidth="1dp">
 
-        <Button
-            android:id="@+id/btnRealtime"
-            android:layout_width="164dp"
-            android:layout_height="44dp"
-            android:text="▶  Real-Time"
-            android:textSize="14sp"
-            android:textColor="#FFFFFF"
-            android:backgroundTint="#4CAF50"
-            android:layout_marginBottom="5dp" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="8dp">
 
-        <com.example.screentranslator.KlipManualButton
-            android:id="@+id/btnManual"
-            android:layout_width="164dp"
-            android:layout_height="44dp"
-            android:text="✂  Klip"
-            android:textSize="14sp"
-            android:textColor="#FFFFFF"
-            android:backgroundTint="#2196F3"
-            android:layout_marginBottom="5dp" />
+            <Button
+                android:id="@+id/btnRealtime"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginBottom="6dp"
+                android:text="@string/realtime"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/on_surface"
+                android:backgroundTint="@color/primary"
+                android:insetTop="0dp"
+                android:insetBottom="0dp" />
 
-        <com.example.screentranslator.KlipCancelButton
-            android:id="@+id/btnRemoveOverlay"
-            android:layout_width="164dp"
-            android:layout_height="44dp"
-            android:text="✕  Cancel"
-            android:textSize="14sp"
-            android:textColor="#FFFFFF"
-            android:backgroundTint="#FF9800"
-            android:visibility="gone"
-            android:layout_marginBottom="5dp" />
+            <com.example.screentranslator.KlipManualButton
+                android:id="@+id/btnManual"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginBottom="6dp"
+                android:text="@string/klip"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/on_surface"
+                android:backgroundTint="@color/secondary"
+                android:insetTop="0dp"
+                android:insetBottom="0dp" />
 
-        <Button
-            android:id="@+id/btnExit"
-            android:layout_width="164dp"
-            android:layout_height="44dp"
-            android:text="✖  Keluar"
-            android:textSize="14sp"
-            android:textColor="#FFFFFF"
-            android:backgroundTint="#F44336" />
-    </LinearLayout>
+            <com.example.screentranslator.KlipCancelButton
+                android:id="@+id/btnRemoveOverlay"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:layout_marginBottom="6dp"
+                android:text="@string/cancel"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/on_error"
+                android:backgroundTint="@color/error"
+                android:visibility="gone"
+                android:insetTop="0dp"
+                android:insetBottom="0dp" />
 
+            <Button
+                android:id="@+id/btnExit"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:text="@string/exit"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="@color/on_surface_variant"
+                android:backgroundTint="@color/surface_variant"
+                android:insetTop="0dp"
+                android:insetBottom="0dp" />
+        </LinearLayout>
+    </androidx.cardview.widget.CardView>
+
+    <!-- Main FAB -->
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/fabMain"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
         android:layout_gravity="center"
-        android:alpha="0.75"
-        android:contentDescription="Translator Button"
-        app:fabCustomSize="48dp"
-        app:backgroundTint="#2196F3"
-        app:tint="#FFFFFF"
-        app:srcCompat="@android:drawable/ic_menu_compass" />
+        android:contentDescription="@string/manual_tl"
+        app:fabCustomSize="56dp"
+        app:backgroundTint="@color/primary"
+        app:tint="@color/on_primary"
+        app:srcCompat="@android:drawable/ic_menu_compass"
+        app:elevation="8dp"
+        app:pressedTranslationZ="12dp" />
 
 </FrameLayout>

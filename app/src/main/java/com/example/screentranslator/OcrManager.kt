@@ -90,5 +90,12 @@ class OcrManager(sourceLanguage: String) {
         if (group.isEmpty()) return null
         return TextLayoutAnalyzer.Result(group.minOf { it.layout.left }, group.minOf { it.layout.top }, group.maxOf { it.layout.right }, group.maxOf { it.layout.bottom }, group.map { it.layout.sourceTextSizePx }.average().toFloat(), group.first().layout.backgroundColor, TextLayoutAnalyzer.WritingOrientation.VERTICAL)
     }
-    fun close() { recognizer.close() }
+    fun close() {
+        recognizer.close()
+    }
+
+    // Call this to recycle any blurred patches in detected texts
+    fun recycleBlurredPatches(detectedTexts: List<DetectedText>) {
+        detectedTexts.forEach { it.blurredPatch?.let { if (!it.isRecycled) it.recycle() } }
+    }
 }

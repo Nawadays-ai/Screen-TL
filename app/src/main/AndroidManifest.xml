@@ -11,7 +11,7 @@
         android:icon="@android:drawable/ic_menu_compass"
         android:label="Screen Translator"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Material3.DayNight.NoActionBar">
+        android:theme="@style/Theme.ScreenTranslator.Minimal">
 
         <activity android:name=".HistoryActivity" android:exported="false" />
         <activity android:name=".PerformanceActivity" android:exported="false" />

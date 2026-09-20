@@ -3,32 +3,23 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:padding="16dp"
-    android:background="#121212">
+    android:padding="24dp"
+    android:background="@color/surface">
 
+    <!-- Header -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="48dp"
+        android:layout_height="56dp"
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
-        <ImageButton
-            android:id="@+id/btnHistory"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="History"
-            android:src="@android:drawable/ic_menu_recent_history"
-            android:tint="#FFFFFF" />
-
-        <ImageButton
-            android:id="@+id/btnPerformance"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Log performa"
-            android:src="@android:drawable/ic_menu_info_details"
-            android:tint="#FFFFFF" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Screen Translator"
+            android:textColor="@color/on_surface"
+            android:textSize="22sp"
+            android:textStyle="bold" />
 
         <View
             android:layout_width="0dp"
@@ -36,13 +27,36 @@
             android:layout_weight="1" />
 
         <ImageButton
+            android:id="@+id/btnHistory"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:background="@drawable/btn_icon_background"
+            android:contentDescription="@string/history"
+            android:src="@android:drawable/ic_menu_recent_history"
+            android:tint="@color/on_surface_variant"
+            android:padding="10dp" />
+
+        <ImageButton
+            android:id="@+id/btnPerformance"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/btn_icon_background"
+            android:contentDescription="@string/performance"
+            android:src="@android:drawable/ic_menu_info_details"
+            android:tint="@color/on_surface_variant"
+            android:padding="10dp" />
+
+        <ImageButton
             android:id="@+id/btnSettings"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Settings"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/btn_icon_background"
+            android:contentDescription="@string/settings"
             android:src="@android:drawable/ic_menu_preferences"
-            android:tint="#FFFFFF" />
+            android:tint="@color/on_surface_variant"
+            android:padding="10dp" />
     </LinearLayout>
 
     <View
@@ -50,50 +64,71 @@
         android:layout_height="0dp"
         android:layout_weight="1" />
 
-    <LinearLayout
+    <!-- Language Selection Card -->
+    <androidx.cardview.widget.CardView
         android:layout_width="match_parent"
-        android:layout_height="64dp"
-        android:gravity="center"
-        android:orientation="horizontal">
+        android:layout_height="wrap_content"
+        style="@style/Widget.ScreenTranslator.Card"
+        android:layout_marginBottom="24dp">
 
-        <Spinner
-            android:id="@+id/spinnerSourceLang"
-            android:layout_width="0dp"
-            android:layout_height="52dp"
-            android:layout_weight="1"
-            android:background="#2A2A2A" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="20dp">
 
-        <ImageView
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:layout_marginHorizontal="8dp"
-            android:contentDescription="Ke"
-            android:src="@android:drawable/ic_media_next"
-            android:tint="#FFFFFF" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Bahasa"
+                android:textColor="@color/on_surface_variant"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.1"
+                android:layout_marginBottom="16dp" />
 
-        <Spinner
-            android:id="@+id/spinnerTargetLang"
-            android:layout_width="0dp"
-            android:layout_height="52dp"
-            android:layout_weight="1"
-            android:background="#2A2A2A" />
-    </LinearLayout>
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
 
-    <View
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1" />
+                <Spinner
+                    android:id="@+id/spinnerSourceLang"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    style="@style/Widget.ScreenTranslator.Spinner" />
 
+                <ImageView
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:layout_marginHorizontal="12dp"
+                    android:contentDescription="@string/swap"
+                    android:src="@drawable/ic_swap"
+                    android:tint="@color/primary" />
+
+                <Spinner
+                    android:id="@+id/spinnerTargetLang"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    style="@style/Widget.ScreenTranslator.Spinner" />
+            </LinearLayout>
+        </LinearLayout>
+    </androidx.cardview.widget.CardView>
+
+    <!-- Play Button -->
     <ImageButton
         android:id="@+id/btnPlay"
-        android:layout_width="72dp"
-        android:layout_height="72dp"
+        android:layout_width="80dp"
+        android:layout_height="80dp"
         android:layout_gravity="center_horizontal"
-        android:layout_marginBottom="48dp"
-        android:backgroundTint="#2196F3"
-        android:contentDescription="Play"
-        android:padding="18dp"
+        android:layout_marginBottom="32dp"
+        android:background="@drawable/btn_play_background"
+        android:contentDescription="@string/start_translation"
         android:src="@android:drawable/ic_media_play"
-        android:tint="#FFFFFF" />
+        android:tint="@color/on_primary"
+        android:padding="20dp" />
 
 </LinearLayout>

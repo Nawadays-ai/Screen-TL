@@ -73,6 +73,15 @@ class FloatingService : Service() {
     private var targetLanguage: String = "Indonesia"
     private var translationManager: TranslationManager? = null
 
+    // Public accessors for KlipSelectionController (replaces reflection)
+    fun getScreenCaptureManager(): ScreenCaptureManager? = screenCaptureManager
+    fun getOcrManager(): OcrManager? = ocrManager
+    fun getTranslationManager(): TranslationManager? = translationManager
+    fun getSourceLanguage(): String = sourceLanguage
+    fun getTargetLanguage(): String = targetLanguage
+    fun removeTranslationOverlayPublic() { removeTranslationOverlay() }
+    fun updateRemoveOverlayButtonPublic() { updateRemoveOverlayButton() }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -355,6 +364,11 @@ class FloatingService : Service() {
     }
 
     private fun removeTranslationOverlay() {
+        // Recycle blurred patches before removing overlay
+        overlayView?.let { view ->
+            // Access the render items via reflection would be messy, so we'll add a public method
+            view.clearTranslationsAndRecycle()
+        }
         overlayView?.let { runCatching { windowManager.removeView(it) } }
         overlayView = null
         manualOverlayVisible = false
@@ -373,10 +387,12 @@ class FloatingService : Service() {
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     override fun onDestroy() {
-                GeminiTranslationProvider.onRotationEvent = null
+        GeminiTranslationProvider.onRotationEvent = null
         stopRealtimeTranslation("Real-Time Translator Diberhentikan")
         screenCaptureManager?.release(); screenCaptureManager = null
         translationManager?.close(); translationManager = null
+        // Recycle any remaining blurred patches from OCR results
+        // Note: We can't access the detected texts directly here, but the overlay cleanup handles it
         ocrManager = null
         removeTranslationOverlay()
         if (::floatingView.isInitialized) runCatching { windowManager.removeView(floatingView) }
