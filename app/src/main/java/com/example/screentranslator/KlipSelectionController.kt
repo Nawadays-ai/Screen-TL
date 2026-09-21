@@ -282,8 +282,6 @@ object KlipSelectionController {
                         append(cacheStatus).append("\n")
                         append("Unit OCR: ").append(totalUnits).append(" | Request provider: ").append(providerRequests).append("\n")
                         append(source).append(" → ").append(target).append("\n\n")
-                        append(combinedSource)
-                        append("\n→ ")
                         append(combinedTranslated)
                     }
                 )
