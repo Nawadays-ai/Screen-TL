@@ -330,6 +330,19 @@ object KlipSelectionController {
         processNext(0)
     }
 
+    private fun DetectedText.toOverlayItem(translatedText: String): TranslationOverlayItem =
+        TranslationOverlayItem(
+            translatedText = translatedText,
+            left = left,
+            top = top,
+            right = right,
+            bottom = bottom,
+            sourceTextSizePx = sourceTextSizePx,
+            backgroundColor = backgroundColor,
+            blurredPatch = blurredPatch,
+            orientation = orientation
+        ).also { blurredPatch = null }
+
     private fun showResult(
         owner: Context,
         translatedText: String,
