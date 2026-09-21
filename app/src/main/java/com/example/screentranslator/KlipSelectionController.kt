@@ -81,7 +81,10 @@ object KlipSelectionController {
                     ocr = ocr,
                     translator = translator,
                     selectionSpaceWidth = maskView?.width ?: 0,
-                    selectionSpaceHeight = maskView?.height ?: 0
+                    selectionSpaceHeight = maskView?.height ?: 0,
+                    selectionOrigin = maskView?.let { view ->
+                        IntArray(2).also { view.getLocationOnScreen(it) }
+                    } ?: intArrayOf(0, 0)
                 )
             },
             onCancel = { cancel() }
@@ -150,7 +153,8 @@ object KlipSelectionController {
         ocr: OcrManager,
         translator: TranslationManager,
         selectionSpaceWidth: Int,
-        selectionSpaceHeight: Int
+        selectionSpaceHeight: Int,
+        selectionOrigin: IntArray
     ) {
         val owner = service ?: return
         val selection = Rect(rect)
@@ -176,7 +180,8 @@ object KlipSelectionController {
                         bitmap = bitmap,
                         selection = selection,
                         selectionSpaceWidth = selectionSpaceWidth,
-                        selectionSpaceHeight = selectionSpaceHeight
+                        selectionSpaceHeight = selectionSpaceHeight,
+                        selectionOrigin = selectionOrigin
                     )
                     bitmap.recycle()
 
@@ -381,34 +386,27 @@ object KlipSelectionController {
         bitmap: Bitmap,
         selection: Rect,
         selectionSpaceWidth: Int,
-        selectionSpaceHeight: Int
+        selectionSpaceHeight: Int,
+        selectionOrigin: IntArray
     ): Bitmap? {
         val screenW = bitmap.width
         val screenH = bitmap.height
+        val originX = selectionOrigin.getOrNull(0) ?: 0
+        val originY = selectionOrigin.getOrNull(1) ?: 0
 
-        // The selection is drawn in the actual full-screen mask View coordinate space.
-        // Do not substitute displayMetrics here: on devices with insets, cutouts, or
-        // overlay coordinate differences that can shift the crop vertically/horizontally.
-        val coordinateW = selectionSpaceWidth.takeIf { it > 0 }
-            ?: hostRoot?.resources?.displayMetrics?.widthPixels
-            ?: screenW
-        val coordinateH = selectionSpaceHeight.takeIf { it > 0 }
-            ?: hostRoot?.resources?.displayMetrics?.heightPixels
-            ?: screenH
-
-        val scaleX = screenW.toFloat() / coordinateW.coerceAtLeast(1).toFloat()
-        val scaleY = screenH.toFloat() / coordinateH.coerceAtLeast(1).toFloat()
-
-        val left = (selection.left * scaleX).toInt().coerceIn(0, screenW - 1)
-        val top = (selection.top * scaleY).toInt().coerceIn(0, screenH - 1)
-        val right = (selection.right * scaleX).toInt().coerceIn(left + 1, screenW)
-        val bottom = (selection.bottom * scaleY).toInt().coerceIn(top + 1, screenH)
+        // Selection coordinates are local to the mask window. MediaProjection returns
+        // screen coordinates, so translate by the mask's actual on-screen origin instead
+        // of scaling the selection to the bitmap height (which caused vertical drift).
+        val left = (selection.left + originX).coerceIn(0, screenW - 1)
+        val top = (selection.top + originY).coerceIn(0, screenH - 1)
+        val right = (selection.right + originX).coerceIn(left + 1, screenW)
+        val bottom = (selection.bottom + originY).coerceIn(top + 1, screenH)
 
         Log.i(
             TAG,
             "Klip crop mapping: selection=${selection.left},${selection.top},${selection.right},${selection.bottom} " +
-                "space=${coordinateW}x${coordinateH} bitmap=${screenW}x${screenH} " +
-                "crop=$left,$top,$right,$bottom"
+                "space=${selectionSpaceWidth}x${selectionSpaceHeight} origin=${originX},${originY} " +
+                "bitmap=${screenW}x${screenH} crop=$left,$top,$right,$bottom"
         )
 
         if (right - left < MIN_SELECTION_PX || bottom - top < MIN_SELECTION_PX) {
