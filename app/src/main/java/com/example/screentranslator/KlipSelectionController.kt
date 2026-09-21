@@ -252,6 +252,7 @@ object KlipSelectionController {
         }
 
         val results = mutableListOf<String>()
+        val translationsOnly = mutableListOf<String>()
         val overlayResults = mutableListOf<TranslationOverlayItem>()
         var cacheHits = 0
 
@@ -263,6 +264,7 @@ object KlipSelectionController {
             if (index >= detectedTexts.size) {
                 val combinedSource = detectedTexts.map { it.text.trim() }.joinToString("\n\n")
                 val combinedTranslated = results.joinToString("\n\n")
+                val combinedTranslationsOnly = translationsOnly.joinToString("\n\n")
                 val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
                 val source = owner.getSourceLanguage()
                 val target = owner.getTargetLanguage()
@@ -282,13 +284,15 @@ object KlipSelectionController {
                         append(cacheStatus).append("\n")
                         append("Unit OCR: ").append(totalUnits).append(" | Request provider: ").append(providerRequests).append("\n")
                         append(source).append(" → ").append(target).append("\n\n")
+                        append(combinedSource)
+                        append("\n→ ")
                         append(combinedTranslated)
                     }
                 )
 
                 showResult(
                     owner = owner,
-                    translatedText = combinedTranslated,
+                    translatedText = combinedTranslationsOnly,
                     selection = selection,
                     crop = crop
                 )
@@ -309,6 +313,7 @@ object KlipSelectionController {
                         return@translate
                     }
                     results.add("${currentText.text.trim()}\n→ $translatedText")
+                    translationsOnly.add(translatedText)
                     overlayResults.add(currentText.toOverlayItem(translatedText))
                     if (currentWasCached) cacheHits++
                     processNext(index + 1)
