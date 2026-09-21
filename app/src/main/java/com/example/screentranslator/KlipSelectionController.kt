@@ -74,7 +74,16 @@ object KlipSelectionController {
         val display = owner.resources.displayMetrics
         val selectionView = KlipMaskView(
             owner,
-            onConfirm = { rect -> finishSelection(rect, capture, ocr, translator) },
+            onConfirm = { rect ->
+                finishSelection(
+                    rect = rect,
+                    capture = capture,
+                    ocr = ocr,
+                    translator = translator,
+                    selectionSpaceWidth = maskView?.width ?: 0,
+                    selectionSpaceHeight = maskView?.height ?: 0
+                )
+            },
             onCancel = { cancel() }
         ) { exists -> selectionExists = exists }
         maskView = selectionView
@@ -139,7 +148,9 @@ object KlipSelectionController {
         rect: Rect,
         capture: ScreenCaptureManager,
         ocr: OcrManager,
-        translator: TranslationManager
+        translator: TranslationManager,
+        selectionSpaceWidth: Int,
+        selectionSpaceHeight: Int
     ) {
         val owner = service ?: return
         val selection = Rect(rect)
@@ -161,7 +172,12 @@ object KlipSelectionController {
             performanceTrace = trace
             val requested = capture.captureOnce({ bitmap ->
                 try {
-                    val crop = cropBitmap(bitmap, selection)
+                    val crop = cropBitmap(
+                        bitmap = bitmap,
+                        selection = selection,
+                        selectionSpaceWidth = selectionSpaceWidth,
+                        selectionSpaceHeight = selectionSpaceHeight
+                    )
                     bitmap.recycle()
 
                     if (crop == null) {
@@ -361,22 +377,39 @@ object KlipSelectionController {
         }
     }
 
-    private fun cropBitmap(bitmap: Bitmap, selection: Rect): Bitmap? {
+    private fun cropBitmap(
+        bitmap: Bitmap,
+        selection: Rect,
+        selectionSpaceWidth: Int,
+        selectionSpaceHeight: Int
+    ): Bitmap? {
         val screenW = bitmap.width
         val screenH = bitmap.height
 
-        val displayW =
-            hostRoot?.resources?.displayMetrics?.widthPixels?.coerceAtLeast(1) ?: screenW
-        val displayH =
-            hostRoot?.resources?.displayMetrics?.heightPixels?.coerceAtLeast(1) ?: screenH
+        // The selection is drawn in the actual full-screen mask View coordinate space.
+        // Do not substitute displayMetrics here: on devices with insets, cutouts, or
+        // overlay coordinate differences that can shift the crop vertically/horizontally.
+        val coordinateW = selectionSpaceWidth.takeIf { it > 0 }
+            ?: hostRoot?.resources?.displayMetrics?.widthPixels
+            ?: screenW
+        val coordinateH = selectionSpaceHeight.takeIf { it > 0 }
+            ?: hostRoot?.resources?.displayMetrics?.heightPixels
+            ?: screenH
 
-        val scaleX = screenW.toFloat() / displayW.toFloat()
-        val scaleY = screenH.toFloat() / displayH.toFloat()
+        val scaleX = screenW.toFloat() / coordinateW.coerceAtLeast(1).toFloat()
+        val scaleY = screenH.toFloat() / coordinateH.coerceAtLeast(1).toFloat()
 
         val left = (selection.left * scaleX).toInt().coerceIn(0, screenW - 1)
         val top = (selection.top * scaleY).toInt().coerceIn(0, screenH - 1)
         val right = (selection.right * scaleX).toInt().coerceIn(left + 1, screenW)
         val bottom = (selection.bottom * scaleY).toInt().coerceIn(top + 1, screenH)
+
+        Log.i(
+            TAG,
+            "Klip crop mapping: selection=${selection.left},${selection.top},${selection.right},${selection.bottom} " +
+                "space=${coordinateW}x${coordinateH} bitmap=${screenW}x${screenH} " +
+                "crop=$left,$top,$right,$bottom"
+        )
 
         if (right - left < MIN_SELECTION_PX || bottom - top < MIN_SELECTION_PX) {
             return null
