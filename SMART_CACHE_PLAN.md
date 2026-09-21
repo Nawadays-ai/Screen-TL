@@ -21,7 +21,11 @@
 
 ### Tahap 0 — Verifikasi cache dasar
 
-Status: [IN PROGRESS]
+Status: [DONE]
+
+- Crop fix diterapkan: Klip sekarang translasi origin mask, bukan scale proporsional. Unit OCR: 1 konsisten untuk elemen tunggal.
+- Cache dasar berfungsi: hit `1/1` saat source identik (19:26:06, 19:26:17).
+- Miss pada multi-block karena arsitektur cache gabungan (satu key untuk seluruh crop), bukan bug cache. Target Tahap 1.
 
 - Gunakan layar/screenshot yang sama dan pilih isi tulisan yang sama. Ukuran/posisi crop boleh berbeda selama semua tulisan target tetap masuk, jelas, dan tidak ada tulisan lain.
 - Jalankan Klip pertama kali dan simpan/catat History lengkapnya.
@@ -38,7 +42,7 @@ Status: [IN PROGRESS]
 
 ### Tahap 1 — Translation Unit + cache per unit
 
-Status: [PENDING]
+Status: [IN PROGRESS]
 
 - Reuse `TranslationCache`; jangan membuat cache kedua.
 - Bentuk unit dari segmentation yang sudah ada.
