@@ -79,12 +79,7 @@ object KlipSelectionController {
                     rect = rect,
                     capture = capture,
                     ocr = ocr,
-                    translator = translator,
-                    selectionSpaceWidth = maskView?.width ?: 0,
-                    selectionSpaceHeight = maskView?.height ?: 0,
-                    selectionOrigin = maskView?.let { view ->
-                        IntArray(2).also { view.getLocationOnScreen(it) }
-                    } ?: intArrayOf(0, 0)
+                    translator = translator
                 )
             },
             onCancel = { cancel() }
@@ -151,10 +146,7 @@ object KlipSelectionController {
         rect: Rect,
         capture: ScreenCaptureManager,
         ocr: OcrManager,
-        translator: TranslationManager,
-        selectionSpaceWidth: Int,
-        selectionSpaceHeight: Int,
-        selectionOrigin: IntArray
+        translator: TranslationManager
     ) {
         val owner = service ?: return
         val selection = Rect(rect)
@@ -162,6 +154,13 @@ object KlipSelectionController {
         if (selection.width() < MIN_SELECTION_PX || selection.height() < MIN_SELECTION_PX) {
             return
         }
+
+        // Capture mask geometry at confirmation time (view is laid out and attached)
+        val selectionSpaceWidth = maskView?.width ?: 0
+        val selectionSpaceHeight = maskView?.height ?: 0
+        val selectionOrigin = maskView?.let { view ->
+            IntArray(2).also { view.getLocationOnScreen(it) }
+        } ?: intArrayOf(0, 0)
 
         // Keep the mask visible while capture/OCR/translation are running.
         // The selected interior is transparent, so the crop remains untouched.
