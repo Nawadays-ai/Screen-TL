@@ -66,14 +66,12 @@ class TranslationManager(
 
     fun getProviderName(): String = when (provider) {
         is OpenRouterTranslationProvider -> ApiSettings.PROVIDER_OPENROUTER
-        is GeminiTranslationProvider -> "Gemini AI"
         is DeepLTranslationProvider -> ApiSettings.PROVIDER_DEEPL
         is MlKitTranslationProvider -> ApiSettings.PROVIDER_ML_KIT
         else -> provider::class.java.simpleName
     }
 
     private fun getCacheScope(): String = when (provider) {
-        is GeminiTranslationProvider -> "Gemini AI:${GeminiTranslationProvider.getCurrentModel()}"
         is OpenRouterTranslationProvider -> "${ApiSettings.PROVIDER_OPENROUTER}:${ApiSettings.getOpenRouterBaseUrl()}:${ApiSettings.getOpenRouterModel()}"
         else -> getProviderName()
     }
@@ -87,21 +85,17 @@ class TranslationManager(
     }
 
     private fun createProvider(manualProvider: String): TranslationProvider {
-       if (ApiSettings.isOpenRouterEnabled()) {                    // ← TAMBAHAN BARU
-        val key = ApiSettings.getOpenRouterKey()
-        if (!key.isNullOrBlank()) {
-            return OpenRouterTranslationProvider(
-                apiKey = key,
-                baseUrl = ApiSettings.getOpenRouterBaseUrl(),
-                model = ApiSettings.getOpenRouterModel(),
-                sourceLanguage = sourceLanguage,
-                targetLanguage = targetLanguage
+        if (ApiSettings.isOpenRouterEnabled()) {
+            val key = ApiSettings.getOpenRouterKey()
+            if (!key.isNullOrBlank()) {
+                return OpenRouterTranslationProvider(
+                    apiKey = key,
+                    baseUrl = ApiSettings.getOpenRouterBaseUrl(),
+                    model = ApiSettings.getOpenRouterModel(),
+                    sourceLanguage = sourceLanguage,
+                    targetLanguage = targetLanguage
                 )
-        }
-       }
-        if (ApiSettings.isGeminiEnabled()) {
-            val key = ApiSettings.getGeminiKey()
-            if (!key.isNullOrBlank()) return GeminiTranslationProvider(key, sourceLanguage, targetLanguage)
+            }
         }
         if (ApiSettings.isDeepLEnabled()) {
             val key = ApiSettings.getDeepLKey()

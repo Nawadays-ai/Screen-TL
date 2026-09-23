@@ -107,17 +107,12 @@ class FloatingService : Service() {
         setupClickListeners()
         windowManager.addView(floatingView, params)
         updateRemoveOverlayButton()
-
-                // Rotasi Gemini: tampilkan toast saat model berpindah
-        GeminiTranslationProvider.onRotationEvent = { message ->
-            mainHandler.post { showToast(message) }
-        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         sourceLanguage = intent?.getStringExtra("EXTRA_SOURCE_LANG") ?: "Jepang"
         targetLanguage = intent?.getStringExtra("EXTRA_TARGET_LANG") ?: "Indonesia"
-        Log.i(TAG, "Service started: $sourceLanguage -> $targetLanguage, manual=${ApiSettings.getManualProvider()}, gemini=${ApiSettings.isGeminiEnabled()}, deepl=${ApiSettings.isDeepLEnabled()}")
+        Log.i(TAG, "Service started: $sourceLanguage -> $targetLanguage, deepl=${ApiSettings.isDeepLEnabled()}, openRouter=${ApiSettings.isOpenRouterEnabled()}")
 
         ocrManager = OcrManager(sourceLanguage)
         translationManager?.close()
@@ -393,7 +388,6 @@ class FloatingService : Service() {
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
     override fun onDestroy() {
-        GeminiTranslationProvider.onRotationEvent = null
         stopRealtimeTranslation("Real-Time Translator Diberhentikan")
         screenCaptureManager?.release(); screenCaptureManager = null
         translationManager?.close(); translationManager = null

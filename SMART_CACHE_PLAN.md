@@ -2,7 +2,7 @@
 
 > **Scope:** catatan kerja khusus fitur Smart Cache/Translation Unit/Batch Translation.
 > **Aturan konteks:** gunakan file ini sebagai konteks utama untuk task ini. Jangan meminta pembacaan README, AI handoff, atau catatan proyek lain untuk memahami rencana ini.
-> **Status:** diskusi desain; belum ada implementasi dari rancangan ini.
+> **Status:** Tahap 0 dan Tahap 1 selesai; tahap aktif berikutnya adalah Tahap 2 (deduplication).
 > **Build policy:** jangan menjalankan Gradle/compile/APK lokal. Build hanya melalui GitHub Actions.
 
 ## Keputusan yang sudah selesai
@@ -14,7 +14,7 @@
 - [DONE] Cache normalization konservatif: Unicode, line ending, whitespace, dan trim. Jangan memperbaiki typo OCR Jepang secara agresif.
 - [DONE] Translation Unit tidak selalu sama dengan OCR line atau seluruh OCR block. Paragraph/bubble jelas tetap satu unit; UI item berdampingan tidak otomatis digabung.
 - [DONE] Batch tidak memecah unit semantik atau menggabungkan hasil menjadi satu paragraf. Batch hanya optimasi transport.
-- [DONE] Provider batching bersifat provider-specific. DeepL kandidat pertama; Gemini/OpenRouter memerlukan response ber-ID; ML Kit boleh tetap unit-by-unit.
+- [DONE] Provider batching bersifat provider-specific. DeepL kandidat pertama; OpenRouter memerlukan response ber-ID; ML Kit boleh tetap unit-by-unit.
 - [DONE] Implementasi bertahap: verifikasi cache dasar → unit/cache per unit → deduplication → validasi overlay → batching provider.
 
 ## Tahapan kerja
@@ -42,14 +42,16 @@ Status: [DONE]
 
 ### Tahap 1 — Translation Unit + cache per unit
 
-Status: [IN PROGRESS]
+Status: [DONE]
 
-- Reuse `TranslationCache`; jangan membuat cache kedua.
-- Bentuk unit dari segmentation yang sudah ada.
-- Setiap unit mempertahankan source text, geometry, orientation, overlay metadata, cache status, dan translation.
-- Manual dan Klip melewati pipeline unit yang sama setelah OCR.
-- Klip tidak lagi mengirim seluruh crop sebagai satu translation/cache item.
-- Pada tahap ini provider boleh tetap menerjemahkan miss satu per satu agar correctness mudah diuji.
+- Reuse `TranslationCache`; jangan membuat cache kedua. ✅
+- Bentuk unit dari segmentation yang sudah ada. ✅ Unit dibentuk di `OcrManager` (paragraph, line, dan vertical bubble) lalu dipakai apa adanya oleh Manual, Real-Time, dan Klip.
+- Setiap unit mempertahankan source text, geometry, orientation, overlay metadata, cache status, dan translation. ✅ `DetectedText` → `TranslationOverlayItem` membawa `left/top/right/bottom`, `sourceTextSizePx`, `backgroundColor`, dan `orientation`.
+- Manual dan Klip melewati pipeline unit yang sama setelah OCR. ✅ Keduanya memanggil `TranslationManager.translate()` per unit, sehingga scope provider dan `TranslationCache` identik.
+- Klip tidak lagi mengirim seluruh crop sebagai satu translation/cache item. ✅ `KlipSelectionController.translateKlip()` mengiterasi per `DetectedText`.
+- Pada tahap ini provider boleh tetap menerjemahkan miss satu per satu agar correctness mudah diuji. ✅ Masih satu request per miss; batching ditunda ke Tahap 4.
+
+Catatan verifikasi: butir di atas diverifikasi lewat pembacaan kode, bukan build lokal (sesuai build policy). Bukti perangkat Tahap 1 sudah tercatat di Tahap 0: `Unit OCR: 2` (`Cache 0/1`) dan `Unit OCR: 16` (`Cache 6/16`).
 
 ### Tahap 2 — Deduplication
 
@@ -77,7 +79,7 @@ Status: [PENDING]
 - Mulai dari DeepL setelah Tahap 1–3 stabil.
 - Batch hanya berisi unique cache misses.
 - Response harus dipetakan stabil ke unit; jangan mengandalkan urutan tanpa kontrak provider.
-- Gemini/OpenRouter hanya setelah format response ber-ID dan fallback error disepakati.
+- OpenRouter hanya setelah format response ber-ID dan fallback error disepakati.
 - ML Kit tidak dipaksa memakai network-style batching.
 
 ## Metrik wajib
@@ -95,19 +97,21 @@ Contoh: `OCR Units: 24 | Unique Units: 20 | Cache-hit Units: 12 | Unique Cache H
 
 ## Acceptance criteria
 
-- [ ] Klip tidak menganggap seluruh crop sebagai satu translation/cache item.
-- [ ] UI item yang berbeda dapat menjadi unit terpisah.
-- [ ] Paragraph/bubble manga tetap dapat menjadi satu unit.
-- [ ] Manual dan Klip berbagi cache.
-- [ ] Teks sama di lokasi berbeda menjadi cache hit.
-- [ ] Duplicate source tidak diterjemahkan berulang.
-- [ ] Cache miss tidak otomatis berarti satu request per unit.
-- [ ] Batch response tetap terpisah dan kembali ke geometry yang benar.
-- [ ] History tetap satu entry per sesi translation.
-- [ ] Performance/History membedakan metrik wajib.
-- [ ] Vertical Japanese/manga handling tidak dihapus.
-- [ ] GitHub Actions build berhasil.
-- [ ] Uji perangkat berhasil untuk Klip, Manual, cache, overlay, dan provider.
+Tahap 1 menutup kriteria bertanda ✅ di bawah. Kriteria lain menunggu Tahap 2–4 dan/atau uji perangkat.
+
+- [x] Klip tidak menganggap seluruh crop sebagai satu translation/cache item. ✅
+- [x] UI item yang berbeda dapat menjadi unit terpisah. ✅
+- [x] Paragraph/bubble manga tetap dapat menjadi satu unit. ✅
+- [x] Manual dan Klip berbagi cache. ✅
+- [ ] Teks sama di lokasi berbeda menjadi cache hit. (arsitektur sudah benar — geometry tidak ada di cache key — tetapi bukti perangkat lintas posisi belum dicatat)
+- [ ] Duplicate source tidak diterjemahkan berulang. → Tahap 2
+- [ ] Cache miss tidak otomatis berarti satu request per unit. → Tahap 4
+- [ ] Batch response tetap terpisah dan kembali ke geometry yang benar. → Tahap 4
+- [x] History tetap satu entry per sesi translation. ✅
+- [ ] Performance/History membedakan metrik wajib. → Tahap 3
+- [x] Vertical Japanese/manga handling tidak dihapus. ✅
+- [ ] GitHub Actions build berhasil. (belum dijalankan untuk perubahan ini)
+- [ ] Uji perangkat berhasil untuk Klip, Manual, cache, overlay, dan provider. (sebagian sudah; lihat Tahap 0)
 
 ## Aturan implementasi
 
@@ -128,3 +132,11 @@ Contoh: `OCR Units: 24 | Unique Units: 20 | Cache-hit Units: 12 | Unique Cache H
 - [DONE] Menyepakati batching ditunda sampai unit/cache per unit dan deduplication tervalidasi.
 - [DONE] Menemukan dan memperbaiki risiko mapping koordinat Klip di `KlipSelectionController.kt`: crop sekarang memakai ukuran aktual `KlipMaskView`, bukan hanya `displayMetrics`, dan mencatat mapping selection/bitmap/crop ke Logcat. Ini menargetkan gejala area nama skill yang dipilih tetapi crop membaca deskripsi.
 - [NEXT] Uji APK hasil GitHub Actions pada layar yang sama; periksa apakah hasil Klip sudah sesuai area yang terlihat dan, bila masih meleset, kirim log `Klip crop mapping` untuk audit lanjutan.
+
+### Audit + penghapusan Gemini — Tahap 1 ditutup
+
+- [DONE] Audit seluruh referensi silang selesai. Temuan: `GeminiTranslationProvider` dihapus; `TranslationOverlayViewCompat.setTranslationItems()` tidak pernah dipanggil (dead code); `ApiSettings.getManualProvider()` selalu mengembalikan `PROVIDER_ML_KIT` sehingga cabang `PROVIDER_DEEPL` di `TranslationManager.createProvider()` tidak terjangkau; `blurredPatch` tidak pernah diisi selain `null` sehingga seluruh logika recycle blur tidak terpakai; `ScreenCaptureSession.clear()`, `ScreenTLPerformanceTrace.finishWhenIdle()`, dan `OcrManager.recycleBlurredPatches()` tidak dipanggil; dependency `kotlinx-coroutines-android` tidak dipakai.
+- [DONE] Gemini dihapus sepenuhnya karena seluruh model di `MODEL_QUEUE` selalu overload sehingga tidak pernah terpakai. File dihapus: `GeminiTranslationProvider.kt`. File diubah: `ApiSettings.kt` (API + konstanta Gemini dibuang, sisa key lama dibersihkan sekali saat `initialize()`), `TranslationManager.kt` (cabang provider, nama, dan cache scope), `SettingsActivity.kt` (daftar provider API kini `DeepL API` + `OpenRouter`), `FloatingService.kt` (callback toast rotasi dan log), `app/build.gradle.kts` (komentar).
+- [DONE] Tahap 1 ditandai selesai. Bukti: Klip mengiterasi per `DetectedText`, Manual/Real-Time/Klip memakai `TranslationManager.translate()` dan `TranslationCache` yang sama, serta metadata geometry/orientasi ikut terbawa ke `TranslationOverlayItem`.
+- [NOTE] Verifikasi hanya lewat pembacaan kode. Build tetap melalui GitHub Actions sesuai build policy, jadi kompilasi perubahan ini belum dibuktikan.
+- [NEXT] Jalankan GitHub Actions untuk memastikan build hijau, lalu mulai Tahap 2 (deduplication).
