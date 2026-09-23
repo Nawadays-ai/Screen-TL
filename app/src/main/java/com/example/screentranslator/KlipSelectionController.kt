@@ -341,9 +341,8 @@ object KlipSelectionController {
             bottom = bottom,
             sourceTextSizePx = sourceTextSizePx,
             backgroundColor = backgroundColor,
-            blurredPatch = blurredPatch,
             orientation = orientation
-        ).also { blurredPatch = null }
+        )
 
     private fun showResult(
         owner: Context,

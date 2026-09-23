@@ -85,7 +85,4 @@ dependencies {
 
     // OkHttp untuk API DeepL & OpenRouter
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-
-    // Coroutines untuk proses di latar belakang
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 }

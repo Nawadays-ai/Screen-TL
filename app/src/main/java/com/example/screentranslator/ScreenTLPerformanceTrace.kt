@@ -1,7 +1,5 @@
 package com.example.screentranslator
 
-import android.os.Handler
-import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 
@@ -9,9 +7,7 @@ import android.util.Log
 class ScreenTLPerformanceTrace(private val operation: String) {
     companion object {
         private const val TAG = "ScreenTL-Perf"
-        private val mainHandler = Handler(Looper.getMainLooper())
         @Volatile private var active: ScreenTLPerformanceTrace? = null
-        private var finishRunnable: Runnable? = null
 
         fun start(operation: String): ScreenTLPerformanceTrace {
             val trace = ScreenTLPerformanceTrace(operation)
@@ -53,12 +49,6 @@ class ScreenTLPerformanceTrace(private val operation: String) {
             )
         )
         if (active === this) active = null
-    }
-
-    fun finishWhenIdle(delayMs: Long = 500L, result: String = "completed") {
-        finishRunnable?.let(mainHandler::removeCallbacks)
-        finishRunnable = Runnable { finish(result) }
-        mainHandler.postDelayed(finishRunnable!!, delayMs)
     }
 
     /**

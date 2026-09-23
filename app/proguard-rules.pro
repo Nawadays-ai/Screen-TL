@@ -28,9 +28,6 @@
 # Keep OkHttp classes
 -keep class okhttp3.** { *; }
 
-# Keep Kotlin coroutines
--keep class kotlinx.coroutines.** { *; }
-
 # Keep JSON classes
 -keep class org.json.** { *; }
 
@@ -50,7 +47,6 @@
 -keep class com.example.screentranslator.KlipManualButton { *; }
 -keep class com.example.screentranslator.KlipCancelButton { *; }
 -keep class com.example.screentranslator.TranslationOverlayView { *; }
--keep class com.example.screentranslator.TranslationOverlayViewCompat { *; }
 -keep class com.example.screentranslator.KlipResultOverlayView { *; }
 
 # Keep performance trace and log classes
@@ -84,5 +80,4 @@
 # Prevent warnings
 -dontwarn com.google.mlkit.**
 -dontwarn okhttp3.**
--dontwarn kotlinx.coroutines.**
 -dontwarn org.json.**
