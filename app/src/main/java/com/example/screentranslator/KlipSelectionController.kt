@@ -19,9 +19,6 @@ import android.view.View
 import android.view.WindowManager
 import android.graphics.PixelFormat
 import android.widget.Toast
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 object KlipSelectionController {
     private const val TAG = "ScreenTL-Klip"
@@ -250,48 +247,16 @@ object KlipSelectionController {
             return
         }
 
-        val results = mutableListOf<String>()
-        val translationsOnly = mutableListOf<String>()
-        val overlayResults = mutableListOf<TranslationOverlayItem>()
-        var cacheHits = 0
-
-        fun processNext(index: Int) {
-            if (!isActive) {
-                crop.recycle()
-                return
-            }
-            if (index >= detectedTexts.size) {
-                val combinedSource = detectedTexts.map { it.text.trim() }.joinToString("\n\n")
-                val combinedTranslated = results.joinToString("\n\n")
-                val combinedTranslationsOnly = translationsOnly.joinToString("\n\n")
-                val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-                val source = owner.getSourceLanguage()
-                val target = owner.getTargetLanguage()
-                val totalUnits = detectedTexts.size
-                val providerRequests = totalUnits - cacheHits
-
-                val cacheStatus = when {
-                    cacheHits == totalUnits -> "Cache: semua kalimat dari cache ($cacheHits/$totalUnits)"
-                    cacheHits > 0 -> "Cache: sebagian kalimat dari cache ($cacheHits/$totalUnits)"
-                    else -> "Cache: tidak ada kalimat dari cache (0/$totalUnits)"
+        TranslationPipeline(translator, owner.getSourceLanguage(), owner.getTargetLanguage(), "Klip") { !isActive }
+            .run(detectedTexts) { result ->
+                if (!isActive) {
+                    crop.recycle()
+                    return@run
                 }
-
-                TranslationHistory.add(
-                    buildString {
-                        append("[").append(time).append("]\n")
-                        append("TL: ").append(translator.getProviderName()).append(" (Klip)\n")
-                        append(cacheStatus).append("\n")
-                        append("Unit OCR: ").append(totalUnits).append(" | Request provider: ").append(providerRequests).append("\n")
-                        append(source).append(" → ").append(target).append("\n\n")
-                        append(combinedSource)
-                        append("\n→ ")
-                        append(combinedTranslated)
-                    }
-                )
-
+                runCatching { TranslationHistory.add(result.historyEntry) }
                 showResult(
                     owner = owner,
-                    translatedText = combinedTranslationsOnly,
+                    translatedText = result.overlayItems.joinToString("\n\n") { item -> item.translatedText },
                     selection = selection,
                     crop = crop
                 )
@@ -299,50 +264,8 @@ object KlipSelectionController {
                 hasClipOverlay = true
                 hostRoot?.let { setClipCancelVisible(it, true) }
                 toast(owner, "Klip selesai")
-                return
             }
-
-            val currentText = detectedTexts[index]
-            var currentWasCached = false
-            translator.translate(
-                currentText.text.trim(),
-                onSuccess = { translatedText ->
-                    if (!isActive) {
-                        crop.recycle()
-                        return@translate
-                    }
-                    results.add("${currentText.text.trim()}\n→ $translatedText")
-                    translationsOnly.add(translatedText)
-                    overlayResults.add(currentText.toOverlayItem(translatedText))
-                    if (currentWasCached) cacheHits++
-                    processNext(index + 1)
-                },
-                onFailure = { exception ->
-                    if (!isActive) {
-                        crop.recycle()
-                        return@translate
-                    }
-                    results.add("${currentText.text.trim()}\n→ [Gagal diterjemahkan: ${exception.message ?: "Unknown error"}]")
-                    processNext(index + 1)
-                },
-                onCacheHit = { currentWasCached = true }
-            )
-        }
-
-        processNext(0)
     }
-
-    private fun DetectedText.toOverlayItem(translatedText: String): TranslationOverlayItem =
-        TranslationOverlayItem(
-            translatedText = translatedText,
-            left = left,
-            top = top,
-            right = right,
-            bottom = bottom,
-            sourceTextSizePx = sourceTextSizePx,
-            backgroundColor = backgroundColor,
-            orientation = orientation
-        )
 
     private fun showResult(
         owner: Context,

@@ -22,6 +22,11 @@
 # Keep TranslationProvider implementations
 -keep class com.example.screentranslator.**TranslationProvider** { *; }
 
+# Keep the deduplicated translation pipeline and its shared text normalizer
+-keep class com.example.screentranslator.TranslationPipeline { *; }
+-keep class com.example.screentranslator.TranslationSessionResult { *; }
+-keep class com.example.screentranslator.TranslationTextNormalizer { *; }
+
 # Keep ML Kit classes
 -keep class com.google.mlkit.** { *; }
 

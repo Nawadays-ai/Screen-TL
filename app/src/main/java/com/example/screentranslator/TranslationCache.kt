@@ -6,7 +6,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
-import java.text.Normalizer
 import java.util.LinkedHashMap
 
 /**
@@ -65,18 +64,12 @@ object TranslationCache {
     }
 
     private fun keyFor(providerName: String, sourceLanguage: String, targetLanguage: String, sourceText: String): String {
-        val normalizedText = normalizeSourceText(sourceText)
+        val normalizedText = TranslationTextNormalizer.normalize(sourceText)
         val material = listOf(CACHE_VERSION, providerName, sourceLanguage, targetLanguage, normalizedText)
             .joinToString(separator = "\u0000")
         val digest = MessageDigest.getInstance("SHA-256").digest(material.toByteArray(StandardCharsets.UTF_8))
         return digest.joinToString(separator = "") { byte -> "%02x".format(byte) }
     }
-
-    private fun normalizeSourceText(text: String): String = Normalizer.normalize(text, Normalizer.Form.NFC)
-        .replace("\r\n", "\n")
-        .lineSequence()
-        .joinToString("\n") { line -> line.trim().replace(Regex("[\\t\\u000B\\u000C ]+"), " ") }
-        .trim()
 
     private fun putMemory(key: String, translated: String) {
         memoryEntries[key] = translated
