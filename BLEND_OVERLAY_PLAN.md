@@ -103,17 +103,31 @@ Spesifikasi:
 - 2026-09-25: dibuat; branch + referensi sesi sebelumnya diamankan sebagai `1639ed1`.
 - 2026-09-25 Tahap 1: sampling glyph pakai k-means 3 cluster (bukan 2 — outline sering menyatu dengan background pada 2 cluster, terutama teks terang di panel gelap). Threshold outline vs background diturunkan ke 15 luminance: dark-on-dark outline memang bedanya kecil, dan tebakan salah aman karena stroke sewarna panel praktis tak terlihat. Shadow pakai `setShadowLayer` langsung (teks didukung hardware canvas, tanpa software layer).
 
+
 ## Aturan kerja untuk sesi berikutnya
 
-Branch ini tidak punya Android SDK di mesin lokal, jadi kode **tidak bisa dikompilasi atau di-typecheck sebelum sampai ke CI**. Rapikan statis lebih dulu; CI hanya melaporkan error pertama per komilasi, jadi satu error bisa menyembunyikan beberapa error lain di bawahnya.
+**Tidak ada Android SDK di mesin ini, jadi `gradle assembleDebug` tidak bisa jalan — TAPI kode Kotlin bisa dikompilasi lokal memakai compiler dari Gradle cache.** Pakai ini sebelum mengandalkan CI, karena CI hanya melaporkan error pertama per kompilasi sehingga satu error menyembunyikan yang lain di bawahnya.
 
-Dua kelas error yang sudah beberapa kali muncul di branch ini, keduanya dari kode yang *terlihat* benar:
+### Kompilasi lokal tanpa Android SDK (resep, sudah teruji)
 
-1. **Properti setter-only.** Kotlin hanya bisa menyintesis properti bila getter **dan** setter ada. Contoh: `android.graphics.Paint` punya `setStrokeColor()` tapi **tidak** punya `getStrokeColor()`, jadi `paint.strokeColor = x` gagal dengan `Unresolved reference`. Bandingkan: `strokeWidth`, `strokeJoin`, `color`, `alpha`, `style` aman karena punya getter+setter. Aturan: kalau nama field framework dipakai sebagai properti, pastikan pasangannya ada; kalau ragu, panggil setter-nya sebagai method — selalu kompilasi.
-2. **Konstanta Android yang salah eja.** `View.OVERSCROLL_IF_CONTENT_SCROLLS` tidak ada; yang benar `View.OVER_SCROLL_IF_CONTENT_SCROLLS`. Sebelum commit, grep nama konstanta `View|Paint|Canvas|Color|*Layout` dan bandingkan dengan API asli.
+Butuh `kotlin-compiler-embeddable-1.9.22.jar`, `kotlin-stdlib`, `trove4j`, dan `org.jetbrains:annotations` (semua ada di `~/.gradle/caches/modules-2`), plus **JDK 17** di `C:\Program Files\Java\jdk-17`. Jangan pakai Java 27: Kotlin 1.9.22 gagal parse string versi itu (`IllegalArgumentException: 27`).
 
-Sebelum menyebut tahap selesai, jalankan langkah ini:
+Jalankan `org.jetbrains.kotlin.cli.jvm.K2JVMCompiler` dengan `-no-stdlib -cp <stdlib>` pada direktori berisi file target **plus stub** untuk `android.*` dan `com.google.mlkit.*`. Stub cukup berisi tanda tangan; nilai balik apa saja boleh. Perhatikan saat menulis stub: pakai method (`fun centerX() = 0`), jangan `@JvmField`; jadikan `var` setiap properti yang di-assign; sertakan **semua** overload yang dipanggil kode (mis. `drawRoundRect` 4-arg dan 6-arg); dan `companion object` harus di dalam class.
 
-- Baca ulang **seluruh baris** yang diedit dari atas sampai bawah. Baris padat BERBAHASA (`if(cond)return false;val x=…` dalam satu baris) mudah kehilangan segmen saat ditulis ulang, dan compiling file penuh bertulis ulang berarti seluruh file harus diverifikasi ulang, bukan hanya baris yang terlihat berubah.
-- Kalau tooling baca-encoding berbeda (PowerShell `Get-Content` membaca sebagai ANSI dan merusak karakter non-ASCII), jangan percaya diff berbasis string. Bandingkan lewat decode UTF-8 eksplisit ([System.IO.File]::ReadAllText dengan UTF8Encoding) atau `git diff` — bukan `Get-Content`.
+Stub yang keliru akan memunculkan error palsu (mis. `val cannot be reassigned` pada `typeface` yang stub-nya `val`). **Selalu periksa nama file yang muncul di error**: kalau yang error adalah stub, itu bukan bug project. Yang dihitung hanya error yang jatuh di file project.
+
+Sudah terverifikasi bersih dengan metode ini: `TextLayoutAnalyzer.kt`, `TranslationOverlayView.kt`, `KlipResultOverlayView.kt` — 0 error pada Kotlin 1.9.22 / JDK 17.
+
+### Jebakan yang sudah beberapa kali muncul
+
+Semuanya dari kode yang *terlihat* benar:
+
+1. **Properti setter-only.** Kotlin hanya menyintesis properti bila getter **dan** setter ada. Contoh: `android.graphics.Paint` punya `setStrokeColor()` tapi **tidak** punya `getStrokeColor()`, jadi `paint.strokeColor = x` gagal dengan `Unresolved reference`. Bandingkan: `strokeWidth`, `strokeJoin`, `color`, `alpha`, `style` aman karena punya getter+setter. Aturan: kalau nama field framework dipakai sebagai properti, pastikan pasangannya ada; kalau ragu, panggil setter-nya sebagai method — selalu kompilasi.
+2. **Konstanta Android yang salah eja.** `View.OVERSCROLL_IF_CONTENT_SCROLLS` tidak ada; yang benar `View.OVER_SCROLL_IF_CONTENT_SCROLLS`. Sebelum commit, grep konstanta `View|Paint|Canvas|Color|*Layout` dan bandingkan dengan API asli.
+3. **Baris padat yang ditulis ulang.** `if(cond)return false;val x=…` dalam satu baris mudah kehilangan segmen. Kalau menulis ulang seluruh file, verifikasi ulang **seluruh** file, bukan hanya baris yang terlihat berubah.
+
+### Catatan tooling
+
+- `Get-Content` di PowerShell shell ini membaca sebagai **ANSI** dan merusak karakter non-ASCII (Jepang jadi mojibake), sehingga diff berbasis string bisa salah. Bandingkan lewat decode UTF-8 eksplisit (`[System.IO.File]::ReadAllText(path, UTF8Encoding)`) atau `git diff`, bukan `Get-Content`.
+- **Kesimpulan subagen wajib diverifikasi terhadap file asli sebelum diterapkan.** Audit terakhir melaporkan `val counts` terduplikasi di baris 131 dan `?: continue` ilegal di baris 135; kedua-duanya salah (baris 131 adalah `for (a in assignment) counts[a]++`, dan `?: continue` memang legal di statement position), dan ditolak setelah kompilasi nyata. Saran "hapus baris ini" dari laporan subagen berisiko menghapus pernyataan yang benar — selalu cek isi barisnya dulu.
 - Bersihkan state yang jadi mati setelah redesign (field yang selalu `emptyList()`, `val` lokal tak terpakai, parameter yang tak dibaca) supaya file tidak menyesatkan pembaca berikutnya.
