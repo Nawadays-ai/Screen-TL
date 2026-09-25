@@ -62,15 +62,12 @@ class TranslationOverlayView(context: Context) : View(context) {
         val top: Float,
         val right: Float,
         val bottom: Float,
-        val fillRight: Float,
         val textSize: Float,
         val horizontalPadding: Float,
         val lines: List<String>,
         val lineSpacing: Float
     ) { fun boxRect() = RectF(left, top, right, bottom) }
     private var renderItems: List<RenderItem> = emptyList()
-    private var groupColors: List<Int> = emptyList()
-    private var itemGroups: List<Int> = emptyList()
     private var sourceWidth = 1
     private var sourceHeight = 1
     private var toleranceRatio = 1f
@@ -85,15 +82,12 @@ class TranslationOverlayView(context: Context) : View(context) {
         this.sourceHeight = sourceHeight.coerceAtLeast(1)
         this.toleranceRatio = toleranceRatio.coerceIn(1f, 3f)
         renderItems = translations.mapNotNull { buildRenderItem(it, this.sourceWidth, this.sourceHeight) }
-        buildOverlapGroups()
         visibility = if (renderItems.isEmpty()) View.GONE else View.VISIBLE
         invalidate()
     }
 
     fun clearTranslations() {
         renderItems = emptyList()
-        groupColors = emptyList()
-        itemGroups = emptyList()
         visibility = View.GONE
         invalidate()
     }
@@ -153,12 +147,6 @@ class TranslationOverlayView(context: Context) : View(context) {
         return inset.toFloat().coerceAtLeast(0f)
     }
 
-    private fun buildOverlapGroups() {
-        // Each box now carries its own sampled control colour, so there is nothing to merge.
-        itemGroups = emptyList()
-        groupColors = emptyList()
-    }
-
     private fun chooseTextColor(backgroundColor: Int): Int {
         val luminance = 0.2126f * Color.red(backgroundColor) + 0.7152f * Color.green(backgroundColor) + 0.0722f * Color.blue(backgroundColor)
         return if (luminance < 150f) Color.WHITE else Color.BLACK
@@ -195,7 +183,9 @@ class TranslationOverlayView(context: Context) : View(context) {
         textPaint.style = if (drawStroke) Paint.Style.FILL_AND_STROKE else Paint.Style.FILL
         textPaint.strokeJoin = Paint.Join.ROUND
         textPaint.strokeWidth = textSize * strokeWidthRatio
-        textPaint.strokeColor = stroke
+        // Paint has setStrokeColor() but no getStrokeColor(), so Kotlin cannot synthesise a
+        // `strokeColor` property here; the setter has to be called as a method.
+        textPaint.setStrokeColor(stroke)
         textPaint.setShadowLayer(textSize * shadowRadiusRatio, textSize * shadowOffsetRatio, textSize * shadowOffsetRatio, shadowColor)
     }
 
@@ -251,7 +241,6 @@ class TranslationOverlayView(context: Context) : View(context) {
         val measuredWidth = normalized.split('\n').maxOfOrNull { textPaint.measureText(it) } ?: 0f
         val availableScreenWidth = (width - 8f).coerceAtLeast(originalWidth)
 
-        val minAllowedWidth = horizontalPadding * 2f + minTextSizePx
         val originalTextWidth = (originalWidth - horizontalPadding * 2f).coerceAtLeast(1f)
 
         // Grow only to the right, anchored on the control's left edge, so the panel reads as that
@@ -295,7 +284,7 @@ class TranslationOverlayView(context: Context) : View(context) {
         textPaint.textSize = finalTextSize
         lineSpacing = finalTextSize * 1.16f
         lines = wrapText(normalized, maxTextWidth, finalTextSize)
-        return RenderItem(item, boxLeft, toleranceTop, boxRight, toleranceBottom, boxRight, finalTextSize, horizontalPadding, lines, lineSpacing)
+        return RenderItem(item, boxLeft, toleranceTop, boxRight, toleranceBottom, finalTextSize, horizontalPadding, lines, lineSpacing)
     }
 
     /**
@@ -337,8 +326,6 @@ class TranslationOverlayView(context: Context) : View(context) {
 
     override fun onDetachedFromWindow() {
         renderItems = emptyList()
-        groupColors = emptyList()
-        itemGroups = emptyList()
         super.onDetachedFromWindow()
     }
 }

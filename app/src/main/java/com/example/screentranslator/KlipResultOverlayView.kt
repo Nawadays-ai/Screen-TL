@@ -86,7 +86,7 @@ class KlipResultOverlayView(
         })
 
         val scroll = ScrollView(context).apply {
-            overScrollMode = View.OVERSCROLL_IF_CONTENT_SCROLLS
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
         }
         val text = TextView(context).apply {
             this.text = translatedText.trim().ifBlank { "Tidak ada hasil terjemahan." }
