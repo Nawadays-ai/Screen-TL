@@ -2,8 +2,8 @@
 
 > **Scope:** catatan kerja perubahan tampilan mode Manual (overlay menyatu dengan game) dan mode Klip (desain minimalis). Mode Real-Time di luar scope.
 > **Aturan konteks:** gunakan file ini sebagai konteks utama untuk task ini. Jangan meminta pembacaan README, AI handoff, atau catatan proyek lain untuk memahami rencana ini.
-> **Status:** Tahap 0 selesai. Tahap 1 selesai ditulis (kode), menunggu build + test perangkat oleh user. Tahap 2–3 belum dimulai. Tahap 4 ditunda (riset).
-> **Build policy:** jangan menjalankan Gradle/compile/APK lokal. User yang build dan test APK sendiri.
+> **Status:** Tahap 0 selesai. Tahap 1 selesai ditulis dan terverifikasi 0 error compile (Kotlin 1.9.22 lokal), menunggu build + test perangkat oleh user. Tahap 2–3 belum dimulai. Tahap 4 ditunda (riset).
+> **Build policy:** APK **tidak pernah** dibangun lokal — keputusan user, bukan kekurangan setup. Build hanya via GitHub Actions, lalu user tes di perangkat. Yang boleh: type-check Kotlin terisolasi via compiler di Gradle cache (ringan, detik) untuk menangkap error sebelum CI.
 
 ## Keputusan yang sudah selesai
 
@@ -106,11 +106,13 @@ Spesifikasi:
 
 ## Aturan kerja untuk sesi berikutnya
 
-**Tidak ada Android SDK di mesin ini, jadi `gradle assembleDebug` tidak bisa jalan — TAPI kode Kotlin bisa dikompilasi lokal memakai compiler dari Gradle cache.** Pakai ini sebelum mengandalkan CI, karena CI hanya melaporkan error pertama per kompilasi sehingga satu error menyembunyikan yang lain di bawahnya.
+**Keputusan user: tidak pernah membangun APK lokal.** APK selalu dibangun lewat GitHub Actions, lalu diuji user di perangkat. PC user low-end (i5 gen4, 8 GB) dan memang tidak ada niatan menyiapkan Android SDK/Studio. **Jangan usulkan setup build lokal**; itu keputusan user, bukan kekurangan yang perlu ditutup.
+
+Yang boleh dan berguna: **type-check Kotlin terisolasi secara lokal** (detik, ringan, tanpa membebani PC) untuk menangkap error compile sebelum CI — karena CI hanya melaporkan error pertama per kompilasi, sehingga satu error menyembunyikan yang lain di bawahnya. Type-check lokal **bukan** pengganti build APK: `gradle assembleDebug` tetap mustahil di mesin ini karena Android SDK tidak ada.
 
 ### Kompilasi lokal tanpa Android SDK (resep, sudah teruji)
 
-Butuh `kotlin-compiler-embeddable-1.9.22.jar`, `kotlin-stdlib`, `trove4j`, dan `org.jetbrains:annotations` (semua ada di `~/.gradle/caches/modules-2`), plus **JDK 17** di `C:\Program Files\Java\jdk-17`. Jangan pakai Java 27: Kotlin 1.9.22 gagal parse string versi itu (`IllegalArgumentException: 27`).
+Butuh `kotlin-compiler-embeddable-1.9.22.jar`, `kotlin-stdlib`, `trove4j`, dan `org.jetbrains:annotations` (semua ada di `~/.gradle/caches/modules-2`, sisa setup awal project), plus **JDK 17** di `C:\Program Files\Java\jdk-17`. Jangan pakai Java 27: Kotlin 1.9.22 gagal parse string versi itu (`IllegalArgumentException: 27`).
 
 Jalankan `org.jetbrains.kotlin.cli.jvm.K2JVMCompiler` dengan `-no-stdlib -cp <stdlib>` pada direktori berisi file target **plus stub** untuk `android.*` dan `com.google.mlkit.*`. Stub cukup berisi tanda tangan; nilai balik apa saja boleh. Perhatikan saat menulis stub: pakai method (`fun centerX() = 0`), jangan `@JvmField`; jadikan `var` setiap properti yang di-assign; sertakan **semua** overload yang dipanggil kode (mis. `drawRoundRect` 4-arg dan 6-arg); dan `companion object` harus di dalam class.
 
