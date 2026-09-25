@@ -3,10 +3,8 @@ package com.example.screentranslator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.RectF
-import android.graphics.Shader
 import android.graphics.Typeface
 import android.view.View
 import android.view.WindowInsets
@@ -15,7 +13,6 @@ import kotlin.math.roundToInt
 /** Renders translated OCR blocks while keeping screenshot coordinates 1:1. */
 class TranslationOverlayView(context: Context) : View(context) {
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; alpha = 255 }
-    private val glassPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.2f }
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
@@ -32,7 +29,15 @@ class TranslationOverlayView(context: Context) : View(context) {
     private val minTextSizePx = 8f
     private val maxTextSizePx = 96f
     private val minFontScale = 0.62f
-    private val maxWidthRatio = 1.55f
+
+    /**
+     * How far a panel may grow beyond the control it covers.
+     *
+     * Indonesian text is routinely longer than the Japanese it replaces, so a panel that cannot
+     * grow would have to shrink its font on most screens. 1.6x is enough headroom for a long line
+     * or two while still leaving most of the screen untouched.
+     */
+    private val maxWidthRatio = 1.6f
     private val bubbleWidthRatio = 2.80f
 
     private data class RenderItem(
@@ -47,7 +52,6 @@ class TranslationOverlayView(context: Context) : View(context) {
         val lines: List<String>,
         val lineSpacing: Float
     ) { fun boxRect() = RectF(left, top, right, bottom) }
-
     private var renderItems: List<RenderItem> = emptyList()
     private var groupColors: List<Int> = emptyList()
     private var itemGroups: List<Int> = emptyList()
@@ -92,28 +96,19 @@ class TranslationOverlayView(context: Context) : View(context) {
             val bottom = renderItem.bottom * scaleY + coordinateOffsetY
             if (right <= left || bottom <= top) return@forEachIndexed
             val box = RectF(left, top, right, bottom)
-            val fillBox = RectF(left, top, renderItem.fillRight * scaleX, bottom)
-            val radius = ((bottom - top) * 0.10f).coerceIn(5f, 12f)
-            val groupId = itemGroups.getOrElse(index) { index }
-            val effectiveColor = groupColors.getOrElse(groupId) { frostBaseColor(renderItem.item.backgroundColor) }
-
-            canvas.save()
-            canvas.clipRect(box)
-            drawFrostGlass(canvas, fillBox, effectiveColor, radius)
-            canvas.restore()
+            val radius = ((bottom - top) * 0.12f).coerceIn(2f, 7f)
+            drawPanel(canvas, box, renderItem.item.backgroundColor, radius)
         }
 
-        renderItems.forEachIndexed { index, renderItem ->
+        renderItems.forEachIndexed { _, renderItem ->
             val left = renderItem.left * scaleX
             val top = renderItem.top * scaleY + coordinateOffsetY
             val right = renderItem.right * scaleX
             val bottom = renderItem.bottom * scaleY + coordinateOffsetY
             if (right <= left || bottom <= top) return@forEachIndexed
-            val groupId = itemGroups.getOrElse(index) { index }
-            val effectiveColor = groupColors.getOrElse(groupId) { frostBaseColor(renderItem.item.backgroundColor) }
             textPaint.textScaleX = 1f
             textPaint.textSize = renderItem.textSize * scaleY
-            textPaint.color = chooseTextColor(effectiveColor)
+            textPaint.color = chooseTextColor(renderItem.item.backgroundColor)
             textPaint.alpha = 255
             val padding = renderItem.horizontalPadding * scaleX
             val lineHeight = renderItem.lineSpacing * scaleY
@@ -138,58 +133,44 @@ class TranslationOverlayView(context: Context) : View(context) {
     }
 
     private fun buildOverlapGroups() {
-        if (renderItems.isEmpty()) { itemGroups = emptyList(); groupColors = emptyList(); return }
-        val parent = IntArray(renderItems.size) { it }
-        fun find(value: Int): Int { var x = value; while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x] }; return x }
-        fun union(a: Int, b: Int) { val rootA = find(a); val rootB = find(b); if (rootA != rootB) parent[rootB] = rootA }
-        for (i in renderItems.indices) {
-            val a = renderItems[i].boxRect()
-            for (j in i + 1 until renderItems.size) if (RectF.intersects(a, renderItems[j].boxRect())) union(i, j)
-        }
-        val rootToGroup = linkedMapOf<Int, Int>(); val groups = IntArray(renderItems.size)
-        renderItems.indices.forEach { index -> val root = find(index); groups[index] = rootToGroup.getOrPut(root) { rootToGroup.size } }
-        itemGroups = groups.toList()
-        val sums = Array(rootToGroup.size) { FloatArray(4) }
-        renderItems.forEachIndexed { index, item ->
-            val group = itemGroups[index]
-            val color = frostBaseColor(item.item.backgroundColor)
-            sums[group][0] = sums[group][0] + Color.red(color)
-            sums[group][1] = sums[group][1] + Color.green(color)
-            sums[group][2] = sums[group][2] + Color.blue(color)
-            sums[group][3] = sums[group][3] + 1f
-        }
-        groupColors = sums.map { sum ->
-            val count = sum[3].coerceAtLeast(1f)
-            Color.rgb((sum[0] / count).toInt().coerceIn(0, 255), (sum[1] / count).toInt().coerceIn(0, 255), (sum[2] / count).toInt().coerceIn(0, 255))
-        }
+        // Each box now carries its own sampled control colour, so there is nothing to merge.
+        itemGroups = emptyList()
+        groupColors = emptyList()
     }
 
-    private fun drawFrostGlass(canvas: Canvas, box: RectF, baseColor: Int, radius: Float) {
-        val safeBox = RectF(box)
-        val edge = adjustColor(baseColor, 0.92f)
-        val deep = adjustColor(baseColor, 0.48f)
-        backgroundPaint.shader = LinearGradient(safeBox.left, safeBox.top, safeBox.right.coerceAtLeast(safeBox.left + 1f), safeBox.bottom, intArrayOf(edge, baseColor, deep, adjustColor(baseColor, 0.58f)), floatArrayOf(0f, 0.28f, 0.58f, 1f), Shader.TileMode.CLAMP)
-        backgroundPaint.alpha = 255
-        canvas.drawRoundRect(safeBox, radius, radius, backgroundPaint)
+    private fun chooseTextColor(backgroundColor: Int): Int {
+        val luminance = 0.2126f * Color.red(backgroundColor) + 0.7152f * Color.green(backgroundColor) + 0.0722f * Color.blue(backgroundColor)
+        return if (luminance < 150f) Color.WHITE else Color.BLACK
+    }
+
+    /**
+     * Draws one solid panel that takes on the sampled colour of the control it covers.
+     *
+     * The previous version layered a four-stop gradient, a white wash and a black wash to fake
+     * frosted glass. On top of a game screen that read as a translucent blob rather than as part
+     * of the interface, and the stacked washes also washed out the text. One solid fill keeps the
+     * control's own colour, so the overlay reads as that control showing its translation.
+     *
+     * The border is only drawn when the panel would otherwise blend into what surrounds it.
+     */
+    private fun drawPanel(canvas: Canvas, box: RectF, baseColor: Int, radius: Float) {
+        val luminance = 0.2126f * Color.red(baseColor) + 0.7152f * Color.green(baseColor) + 0.0722f * Color.blue(baseColor)
+        // Light controls need a slightly deeper fill so white text stays legible; dark ones stay
+        // close to the original so the control does not turn into a black hole.
+        val fill = if (luminance > 160f) adjustColor(baseColor, 0.62f) else adjustColor(baseColor, 0.86f)
+
         backgroundPaint.shader = null
-        glassPaint.color = Color.argb(46, 255, 255, 255)
-        canvas.drawRoundRect(safeBox, radius, radius, glassPaint)
-        glassPaint.color = Color.argb(52, 0, 0, 0)
-        canvas.drawRoundRect(safeBox, radius, radius, glassPaint)
-        borderPaint.color = Color.argb(155, 255, 255, 255)
-        borderPaint.strokeWidth = 1.2f.coerceAtLeast(width / 1080f)
-        canvas.drawRoundRect(safeBox, radius, radius, borderPaint)
-    }
+        backgroundPaint.alpha = 255
+        backgroundPaint.color = fill
+        canvas.drawRoundRect(box, radius, radius, backgroundPaint)
 
-    private fun frostBaseColor(color: Int): Int {
-        val luminance = 0.2126f * Color.red(color) + 0.7152f * Color.green(color) + 0.0722f * Color.blue(color)
-        val factor = if (luminance > 175f) 0.42f else 0.56f
-        return adjustColor(color, factor)
-    }
-
-    private fun chooseTextColor(effectiveColor: Int): Int {
-        val luminance = 0.2126f * Color.red(effectiveColor) + 0.7152f * Color.green(effectiveColor) + 0.0722f * Color.blue(effectiveColor)
-        return if (luminance < 145f) Color.WHITE else Color.BLACK
+        // Only a faint edge on a light panel, where the fill could otherwise disappear into a pale
+        // control. Dark panels keep the control's own edge and need nothing added.
+        if (luminance > 160f) {
+            borderPaint.color = Color.argb(38, 0, 0, 0)
+            borderPaint.strokeWidth = (width / 1080f).coerceAtLeast(1f)
+            canvas.drawRoundRect(box, radius, radius, borderPaint)
+        }
     }
 
     private fun adjustColor(color: Int, factor: Float): Int = Color.rgb((Color.red(color) * factor).roundToIntSafe(), (Color.green(color) * factor).roundToIntSafe(), (Color.blue(color) * factor).roundToIntSafe())
@@ -213,13 +194,37 @@ class TranslationOverlayView(context: Context) : View(context) {
         textPaint.textSize = baseTextSize
         val measuredWidth = normalized.split('\n').maxOfOrNull { textPaint.measureText(it) } ?: 0f
         val availableScreenWidth = (width - 8f).coerceAtLeast(originalWidth)
-        val desiredBubbleWidth = maxOf(originalWidth * bubbleWidthRatio, measuredWidth + horizontalPadding * 2f)
-        val allowedWidth = if (isBubble) desiredBubbleWidth.coerceAtMost(availableScreenWidth) else if (toleranceRatio > 1f) (originalWidth * toleranceRatio).coerceAtMost(availableScreenWidth) else originalWidth * maxWidthRatio
-        val boxWidth = allowedWidth.coerceAtLeast(originalWidth).coerceAtMost(availableScreenWidth)
-        val centerX = baseLeft + originalWidth / 2f
-        val left = (centerX - boxWidth / 2f).coerceIn(0f, (width - boxWidth).coerceAtLeast(0f))
-        val right = (left + boxWidth).coerceAtMost(width.toFloat())
-        val maxTextWidth = (right - left - horizontalPadding * 2f).coerceAtLeast(1f)
+
+        val minAllowedWidth = horizontalPadding * 2f + minTextSizePx
+        val originalTextWidth = (originalWidth - horizontalPadding * 2f).coerceAtLeast(1f)
+
+        // Grow only to the right, anchored on the control's left edge, so the panel reads as that
+        // control revealing more room rather than as a new box hovering over the screen. A
+        // vertical bubble keeps its own width rule: it has to fit the column it was carved from.
+        var boxLeft = baseLeft
+        var boxRight: Float
+        if (isBubble) {
+            val bubbleWidth = maxOf(originalWidth * bubbleWidthRatio, measuredWidth + horizontalPadding * 2f)
+                .coerceAtMost(availableScreenWidth)
+            boxRight = (baseLeft + bubbleWidth).coerceAtMost(width.toFloat())
+            if (boxRight - boxLeft < originalWidth) boxLeft = (boxRight - originalWidth).coerceAtLeast(0f)
+        } else {
+            val maxWidth = (originalWidth * maxWidthRatio).coerceAtMost(availableScreenWidth)
+            val wanted = (measuredWidth + horizontalPadding * 2f).coerceIn(originalWidth, maxWidth)
+            boxRight = (baseLeft + wanted).coerceAtMost(width.toFloat())
+        }
+        boxRight = boxRight.coerceAtLeast(boxLeft + originalWidth)
+
+        var boxWidth = boxRight - boxLeft
+        var maxTextWidth = (boxWidth - horizontalPadding * 2f).coerceAtLeast(1f)
+
+        // If growing would land on top of a neighbouring control, give the room back and let the
+        // font shrink instead. The original control keeps its shape, which is the whole point.
+        if (boxWidth > originalWidth && collidesWithOtherBox(boxLeft, toleranceTop, boxRight, toleranceBottom)) {
+            boxWidth = originalWidth
+            boxRight = boxLeft + originalWidth
+            maxTextWidth = originalTextWidth
+        }
 
         var finalTextSize = baseTextSize
         var lines = wrapText(normalized, maxTextWidth, finalTextSize)
@@ -234,7 +239,26 @@ class TranslationOverlayView(context: Context) : View(context) {
         textPaint.textSize = finalTextSize
         lineSpacing = finalTextSize * 1.16f
         lines = wrapText(normalized, maxTextWidth, finalTextSize)
-        return RenderItem(item, left, toleranceTop, right, toleranceBottom, right, finalTextSize, horizontalPadding, lines, lineSpacing)
+        return RenderItem(item, boxLeft, toleranceTop, boxRight, toleranceBottom, boxRight, finalTextSize, horizontalPadding, lines, lineSpacing)
+    }
+
+    /**
+     * Reports whether [probe] would overlap any other unit's box.
+     *
+     * Overlap groups are not used for this: only pairs whose intersection is thin are treated as a
+     * collision, so a long paragraph and the line directly beneath it do not cancel each other's
+     * growth.
+     */
+    private fun collidesWithOtherBox(probeLeft: Float, probeTop: Float, probeRight: Float, probeBottom: Float): Boolean {
+        val probe = RectF(probeLeft, probeTop, probeRight, probeBottom)
+        return renderItems.any { other ->
+            if (other.item.left == probeLeft.toInt() && other.item.top == probeTop.toInt()) return@any false
+            val rect = other.boxRect()
+            if (!RectF.intersects(probe, rect)) return@any false
+            val overlapX = minOf(probe.right, rect.right) - maxOf(probe.left, rect.left)
+            val overlapY = minOf(probe.bottom, rect.bottom) - maxOf(probe.top, rect.top)
+            overlapX > 2f && overlapY > 2f
+        }
     }
 
     private fun normalizeParagraph(text: String): String = text.replace("\r\n", "\n").replace('\r', '\n').split('\n').joinToString("\n") { it.replace(Regex("[ \\t]+"), " ").trim() }.trim()

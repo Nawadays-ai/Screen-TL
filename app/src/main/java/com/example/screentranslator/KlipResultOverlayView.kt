@@ -5,16 +5,12 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.Rect
-import android.graphics.RenderEffect
-import android.graphics.Shader
 import android.graphics.drawable.GradientDrawable
-import android.os.Build
 import android.view.Gravity
 import android.view.View
 import android.view.ViewOutlineProvider
 import android.widget.FrameLayout
 import android.widget.ImageButton
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -50,11 +46,14 @@ class KlipResultOverlayView(
     }
 
     private fun buildPanel(translatedText: String) {
-        val radius = 26f * density
+        // One solid, near-opaque charcoal panel. The previous version stacked a blurred copy of the
+        // crop under two dark washes, which read as a glass slab; over a game screen the blur also
+        // pulled unrelated colours into the panel. A single fill keeps it plain and predictable.
+        val radius = 6f * density
         panel.background = GradientDrawable().apply {
             cornerRadius = radius
-            setColor(Color.argb(190, 20, 24, 30))
-            setStroke((1.2f * density).toInt().coerceAtLeast(1), Color.argb(90, 255, 255, 255))
+            setColor(Color.argb(232, 28, 28, 30))
+            setStroke(1, Color.argb(46, 255, 255, 255))
         }
         panel.clipToOutline = true
         panel.outlineProvider = object : ViewOutlineProvider() {
@@ -63,61 +62,31 @@ class KlipResultOverlayView(
             }
         }
 
-        val blurImage = ImageView(context).apply {
-            setImageBitmap(selectedBitmap)
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            alpha = 0.78f
-            contentDescription = null
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                setRenderEffect(RenderEffect.createBlurEffect(22f * density, 22f * density, Shader.TileMode.CLAMP))
-            }
-        }
-        panel.addView(blurImage, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-
-        panel.addView(View(context).apply {
-            setBackgroundColor(Color.argb(105, 15, 18, 24))
-        }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-
         val content = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding((22 * density).toInt(), (18 * density).toInt(), (18 * density).toInt(), (18 * density).toInt())
+            setPadding((16 * density).toInt(), (12 * density).toInt(), (12 * density).toInt(), (16 * density).toInt())
         }
-        val header = FrameLayout(context)
-        content.addView(header, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (42 * density).toInt()))
 
-        val title = TextView(context).apply {
-            text = "Terjemahan"
-            setTextColor(Color.WHITE)
-            textSize = 20f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        header.addView(title, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.MATCH_PARENT))
-
+        // The close button stays; the "Terjemahan" heading and its divider go, so the translation
+        // is the first thing the panel shows.
         val close = ImageButton(context).apply {
             setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
-            setColorFilter(Color.WHITE)
+            setColorFilter(Color.argb(220, 255, 255, 255))
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(Color.argb(90, 0, 0, 0))
+                setColor(Color.argb(38, 0, 0, 0))
             }
             contentDescription = "Tutup terjemahan Klip"
             setOnClickListener { closeOnce() }
             isFocusable = true
             isClickable = true
         }
-        header.addView(close, FrameLayout.LayoutParams((44 * density).toInt(), (44 * density).toInt()).apply {
-            gravity = Gravity.END or Gravity.CENTER_VERTICAL
-        })
-
-        content.addView(View(context).apply {
-            setBackgroundColor(Color.argb(70, 255, 255, 255))
-        }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (1 * density).toInt().coerceAtLeast(1)).apply {
-            bottomMargin = (10 * density).toInt()
+        content.addView(close, LinearLayout.LayoutParams((36 * density).toInt(), (36 * density).toInt()).apply {
+            gravity = Gravity.END
         })
 
         val scroll = ScrollView(context).apply {
-            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            overScrollMode = View.OVERSCROLL_IF_CONTENT_SCROLLS
         }
         val text = TextView(context).apply {
             this.text = translatedText.trim().ifBlank { "Tidak ada hasil terjemahan." }
@@ -125,7 +94,6 @@ class KlipResultOverlayView(
             textSize = 18f
             setLineSpacing(0f, 1.12f)
             includeFontPadding = true
-            setPadding(0, 0, 0, (4 * density).toInt())
         }
         scroll.addView(text, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
         content.addView(scroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
