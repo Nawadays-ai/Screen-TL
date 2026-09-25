@@ -102,3 +102,18 @@ Spesifikasi:
 
 - 2026-09-25: dibuat; branch + referensi sesi sebelumnya diamankan sebagai `1639ed1`.
 - 2026-09-25 Tahap 1: sampling glyph pakai k-means 3 cluster (bukan 2 — outline sering menyatu dengan background pada 2 cluster, terutama teks terang di panel gelap). Threshold outline vs background diturunkan ke 15 luminance: dark-on-dark outline memang bedanya kecil, dan tebakan salah aman karena stroke sewarna panel praktis tak terlihat. Shadow pakai `setShadowLayer` langsung (teks didukung hardware canvas, tanpa software layer).
+
+## Aturan kerja untuk sesi berikutnya
+
+Branch ini tidak punya Android SDK di mesin lokal, jadi kode **tidak bisa dikompilasi atau di-typecheck sebelum sampai ke CI**. Rapikan statis lebih dulu; CI hanya melaporkan error pertama per komilasi, jadi satu error bisa menyembunyikan beberapa error lain di bawahnya.
+
+Dua kelas error yang sudah beberapa kali muncul di branch ini, keduanya dari kode yang *terlihat* benar:
+
+1. **Properti setter-only.** Kotlin hanya bisa menyintesis properti bila getter **dan** setter ada. Contoh: `android.graphics.Paint` punya `setStrokeColor()` tapi **tidak** punya `getStrokeColor()`, jadi `paint.strokeColor = x` gagal dengan `Unresolved reference`. Bandingkan: `strokeWidth`, `strokeJoin`, `color`, `alpha`, `style` aman karena punya getter+setter. Aturan: kalau nama field framework dipakai sebagai properti, pastikan pasangannya ada; kalau ragu, panggil setter-nya sebagai method — selalu kompilasi.
+2. **Konstanta Android yang salah eja.** `View.OVERSCROLL_IF_CONTENT_SCROLLS` tidak ada; yang benar `View.OVER_SCROLL_IF_CONTENT_SCROLLS`. Sebelum commit, grep nama konstanta `View|Paint|Canvas|Color|*Layout` dan bandingkan dengan API asli.
+
+Sebelum menyebut tahap selesai, jalankan langkah ini:
+
+- Baca ulang **seluruh baris** yang diedit dari atas sampai bawah. Baris padat BERBAHASA (`if(cond)return false;val x=…` dalam satu baris) mudah kehilangan segmen saat ditulis ulang, dan compiling file penuh bertulis ulang berarti seluruh file harus diverifikasi ulang, bukan hanya baris yang terlihat berubah.
+- Kalau tooling baca-encoding berbeda (PowerShell `Get-Content` membaca sebagai ANSI dan merusak karakter non-ASCII), jangan percaya diff berbasis string. Bandingkan lewat decode UTF-8 eksplisit ([System.IO.File]::ReadAllText dengan UTF8Encoding) atau `git diff` — bukan `Get-Content`.
+- Bersihkan state yang jadi mati setelah redesign (field yang selalu `emptyList()`, `val` lokal tak terpakai, parameter yang tak dibaca) supaya file tidak menyesatkan pembaca berikutnya.
