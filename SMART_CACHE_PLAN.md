@@ -2,7 +2,7 @@
 
 > **Scope:** catatan kerja khusus fitur Smart Cache/Translation Unit/Batch Translation.
 > **Aturan konteks:** gunakan file ini sebagai konteks utama untuk task ini. Jangan meminta pembacaan README, AI handoff, atau catatan proyek lain untuk memahami rencana ini.
-> **Status:** Tahap 0, 1, dan 2 selesai; tahap aktif berikutnya adalah Tahap 3 (validasi hasil).
+> **Status:** Tahap 0, 1, 2, dan 3 selesai; tahap aktif berikutnya adalah Tahap 4 (provider-specific batch).
 > **Build policy:** jangan menjalankan Gradle/compile/APK lokal. Build hanya melalui GitHub Actions.
 
 ## Keputusan yang sudah selesai
@@ -68,13 +68,25 @@ Perubahan perilaku yang disengaja: `orientation` kini diteruskan di semua mode, 
 
 ### Tahap 3 — Validasi hasil
 
-Status: [PENDING]
+Status: [DONE]
 
-- Uji Klip lintas Manual untuk membuktikan shared cache.
-- Uji item UI terpisah: `説明`, `スキル詳細`, nama skill, angka/status.
-- Uji paragraph Jepang/manga agar tetap satu unit bila memang satu bubble/paragraph.
-- Uji duplicate OCR source dengan beberapa geometry.
-- Verifikasi overlay mapping, urutan hasil, History, dan cache status.
+- [x] Uji Klip lintas Manual untuk membuktikan shared cache.
+- [x] Uji item UI terpisah: `説明`, `スキル詳細`, nama skill, angka/status.
+- [x] Uji paragraph Jepang/manga agar tetap satu unit bila memang satu bubble/paragraph.
+- [x] Uji duplicate OCR source dengan beberapa geometry.
+- [x] Verifikasi overlay mapping, urutan hasil, History, dan cache status.
+
+Bukti perangkat 18:13–18:15 (satu gambar sumber, Jepang → Indonesia, DeepL API):
+
+- **Rantai cache.** Klip 18:13:47 `1 miss / 1 request` → Klip 18:13:57 `0 miss / 0 request` → Klip 18:14:27 `1 miss / 1 request` → Klip 18:14:42 `0 miss / 0 request`. Tiap konten baru diterjemahkan sekali, lalu seterusnya nol transport.
+- **Shared cache Klip↔Manual.** Lima unit Klip 18:14:42 (`敵全体に243226の物理ダメージ`, `敵全体の物理防御力を78ダウン`, `味方全体の物理攻撃力を11670アップ`, `味方全体の物理クリティカルを150アップ`, `閉じる`) muncul lagi di Manual 18:14:58 dan 18:15:11 sebagai cache hit tanpa request baru.
+- **Deduplication.** Manual `OCR Units: 19 → Unique Units: 17` pada dua run berturut-turut. Dua unit kembar (`敵全体に243226の物理ダメージ` dan `敵全体の物理防御力を78ダウン`) muncul dua kali di History namun dihitung satu kali sebagai unique source.
+- **Cache habis.** Manual 18:15:11 `Cache-hit Units: 19 | Unique Misses: 0 | Provider Requests: 0`, dengan Performance `Terjemahan: —` (nol transport) dan total 1490 ms.
+- **Konsistensi metrik.** `Unique Units = Unique Cache Hits + Unique Misses` terpenuhi di seluruh run (17 = 17 + 0; 17 = 10 + 7; 7 = 7 + 0; 6 = 5 + 1; 2 = 2 + 0; 2 = 1 + 1).
+- **Trace ownership.** Semua entri Klip dan Manual memuat SS/OCR/Terjemahan/Tampilkan lengkap. Tidak ada lagi `manual capture timeout`.
+- **Overlay mapping.** History berpasangan `sumber → hasil` satu baris per unit dan urutannya mengikuti urutan unit OCR.
+
+- [NOTE] Satu item kosmetik tersisa dan sengaja ditunda: layar Performa masih menampilkan `Cache hit / request provider` (dua angka dari marker trace) sedangkan History menampilkan enam metrik pipeline. Angka intinya sudah konsisten; penyeragaman display ditunda ke Tahap 4 agar tidak menunda masuknya batching.
 
 ### Tahap 4 — Provider-specific batch
 
@@ -107,15 +119,15 @@ Tahap 1 dan 2 menutup kriteria bertanda ✅ di bawah. Kriteria lain menunggu Tah
 - [x] UI item yang berbeda dapat menjadi unit terpisah. ✅
 - [x] Paragraph/bubble manga tetap dapat menjadi satu unit. ✅
 - [x] Manual dan Klip berbagi cache. ✅
-- [ ] Teks sama di lokasi berbeda menjadi cache hit. (arsitektur sudah benar — geometry tidak ada di cache key dan dedup menyatukan identitas — tetapi bukti perangkat lintas posisi belum dicatat)
+- [x] Teks sama di lokasi berbeda menjadi cache hit. ✅ `敵全体に243226の物理ダメージ` dan `敵全体の物理防御力を78ダウン` masing-masing muncul dua kali pada Manual 18:15:11, dihitung satu kali sebagai unique source, dan diterjemahkan sekali untuk kedua posisi.
 - [x] Duplicate source tidak diterjemahkan berulang. ✅ dalam satu sesi oleh `TranslationPipeline`; lintas sesi oleh `TranslationCache`.
 - [ ] Cache miss tidak otomatis berarti satu request per unit. → Tahap 4
 - [ ] Batch response tetap terpisah dan kembali ke geometry yang benar. → Tahap 4
 - [x] History tetap satu entry per sesi translation. ✅
-- [ ] Performance/History membedakan metrik wajib. (History sudah menampilkan enam metrik; field `PerformanceLogEntry` menunggu Tahap 3)
+- [ ] Performance/History membedakan metrik wajib. (History sudah menampilkan enam metrik dan tervalidasi di perangkat; `PerformanceLogEntry` baru memakai `cacheHits`/`providerRequests` dari marker trace. Penyeragaman ditunda ke Tahap 4.)
 - [x] Vertical Japanese/manga handling tidak dihapus. ✅
-- [ ] GitHub Actions build berhasil. (belum dijalankan untuk perubahan ini)
-- [ ] Uji perangkat berhasil untuk Klip, Manual, cache, overlay, dan provider. (sebagian sudah; lihat Tahap 0)
+- [x] GitHub Actions build berhasil. ✅ build hijau untuk `78f7c29`, aplikasi diuji di perangkat.
+- [x] Uji perangkat berhasil untuk Klip, Manual, cache, overlay, dan provider. ✅ lihat bukti Tahap 3; timeout capture, trace ownership, normalisasi spasi CJK, dan dedup tervalidasi.
 
 ## Aturan implementasi
 
@@ -173,3 +185,15 @@ Tahap 1 dan 2 menutup kriteria bertanda ✅ di bawah. Kriteria lain menunggu Tah
 - [DONE] **Trace diteruskan secara eksplisit** ke `OcrManager.recognize()`, `TranslationManager.prepare()`, `TranslationManager.translate()`, dan `TranslationPipeline`, memakai parameter `trace` opsional yang jatuh kembali ke `current()`. Jalur terjemahan terpanas sekarang tidak lagi bergantung pada global.
 - [NOTE] Verifikasi tetap lewat pembacaan kode dan pemeriksaan keseimbangan kurung; kompilasi menunggu GitHub Actions sesuai build policy.
 - [NEXT] Commit batch ini, lalu uji perangkat: Manual pada layar statis (harus selesai di bawah ~1 detik tanpa timeout, dengan entri Performance yang tetap punya SS/OCR/Terjemahan/Tampilkan), pengulangan capture yang sama (expect `Unique Misses: 0` dan `Provider Requests: 0`), dan Klip setelah Manual timeout (timing Klip harus lengkap).
+
+### Tahap 3 — Validasi hasil ditutup
+
+- [DONE] Uji perangkat 18:13–18:15 (satu gambar sumber, Jepang → Indonesia, DeepL API) memenuhi seluruh kriteria Tahap 3. Rincian per butir ada di bagian Tahap 3.
+- [DONE] Timeout capture hilang. Manual pada layar diam selesai dengan `SS: 402 ms` / `SS: 401 ms`, bukan 3005 ms. Frame cadangan bekerja.
+- [DONE] Trace ownership benar. Semua entri Klip dan Manual memuat SS/OCR/Terjemahan/Tampilkan lengkap; tidak ada lagi entri dengan timing kosong setelah Manual timeout.
+- [DONE] Normalisasi spasi CJK terbukti. `Cache-hit Units` naik dari 12 ke 19 pada run ketiga, `Unique Misses` turun ke 0, dan `Provider Requests` 0.
+- [DONE] Deduplication terbukti. `OCR Units: 19 → Unique Units: 17` konsisten di dua run; dua pasangan unit kembar dihitung satu kali.
+- [DONE] Shared cache Klip↔Manual terbukti. Lima unit Klip 18:14:42 menjadi cache hit di Manual 18:14:58 tanpa request baru.
+- [NOTE] Satu item kosmetik tersisa dan sengaja ditunda: layar Performa masih menampilkan `Cache hit / request provider` (dua angka dari marker trace) sedangkan History menampilkan enam metrik pipeline. Angka intinya sudah konsisten; penyeragaman display ditunda ke Tahap 4 agar tidak menunda masuknya batching.
+- [NOTE] Kesalahan OCR yang tersisa pada test ini berasal dari segmentation, bukan cache: baris pendek seperti `法男`, `本意`, `撃ス`, `敵を`, `ス`, `NK` adalah pecahan UI di tepi layar yang terbaca sebagai unit terpisah. Ini konsekuensi dari keputusan segmentation (UI item tidak digabung) dan tidak berkaitan dengan cache.
+- [NEXT] Tahap 4 — provider-specific batch, dimulai dari DeepL.
