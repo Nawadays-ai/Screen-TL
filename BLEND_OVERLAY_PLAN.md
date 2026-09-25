@@ -2,7 +2,7 @@
 
 > **Scope:** catatan kerja perubahan tampilan mode Manual (overlay menyatu dengan game) dan mode Klip (desain minimalis). Mode Real-Time di luar scope.
 > **Aturan konteks:** gunakan file ini sebagai konteks utama untuk task ini. Jangan meminta pembacaan README, AI handoff, atau catatan proyek lain untuk memahami rencana ini.
-> **Status:** Tahap 0 selesai. Tahap 1 selesai ditulis dan terverifikasi 0 error compile (Kotlin 1.9.22 lokal), menunggu build + test perangkat oleh user. Tahap 2–3 belum dimulai. Tahap 4 ditunda (riset).
+> **Status:** Tahap 0 selesai. Tahap 1 selesai ditulis; hasil test perangkat 2026-09-25 **gagal pada 2 poin** (tabrakan dengan teks source, kontras warna rendah) — keduanya sudah diperbaiki, menunggu test ulang. Tahap 2–3 belum dimulai. Tahap 4 ditunda (riset).
 > **Build policy:** APK **tidak pernah** dibangun lokal — keputusan user, bukan kekurangan setup. Build hanya via GitHub Actions, lalu user tes di perangkat. Yang boleh: type-check Kotlin terisolasi via compiler di Gradle cache (ringan, detik) untuk menangkap error sebelum CI.
 
 ## Keputusan yang sudah selesai
@@ -47,10 +47,43 @@ Status: [CODE DONE] menunggu build + test perangkat.
 - [ ] Panel/button terang: teks tetap kontras (tidak "tenggelam").
 - [ ] Teks asli rata kiri → terjemahan juga rata kiri; yang center tetap center.
 - [ ] Bubble vertikal JP: tetap terbaca, outline tidak membuat huruf "tebal berlebihan".
+- [ ] **Teks panjang (2+ baris):** tidak ada baris yang keluar dari patch / menimpa teks asli.
+- [ ] **Semua panel:** teks selalu punya outline, tidak pernah fill polos tanpa tepi.
+
+### Tahap 1b — Perbaikan hasil test perangkat (2026-09-25)
+
+Status: [CODE DONE] terverifikasi 0 error compile (Kotlin 1.9.22 lokal, JDK 17).
+
+Dua keluhan user setelah test perangkat pertama, keduanya **bukan** masalah sampling Tahap 1
+melainkan masalah geometri dan kontras di sisi render:
+
+- [x] **Panel tidak menutupi teks terjemahan.** Tinggi panel sebelumnya selalu sama dengan tinggi
+  kotak teks asli (`toleranceRatio=1` untuk Manual, jadi tidak ada pertumbuhan vertikal sama
+  sekali), sementara terjemahan yang wrap ke 2+ baris meluber keluar patch karena tidak ada
+  `clipRect` di seluruh app. Teks yang meluber itu menggambar tepat di atas glyph game.
+  Perbaikan: panel dihitung dari **kebutuhan teks nyata**
+  (`lineSpacing * lines + padding * 2`), tumbuh simetris di sekitar kotak asli, dibatasi
+  `maxHeightRatio = 1.6` (bubble `1.25`). Setelah tumbuh, panel digeser masuk layar dengan
+  menggeser kedua tepi sekaligus agar tepi bawah tidak hilang di batas layar.
+  `clipRect` per-item ditambahkan sebagai jaring pengaman terakhir.
+- [x] **Kontras diukur terhadap warna yang salah.** `drawPanel` mengecat panel dengan
+  `adjustColor(base, 0.62)` untuk panel terang, sementara sampling fill diukur terhadap warna
+  **asli** — jadi fill yang kontras terhadap background asli bisa jadi nyaris menyatu dengan
+  panel yang dicat. Perbaikan: `paintedPanelColor()` jadi satu sumber kebenaran, dipakai panel
+  dan teks; guard `minFillSeparation` kini mengukur terhadap warna panel yang benar-benar dicat.
+- [x] **Outline mati justru saat style dipercaya.** `drawStroke` bisa `false` ketika sampling
+  dipercaya tapi `hasStroke == false`, sementara jalur fallback selalu `drawStroke = true` —
+  prioritasnya terbalik. Perbaikan: outline **selalu** digambar; warna fallback black/white
+  dipilih yang furthest dari fill.
+- [x] Bonus: `renderItems` dibersihkan sebelum build di `setTranslations` — sebelumnya
+  `collidesWithOtherBox` mengukur box baru terhadap geometri frame sebelumnya, jadi frame
+  pertama tidak punya deteksi tabrakan sama sekali.
 
 ### Tahap 2 — Manual: patch penuh
 
 Status: [TODO] Tujuan: area di bawah teks tidak terlihat sebagai kotak blok.
+**Catatan:** Tahap 2 adalah soal patch terlihat *natural*, bukan soal patch *cukup menutup*.
+Keluhan "teks source masih terlihat" sudah ditangani di Tahap 1b lewat geometri.
 
 - [ ] **Gradient vertical:** ganti 1 warna rata dengan `LinearGradient` — median strip atas ~15% dan strip bawah ~15% dari interior box (dialog box game umumnya bergradient).
 - [ ] **Feather edge:** tepi panel di-blur ±2–3px (scaled) supaya batas kotak tidak keras. Cara utama: `LAYER_TYPE_SOFTWARE` pada `TranslationOverlayView` + `BlurMaskFilter`. Bila frame turun → fallback: 2–3 cincin rounded-rect dengan alpha menurun.
@@ -102,6 +135,7 @@ Spesifikasi:
 
 - 2026-09-25: dibuat; branch + referensi sesi sebelumnya diamankan sebagai `1639ed1`.
 - 2026-09-25 Tahap 1: sampling glyph pakai k-means 3 cluster (bukan 2 — outline sering menyatu dengan background pada 2 cluster, terutama teks terang di panel gelap). Threshold outline vs background diturunkan ke 15 luminance: dark-on-dark outline memang bedanya kecil, dan tebakan salah aman karena stroke sewarna panel praktis tak terlihat. Shadow pakai `setShadowLayer` langsung (teks didukung hardware canvas, tanpa software layer).
+- 2026-09-25 Tahap 1b: hasil test perangkat men perteneciente dua cacat render, bukan cacat sampling. (1) Panel tidak pernah tumbuh vertikal untuk mode Manual (`toleranceRatio=1`), jadi terjemahan yang wrap meluber ke bawah patch dan menimpa teks asli — tidak ada `clipRect` di app saat itu. (2) Kontras fill diukur terhadap warna background asli, padahal `drawPanel` mengecat panel lebih gelap (0.62x) untuk panel terang; hasilnya fill game bisa menyatu dengan panelnya sendiri. Outline juga bisa mati justru ketika sampling dipercaya, padahal jalur fallback selalu menggambarnya. Semua diperbaiki di `TranslationOverlayView.kt`; `paintedPanelColor()` sekarang satu-satunya sumber warna panel.
 
 
 ## Aturan kerja untuk sesi berikutnya

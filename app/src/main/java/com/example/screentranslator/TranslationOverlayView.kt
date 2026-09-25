@@ -30,6 +30,21 @@ class TranslationOverlayView(context: Context) : View(context) {
     private val minTextSizePx = 8f
     private val maxTextSizePx = 96f
     private val minFontScale = 0.62f
+    private val lineSpacingRatio = 1.16f
+
+    /**
+     * How far a panel may grow vertically before the font has to shrink instead.
+     *
+     * Indonesian is routinely longer than the Japanese or Chinese it replaces, so a translation
+     * usually wraps to more lines than the control it sits on. The panel therefore has to get
+     * taller, not just wider: an opaque patch is the only thing standing between the translated
+     * line and the game's own glyphs underneath it. 1.6x is enough headroom for the common case;
+     * past that the font shrinks, which is cheaper than covering a third of the screen.
+     */
+    private val maxHeightRatio = 1.6f
+
+    /** A vertical bubble is a tall control already, so it gets a tighter vertical ceiling. */
+    private val bubbleHeightRatio = 1.25f
 
     /**
      * How far a panel may grow beyond the control it covers.
@@ -56,6 +71,16 @@ class TranslationOverlayView(context: Context) : View(context) {
     private val shadowOffsetRatio = 0.018f
     private val shadowColor = Color.argb(102, 0, 0, 0)
 
+    /**
+     * Floor for the outline so translated text never loses its edge on a busy background.
+     *
+     * The sampled fill alone is not enough: it is trusted against the panel colour, and when it
+     * sits close to it the glyphs read as a smudge. A thin outline in whichever of black/white is
+     * further from the fill is invisible when it is wrong, and it is what keeps white text on a
+     * white panel or dark text on a dark panel legible.
+     */
+    private val minOutlineWidthRatio = 0.025f
+
     private data class RenderItem(
         val item: TranslationOverlayItem,
         val left: Float,
@@ -81,6 +106,10 @@ class TranslationOverlayView(context: Context) : View(context) {
         this.sourceWidth = sourceWidth.coerceAtLeast(1)
         this.sourceHeight = sourceHeight.coerceAtLeast(1)
         this.toleranceRatio = toleranceRatio.coerceIn(1f, 3f)
+        // Cleared first so collidesWithOtherBox does not measure new boxes against the geometry
+        // of the previous frame. Previously the first frame after a capture had no collision
+        // detection at all, and later frames compared against stale positions.
+        renderItems = emptyList()
         renderItems = translations.mapNotNull { buildRenderItem(it, this.sourceWidth, this.sourceHeight) }
         visibility = if (renderItems.isEmpty()) View.GONE else View.VISIBLE
         invalidate()
@@ -116,6 +145,11 @@ class TranslationOverlayView(context: Context) : View(context) {
             val right = renderItem.right * scaleX
             val bottom = renderItem.bottom * scaleY + coordinateOffsetY
             if (right <= left || bottom <= top) return@forEachIndexed
+            // Keep every line inside the patch. A glyph that escapes the panel is drawn straight
+            // over the game's own text, which is the one thing the panel is there to prevent, so
+            // the clip is a backstop for the case the font cannot be shrunk far enough.
+            canvas.save()
+            canvas.clipRect(left, top, right, bottom)
             textPaint.textScaleX = 1f
             // Size is set before measuring: measureText and fontMetrics below both depend on it,
             // and drawStyledLine re-applies the same size for its own passes.
@@ -135,6 +169,7 @@ class TranslationOverlayView(context: Context) : View(context) {
                 }
                 drawStyledLine(canvas, line, lineLeft, firstBaseline + lineIndex * lineHeight, renderItem.item, renderItem.textSize * scaleY)
             }
+            canvas.restore()
         }
         textPaint.textScaleX = 1f; textPaint.color = Color.WHITE; textPaint.alpha = 255
         textPaint.style = Paint.Style.FILL
@@ -171,30 +206,41 @@ class TranslationOverlayView(context: Context) : View(context) {
      * stroke and shadow shrink together with a font that had to fit its box.
      */
     private fun drawStyledLine(canvas: Canvas, line: String, x: Float, baseline: Float, item: TranslationOverlayItem, textSize: Float) {
-        val style = item.glyphStyle?.takeIf { it.separation >= minFillSeparation }
-        val fill = style?.fill ?: chooseTextColor(item.backgroundColor)
+        // Contrast is judged against the colour the panel is actually painted, not against the
+        // colour that was sampled off the screen. drawPanel darkens a light control before filling
+        // it, so a fill chosen against the original background can end up sitting almost on top of
+        // the panel it is drawn on — which is how "the translation is hard to read" happens.
+        val panelColor = paintedPanelColor(item.backgroundColor)
+        val style = item.glyphStyle?.takeIf { abs(luminanceOf(it.fill) - luminanceOf(panelColor)) >= minFillSeparation }
+        val fill = style?.fill ?: chooseTextColor(panelColor)
         val fillLuminance = luminanceOf(fill)
+
+        // The outline colour is always the one furthest from the fill. Black or white is a safe
+        // pick because whichever is wrong is the colour of the glyph's own interior, and a stroke
+        // drawn in the fill's own colour reads as a slightly bolder letter rather than an outline.
+        val contrastStroke = if (fillLuminance >= 128f) Color.BLACK else Color.WHITE
         val strokeColor: Int
         val drawStroke: Boolean
-        if (style != null) {
-            drawStroke = style.hasStroke && abs(luminanceOf(style.stroke) - fillLuminance) >= minStrokeContrast
+        if (style != null && style.hasStroke && abs(luminanceOf(style.stroke) - fillLuminance) >= minStrokeContrast) {
             strokeColor = style.stroke
-        } else {
             drawStroke = true
-            strokeColor = if (fillLuminance >= 140f) Color.BLACK else Color.WHITE
+        } else {
+            strokeColor = contrastStroke
+            drawStroke = true
         }
 
         textPaint.textSize = textSize
         textPaint.strokeJoin = Paint.Join.ROUND
-        textPaint.strokeWidth = textSize * strokeWidthRatio
+        textPaint.strokeWidth = (textSize * if (drawStroke) strokeWidthRatio else minOutlineWidthRatio)
+            .coerceAtLeast(1f)
         textPaint.setShadowLayer(textSize * shadowRadiusRatio, textSize * shadowOffsetRatio, textSize * shadowOffsetRatio, shadowColor)
 
-        if (drawStroke) {
-            textPaint.style = Paint.Style.STROKE
-            textPaint.color = strokeColor
-            textPaint.alpha = 255
-            canvas.drawText(line, x, baseline, textPaint)
-        }
+        // The outline goes down first so the fill covers its inner half; a stroke drawn after the
+        // fill would eat into the letter and make it look bolder than the game's own text.
+        textPaint.style = Paint.Style.STROKE
+        textPaint.color = strokeColor
+        textPaint.alpha = 255
+        canvas.drawText(line, x, baseline, textPaint)
 
         textPaint.style = Paint.Style.FILL
         textPaint.color = fill
@@ -213,15 +259,8 @@ class TranslationOverlayView(context: Context) : View(context) {
      * The border is only drawn when the panel would otherwise blend into what surrounds it.
      */
     private fun drawPanel(canvas: Canvas, box: RectF, baseColor: Int, radius: Float) {
-        val luminance = 0.2126f * Color.red(baseColor) + 0.7152f * Color.green(baseColor) + 0.0722f * Color.blue(baseColor)
-        // Light controls need a slightly deeper fill so white text stays legible; dark ones stay
-        // close to the original so the control does not turn into a black hole.
-        val fill = if (luminance > 160f) adjustColor(baseColor, 0.62f) else adjustColor(baseColor, 0.86f)
-
-        backgroundPaint.shader = null
-        backgroundPaint.alpha = 255
-        backgroundPaint.color = fill
-        canvas.drawRoundRect(box, radius, radius, backgroundPaint)
+        val luminance = luminanceOf(baseColor)
+        canvas.drawRoundRect(box, radius, radius, panelPaint(baseColor, luminance))
 
         // Only a faint edge on a light panel, where the fill could otherwise disappear into a pale
         // control. Dark panels keep the control's own edge and need nothing added.
@@ -230,6 +269,25 @@ class TranslationOverlayView(context: Context) : View(context) {
             borderPaint.strokeWidth = (width / 1080f).coerceAtLeast(1f)
             canvas.drawRoundRect(box, radius, radius, borderPaint)
         }
+    }
+
+    /**
+     * The colour the panel is actually filled with for a given sampled background.
+     *
+     * Kept in one place because the text has to make the same decision: a fill colour chosen for
+     * the game's own light control turns unreadable once the panel is darkened underneath it, so
+     * both sides have to agree on the painted result rather than each re-deriving it.
+     */
+    private fun paintedPanelColor(baseColor: Int): Int =
+        if (luminanceOf(baseColor) > 160f) adjustColor(baseColor, 0.62f) else adjustColor(baseColor, 0.86f)
+
+    private fun panelPaint(baseColor: Int, luminance: Float): Paint {
+        backgroundPaint.shader = null
+        backgroundPaint.alpha = 255
+        // Light controls need a slightly deeper fill so white text stays legible; dark ones stay
+        // close to the original so the control does not turn into a black hole.
+        backgroundPaint.color = paintedPanelColor(baseColor)
+        return backgroundPaint
     }
 
     private fun adjustColor(color: Int, factor: Float): Int = Color.rgb((Color.red(color) * factor).roundToIntSafe(), (Color.green(color) * factor).roundToIntSafe(), (Color.blue(color) * factor).roundToIntSafe())
@@ -241,11 +299,8 @@ class TranslationOverlayView(context: Context) : View(context) {
         if (baseRight <= baseLeft || baseBottom <= baseTop) return null
         val originalWidth = baseRight - baseLeft; val originalHeight = baseBottom - baseTop
         val isBubble = item.orientation == TextLayoutAnalyzer.WritingOrientation.VERTICAL
-        val boxHeight = (originalHeight * toleranceRatio).coerceAtLeast(originalHeight)
-        val toleranceTop = (baseTop - (boxHeight - originalHeight) / 2f).coerceAtLeast(0f)
-        val toleranceBottom = (toleranceTop + boxHeight).coerceAtMost(height.toFloat())
-        val horizontalPadding = (boxHeight * if (isBubble) 0.08f else horizontalPaddingRatio).coerceIn(3f, if (isBubble) 22f else 16f)
-        val verticalPadding = (boxHeight * verticalPaddingRatio).coerceIn(2f, 8f)
+        val originalBoxHeight = originalHeight * toleranceRatio
+        val horizontalPadding = (originalBoxHeight * if (isBubble) 0.08f else horizontalPaddingRatio).coerceIn(3f, if (isBubble) 22f else 16f)
         val baseTextSize = (if (item.sourceTextSizePx > 0f) item.sourceTextSizePx else originalHeight * 0.72f).coerceIn(minTextSizePx, maxTextSizePx)
         val normalized = normalizeParagraph(item.translatedText); if (normalized.isEmpty()) return null
 
@@ -278,26 +333,51 @@ class TranslationOverlayView(context: Context) : View(context) {
 
         // If growing would land on top of a neighbouring control, give the room back and let the
         // font shrink instead. The original control keeps its shape, which is the whole point.
-        if (boxWidth > originalWidth && collidesWithOtherBox(boxLeft, toleranceTop, boxRight, toleranceBottom)) {
+        val originalBoxTop = (baseTop - (originalBoxHeight - originalHeight) / 2f).coerceAtLeast(0f)
+        val originalBoxBottom = (originalBoxTop + originalBoxHeight).coerceAtMost(height.toFloat())
+        if (boxWidth > originalWidth && collidesWithOtherBox(boxLeft, originalBoxTop, boxRight, originalBoxBottom)) {
             boxWidth = originalWidth
             boxRight = boxLeft + originalWidth
             maxTextWidth = originalTextWidth
         }
 
+        // The panel is sized to the text it has to cover, not to the control it replaced.
+        //
+        // A translation is usually longer than the original line, so it wraps to more lines than
+        // the control has height for. Sizing the panel to the original height leaves the wrapped
+        // lines with nowhere to go: they spill past the opaque patch and land on the game's own
+        // glyphs, which is exactly the overlap this panel exists to prevent. Growing vertically
+        // until the text fits is the only way to keep the patch under the whole translation.
+        val maxPanelHeight = (originalBoxHeight * if (isBubble) bubbleHeightRatio else maxHeightRatio)
+            .coerceAtMost(height.toFloat())
+        val verticalPadding = (originalBoxHeight * verticalPaddingRatio).coerceIn(2f, 8f)
+
         var finalTextSize = baseTextSize
         var lines = wrapText(normalized, maxTextWidth, finalTextSize)
-        val availableHeight = (boxHeight - verticalPadding * 2f).coerceAtLeast(1f)
-        var lineSpacing = finalTextSize * 1.16f
-        var totalHeight = lineSpacing * lines.size
-        if (totalHeight > availableHeight && totalHeight > 0f) {
-            val fitScale = (availableHeight / totalHeight).coerceAtLeast(minFontScale)
+        // Height needed to hold every wrapped line plus its padding.
+        var needed = finalTextSize * lineSpacingRatio * lines.size + verticalPadding * 2f
+
+        // Grow vertically to fit, but no further than the ceiling: past that the font gives way
+        // instead, which costs legibility far less than covering a third of the screen.
+        val panelHeight = minOf(needed, maxPanelHeight)
+        if (needed > panelHeight) {
+            val available = (panelHeight - verticalPadding * 2f).coerceAtLeast(1f)
+            val fitScale = (available / (finalTextSize * lineSpacingRatio * lines.size)).coerceAtLeast(minFontScale)
             finalTextSize = (finalTextSize * fitScale).coerceIn(minTextSizePx, baseTextSize)
             lines = wrapText(normalized, maxTextWidth, finalTextSize)
+            needed = finalTextSize * lineSpacingRatio * lines.size + verticalPadding * 2f
         }
-        textPaint.textSize = finalTextSize
-        lineSpacing = finalTextSize * 1.16f
-        lines = wrapText(normalized, maxTextWidth, finalTextSize)
-        return RenderItem(item, boxLeft, toleranceTop, boxRight, toleranceBottom, finalTextSize, horizontalPadding, lines, lineSpacing)
+
+        // Centre the grown panel on the original control, then shift it back inside the screen.
+        // The shift is applied to both edges at once so a panel that cannot fit above its control
+        // slides down whole rather than losing its bottom edge to the screen boundary.
+        val settledHeight = minOf(needed, maxPanelHeight)
+        var top = (originalBoxTop - (settledHeight - originalBoxHeight) / 2f).coerceAtLeast(0f)
+        if (top + settledHeight > height.toFloat()) top = (height.toFloat() - settledHeight).coerceAtLeast(0f)
+        val boxTop = top
+        val boxBottom = top + settledHeight
+        val lineSpacing = finalTextSize * lineSpacingRatio
+        return RenderItem(item, boxLeft, boxTop, boxRight, boxBottom, finalTextSize, horizontalPadding, lines, lineSpacing)
     }
 
     /**
