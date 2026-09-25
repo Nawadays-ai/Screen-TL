@@ -22,7 +22,9 @@ import kotlin.math.min
  *
  * The selected screen area stays transparent/untouched while the rest of the
  * screen is dimmed. The translation is presented in a compact, scrollable
- * glass-like panel whose background is a real blurred copy of the selected area.
+ * panel with one solid near-opaque fill: the earlier version stacked a blurred
+ * copy of the selection under dark washes, which read as a glass slab and
+ * pulled unrelated colours off the game screen.
  */
 class KlipResultOverlayView(
     context: Context,
