@@ -150,14 +150,19 @@ class DeepLTranslationProvider(
             onSuccess(BatchTranslationResult(emptyMap(), emptyMap()))
             return
         }
+        // A blank text is not worth a round trip, but it must not cost the other texts their
+        // translation either. Drop the blanks from the request and report them by original index.
         val blankIndexes = texts.indices.filter { texts[it].isBlank() }
-        if (blankIndexes.isNotEmpty()) {
-            // A blank element is not worth a round trip; report it and translate the rest.
+        val sendableIndexes = texts.indices.filter { texts[it].isNotBlank() }
+        if (sendableIndexes.isEmpty()) {
             onSuccess(BatchTranslationResult(emptyMap(), blankIndexes.associateWith { "Teks kosong" }))
             return
         }
+        val sendableTexts = sendableIndexes.map { texts[it] }
         if (sourceLanguage == targetLanguage) {
-            onSuccess(BatchTranslationResult(texts.indices.associateWith { it to texts[it] }, emptyMap()))
+            val resolved = LinkedHashMap<Int, String>()
+            sendableIndexes.forEach { resolved[it] = texts[it] }
+            onSuccess(BatchTranslationResult(resolved, blankIndexes.associateWith { "Teks kosong" }))
             return
         }
 
@@ -168,7 +173,7 @@ class DeepLTranslationProvider(
         }
 
         val textArray = JSONArray()
-        texts.forEach { textArray.put(it) }
+        sendableTexts.forEach { textArray.put(it) }
         val json = JSONObject()
             .put("text", textArray)
             .put("target_lang", targetCode)
@@ -199,22 +204,25 @@ class DeepLTranslationProvider(
                     }
                     try {
                         val translations = JSONObject(responseBody).getJSONArray("translations")
-                        if (translations.length() != texts.size) {
+                        if (translations.length() != sendableTexts.size) {
                             onFailure(
                                 IllegalStateException(
-                                    "DeepL mengembalikan ${translations.length()} terjemahan untuk ${texts.size} teks"
+                                    "DeepL mengembalikan ${translations.length()} terjemahan untuk ${sendableTexts.size} teks"
                                 )
                             )
                             return
                         }
                         val resolved = LinkedHashMap<Int, String>()
-                        val failed = LinkedHashMap<Int, String>()
-                        for (index in texts.indices) {
-                            val value = translations.getJSONObject(index).optString("text", "")
+                        val failed = LinkedHashMap<Int, String>(blankIndexes.associateWith { "Teks kosong" })
+                        for (position in sendableTexts.indices) {
+                            // Map back through sendableIndexes so the caller always receives the
+                            // index of the text it originally asked about, blanks included.
+                            val originalIndex = sendableIndexes[position]
+                            val value = translations.getJSONObject(position).optString("text", "")
                             if (value.isBlank()) {
-                                failed[index] = "DeepL mengembalikan teks kosong"
+                                failed[originalIndex] = "DeepL mengembalikan teks kosong"
                             } else {
-                                resolved[index] = value
+                                resolved[originalIndex] = value
                             }
                         }
                         onSuccess(BatchTranslationResult(resolved, failed))

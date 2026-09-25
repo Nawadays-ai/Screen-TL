@@ -157,15 +157,19 @@ class TranslationManager(
         failed: MutableMap<Int, String>,
         cacheScope: String,
         trace: ScreenTLPerformanceTrace?,
-        onRequest: () -> Unit
+        onRequest: () -> Unit,
+        onDone: () -> Unit
     ) {
-        if (chunkIndex >= chunks.size) return
+        if (chunkIndex >= chunks.size) {
+            onDone()
+            return
+        }
         val indexes = chunks[chunkIndex]
         val batchTexts = indexes.map { texts[it] }
         // One marker per transport call, so the performance log's request count stays honest.
         trace?.mark("translation_request provider=${getProviderName()} texts=${batchTexts.size} chars=${batchTexts.sumOf { it.length }}")
         requestGroup(batchTexts, indexes, resolved, failed, cacheScope, trace, allowSingleRetry = true, onRequest) {
-            processChunks(chunks, chunkIndex + 1, texts, resolved, failed, cacheScope, trace, onRequest)
+            processChunks(chunks, chunkIndex + 1, texts, resolved, failed, cacheScope, trace, onRequest, onDone)
         }
     }
 
