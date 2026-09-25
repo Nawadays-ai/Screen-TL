@@ -32,8 +32,9 @@ data class TranslationSessionResult(
  * in the identity: the same text found in two places is resolved once and then rendered at both
  * locations, each with its own box and writing orientation.
  *
- * Resolution stays strictly sequential and unit by unit. Batching is deliberately out of scope
- * here, so [TranslationSessionResult.providerRequests] equals
+ * Grouping is what fixes the per-unit metrics; how the misses then reach the provider is
+ * [TranslationManager]'s job, so [TranslationSessionResult.providerRequests] reports the number of
+ * real transport calls, which after batching is no longer equal to
  * [TranslationSessionResult.uniqueMisses].
  *
  * A pipeline instance owns per-run state; create a new one for every session.
@@ -71,47 +72,36 @@ class TranslationPipeline(
         }
 
         if (orderedUnits.isEmpty()) {
-            onFinished(buildResult())
+            onFinished(buildResult(0))
             return
         }
 
-        resolveNext(groups.values.toList(), 0) { onFinished(buildResult()) }
-    }
-
-    /**
-     * Resolves one unique source per step. Cancellation is only checked at step boundaries, so a
-     * cancelled session stops before issuing further provider work while an in-flight call is
-     * still allowed to settle.
-     */
-    private fun resolveNext(orderedGroups: List<UnitGroup>, index: Int, onDone: () -> Unit) {
-        if (isCancelled() || index >= orderedGroups.size) {
-            onDone()
+        // Cancellation is checked before any provider work starts. Once a batch is in flight it
+        // is left to settle rather than being abandoned, so cache writes stay consistent.
+        if (isCancelled()) {
+            onFinished(buildResult(0))
             return
         }
 
-        val group = orderedGroups[index]
-        val representative = group.units.first()
-        try {
-            translator.translate(
-                text = representative.text,
-                onSuccess = { translated ->
+        val orderedGroups = groups.values.toList()
+        translator.translateBatch(
+            texts = orderedGroups.map { it.units.first().text },
+            onSuccess = { result ->
+                result.translations.forEach { (position, translated) ->
+                    val group = orderedGroups[position]
                     group.translation = translated
-                    resolveNext(orderedGroups, index + 1, onDone)
-                },
-                onFailure = { exception ->
-                    group.failure = exception.message ?: "Unknown error"
-                    resolveNext(orderedGroups, index + 1, onDone)
-                },
-                onCacheHit = { group.resolvedFromCache = true },
-                trace = trace
-            )
-        } catch (exception: Exception) {
-            group.failure = exception.message ?: "Unknown error"
-            resolveNext(orderedGroups, index + 1, onDone)
-        }
+                    group.resolvedFromCache = position in result.fromCache
+                }
+                result.failures.forEach { (position, reason) ->
+                    orderedGroups[position].failure = reason
+                }
+                onFinished(buildResult(result.requests))
+            },
+            trace = trace
+        )
     }
 
-    private fun buildResult(): TranslationSessionResult {
+    private fun buildResult(providerRequests: Int): TranslationSessionResult {
         val overlayItems = ArrayList<TranslationOverlayItem>(orderedUnits.size)
         val historyLines = ArrayList<String>(orderedUnits.size)
 
@@ -139,7 +129,6 @@ class TranslationPipeline(
 
         val ocrUnits = orderedUnits.size
         val uniqueUnits = groups.size
-        val providerRequests = uniqueMisses
         val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
         val providerLabel = buildString {
             append(translator.getProviderName())

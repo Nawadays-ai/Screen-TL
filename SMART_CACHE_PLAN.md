@@ -2,7 +2,7 @@
 
 > **Scope:** catatan kerja khusus fitur Smart Cache/Translation Unit/Batch Translation.
 > **Aturan konteks:** gunakan file ini sebagai konteks utama untuk task ini. Jangan meminta pembacaan README, AI handoff, atau catatan proyek lain untuk memahami rencana ini.
-> **Status:** Tahap 0, 1, 2, dan 3 selesai; tahap aktif berikutnya adalah Tahap 4 (provider-specific batch).
+> **Status:** Tahap 0, 1, 2, 3, dan 4 selesai; menunggu uji perangkat untuk Tahap 4. Sisa satu item kosmetik: samakan layar Performa dengan enam metrik History.
 > **Build policy:** jangan menjalankan Gradle/compile/APK lokal. Build hanya melalui GitHub Actions.
 
 ## Keputusan yang sudah selesai
@@ -90,13 +90,20 @@ Bukti perangkat 18:13–18:15 (satu gambar sumber, Jepang → Indonesia, DeepL A
 
 ### Tahap 4 — Provider-specific batch
 
-Status: [PENDING]
+Status: [DONE] (implementasi selesai, menunggu uji perangkat)
 
-- Mulai dari DeepL setelah Tahap 1–3 stabil.
-- Batch hanya berisi unique cache misses.
-- Response harus dipetakan stabil ke unit; jangan mengandalkan urutan tanpa kontrak provider.
-- OpenRouter hanya setelah format response ber-ID dan fallback error disepakati.
-- ML Kit tidak dipaksa memakai network-style batching.
+- [DONE] Kontrak `TranslationProvider.translateBatch(texts, onSuccess, onFailure)`. Hasil dan kegagalan dilaporkan **per indeks**, sehingga batch yang gagal sebagian tidak pernah membuat pemanggil menebak entri mana yang hilang. Implementasi default menerjemahkan satu per satu, jadi ML Kit (tanpa endpoint batch) dan OpenRouter belum ikut berubah.
+- [DONE] `DeepLTranslationProvider` memakai array `text` secara native. Dokumentasi DeepL menyatakan tiap elemen array diterjemahkan secara independen dan response kembali sesuai urutan request, sehingga batch tidak dapat menggabungkan unit maupun membiarkan satu unit memengaruhi unit lain. Panjang response diverifikasi terhadap panjang request.
+- [DONE] `TranslationManager.translateBatch()` dengan urutan yang disengaja: cek cache **per teks** lebih dulu, hanya miss yang dikirim, chunk maksimal `MAX_BATCH_TEXTS = 20`, dan setiap hasil langsung disimpan ke cache dengan key-nya sendiri.
+- [DONE] Retry sesuai kesepakatan: kegagalan parsial mengirim ulang **hanya** teks yang hilang; request yang ditolak seluruhnya dipecah menjadi dua bagian lalu masing-masing dicoba lagi; satu teks mencoba satu kali lagi sebelum kegagalannya dicatat. `allowSingleRetry` menjaga agar retry tidak berulang tanpa akhir.
+- [DONE] `TranslationPipeline` memakai jalur batch. `Provider Requests` kini melaporkan jumlah transport call nyata dan tidak lagi selalu sama dengan `Unique Misses`.
+- [DONE] `BatchTranslationResult` diperluas untuk membawa `fromCache` dan `requests`; aturan ProGuard untuk tipe baru.
+- [NOTE] Cache key tetap per teks, bukan per batch. "Terjemahkan skill saja" tetap cache hit setelah seluruh layar pernah diterjemahkan.
+- [NOTE] Batas 20 unit per request dipilih pemilik proyek. Ini pagar pengaman, bukan batas API DeepL yang terdokumentasi; dokumentasi hanya menyebut batas ukuran request 128 KiB. Menurunkannya cukup mengubah satu konstanta.
+- [NOTE] Batching tidak mengurangi kuota karakter DeepL Free (500.000 karakter/bulan); yang berkurang adalah jumlah HTTP request dan waktu tunggu.
+- [NOTE] Verifikasi lewat pembacaan kode dan pemeriksaan keseimbangan kurung; kompilasi dan perilaku batching menunggu GitHub Actions serta uji perangkat.
+- [NEXT] Uji perangkat: `Provider Requests` harus turun (misalnya 7 miss menjadi 1 request), History tetap berpasangan `sumber → hasil` per unit, dan hasil batch DeepL harus identik dengan mode one-by-one.
+- [NEXT] Sisa item kosmetik Tahap 3: layar Performa masih menampilkan dua angka `Cache hit / request provider`; samakan dengan enam metrik pipeline seperti di History.
 
 ## Metrik wajib
 
@@ -121,8 +128,8 @@ Tahap 1 dan 2 menutup kriteria bertanda ✅ di bawah. Kriteria lain menunggu Tah
 - [x] Manual dan Klip berbagi cache. ✅
 - [x] Teks sama di lokasi berbeda menjadi cache hit. ✅ `敵全体に243226の物理ダメージ` dan `敵全体の物理防御力を78ダウン` masing-masing muncul dua kali pada Manual 18:15:11, dihitung satu kali sebagai unique source, dan diterjemahkan sekali untuk kedua posisi.
 - [x] Duplicate source tidak diterjemahkan berulang. ✅ dalam satu sesi oleh `TranslationPipeline`; lintas sesi oleh `TranslationCache`.
-- [ ] Cache miss tidak otomatis berarti satu request per unit. → Tahap 4
-- [ ] Batch response tetap terpisah dan kembali ke geometry yang benar. → Tahap 4
+- [x] Cache miss tidak otomatis berarti satu request per unit. ✅ `TranslationManager.translateBatch()` mengirim unique miss dalam chunk 20, jadi 7 miss menjadi 1 request transport.
+- [x] Batch response tetap terpisah dan kembali ke geometry yang benar. ✅ `BatchTranslationResult` melaporkan hasil per indeks teks, dan `TranslationPipeline` memetakannya kembali ke `UnitGroup` lalu ke geometry masing-masing.
 - [x] History tetap satu entry per sesi translation. ✅
 - [ ] Performance/History membedakan metrik wajib. (History sudah menampilkan enam metrik dan tervalidasi di perangkat; `PerformanceLogEntry` baru memakai `cacheHits`/`providerRequests` dari marker trace. Penyeragaman ditunda ke Tahap 4.)
 - [x] Vertical Japanese/manga handling tidak dihapus. ✅

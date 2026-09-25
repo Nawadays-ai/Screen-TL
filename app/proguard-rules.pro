@@ -21,6 +21,7 @@
 
 # Keep TranslationProvider implementations
 -keep class com.example.screentranslator.**TranslationProvider** { *; }
+-keep class com.example.screentranslator.BatchTranslationResult { *; }
 
 # Keep the deduplicated translation pipeline and its shared text normalizer
 -keep class com.example.screentranslator.TranslationPipeline { *; }
