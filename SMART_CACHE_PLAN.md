@@ -2,7 +2,7 @@
 
 > **Scope:** catatan kerja khusus fitur Smart Cache/Translation Unit/Batch Translation.
 > **Aturan konteks:** gunakan file ini sebagai konteks utama untuk task ini. Jangan meminta pembacaan README, AI handoff, atau catatan proyek lain untuk memahami rencana ini.
-> **Status:** Tahap 0, 1, 2, 3, dan 4 selesai; menunggu uji perangkat untuk Tahap 4. Sisa satu item kosmetik: samakan layar Performa dengan enam metrik History.
+> **Status:** Tahap 0 sampai 4 selesai dan tervalidasi di perangkat. Sisa satu item kosmetik: samakan tampilan layar Performa dengan enam metrik History.
 > **Build policy:** jangan menjalankan Gradle/compile/APK lokal. Build hanya melalui GitHub Actions.
 
 ## Keputusan yang sudah selesai
@@ -90,7 +90,7 @@ Bukti perangkat 18:13–18:15 (satu gambar sumber, Jepang → Indonesia, DeepL A
 
 ### Tahap 4 — Provider-specific batch
 
-Status: [DONE] (implementasi selesai, menunggu uji perangkat)
+Status: [DONE]
 
 - [DONE] Kontrak `TranslationProvider.translateBatch(texts, onSuccess, onFailure)`. Hasil dan kegagalan dilaporkan **per indeks**, sehingga batch yang gagal sebagian tidak pernah membuat pemanggil menebak entri mana yang hilang. Implementasi default menerjemahkan satu per satu, jadi ML Kit (tanpa endpoint batch) dan OpenRouter belum ikut berubah.
 - [DONE] `DeepLTranslationProvider` memakai array `text` secara native. Dokumentasi DeepL menyatakan tiap elemen array diterjemahkan secara independen dan response kembali sesuai urutan request, sehingga batch tidak dapat menggabungkan unit maupun membiarkan satu unit memengaruhi unit lain. Panjang response diverifikasi terhadap panjang request.
@@ -101,9 +101,12 @@ Status: [DONE] (implementasi selesai, menunggu uji perangkat)
 - [NOTE] Cache key tetap per teks, bukan per batch. "Terjemahkan skill saja" tetap cache hit setelah seluruh layar pernah diterjemahkan.
 - [NOTE] Batas 20 unit per request dipilih pemilik proyek. Ini pagar pengaman, bukan batas API DeepL yang terdokumentasi; dokumentasi hanya menyebut batas ukuran request 128 KiB. Menurunkannya cukup mengubah satu konstanta.
 - [NOTE] Batching tidak mengurangi kuota karakter DeepL Free (500.000 karakter/bulan); yang berkurang adalah jumlah HTTP request dan waktu tunggu.
-- [NOTE] Verifikasi lewat pembacaan kode dan pemeriksaan keseimbangan kurung; kompilasi dan perilaku batching menunggu GitHub Actions serta uji perangkat.
-- [NEXT] Uji perangkat: `Provider Requests` harus turun (misalnya 7 miss menjadi 1 request), History tetap berpasangan `sumber → hasil` per unit, dan hasil batch DeepL harus identik dengan mode one-by-one.
-- [NEXT] Sisa item kosmetik Tahap 3: layar Performa masih menampilkan dua angka `Cache hit / request provider`; samakan dengan enam metrik pipeline seperti di History.
+- [DONE] Uji perangkat 19:47–19:50 (Manual, DeepL API, satu gambar sumber) membuktikan batching bekerja. `Provider Requests: 1` pada setiap run yang punya miss, dengan `Unit OCR` 13–27, artinya puluhan unit hanya butuh satu transport call. Run dengan `Provider Requests: 0` selesai dengan `Terjemahan: —` karena seluruh unit dilayani cache.
+- [DONE] Tidak ada teks yang tertukar posisi: History tetap berpasangan `sumber → hasil` per unit dan urutannya mengikuti urutan unit OCR.
+- [DONE] Kecepatan meningkat nyata. Run Miss-before batching sebelumnya butuh 2818 ms terjemahan untuk 7 miss; run dengan jumlah unit lebih besar kini menyelesaikan 9 miss dalam 844 ms dan 4 miss dalam 425 ms.
+- [DONE] Tidak ada error kompilasi maupun runtime setelah dua perbaikan yang ditemukan build: arity trailing lambda pada `processChunks` dan pemetaan indeks pada `DeepLTranslationProvider.translateBatch` (teks kosong dulu membatalkan seluruh batch, lalu perbaikannya membuat setiap terjemahan mendarat di unit yang salah karena indeks response dibandingkan dengan `texts.size` padahal yang dikirim `sendableTexts`).
+- [NOTE] `Terjemahan: —` pada run cache penuh adalah perilaku yang benar, bukan kegagalan: tidak ada transport request sehingga tidak ada durasi terjemahan untuk dilaporkan.
+- [NOTE] Sisa satu item kosmetik Tahap 3: layar Performa masih menampilkan dua angka `Cache hit / request provider`; samakan dengan enam metrik pipeline seperti di History. Angka di bawah ini adalah hit unit bukan request, jadi cukup membingungkan setelah batching.
 
 ## Metrik wajib
 
