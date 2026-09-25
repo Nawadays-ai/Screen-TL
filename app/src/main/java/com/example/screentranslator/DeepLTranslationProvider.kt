@@ -6,6 +6,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -125,6 +126,106 @@ class DeepLTranslationProvider(
                         val translations = JSONObject(responseBody).getJSONArray("translations")
                         val translated = translations.getJSONObject(0).getString("text")
                         onSuccess(translated)
+                    } catch (e: Exception) {
+                        onFailure(IllegalStateException("Respons DeepL tidak valid", e))
+                    }
+                }
+            }
+        })
+    }
+
+    /**
+     * Sends every text as one element of DeepL's `text` array.
+     *
+     * DeepL documents that each array element is translated independently and that results come
+     * back in request order, so batching here cannot merge two units or let one unit influence
+     * another. Length is therefore asserted against the request rather than trusted blindly.
+     */
+    override fun translateBatch(
+        texts: List<String>,
+        onSuccess: (BatchTranslationResult) -> Unit,
+        onFailure: (Exception) -> Unit
+    ) {
+        if (texts.isEmpty()) {
+            onSuccess(BatchTranslationResult(emptyMap(), emptyMap()))
+            return
+        }
+        // A blank text is not worth a round trip, but it must not cost the other texts their
+        // translation either. Drop the blanks from the request and report them by original index.
+        val blankIndexes = texts.indices.filter { texts[it].isBlank() }
+        val sendableIndexes = texts.indices.filter { texts[it].isNotBlank() }
+        if (sendableIndexes.isEmpty()) {
+            onSuccess(BatchTranslationResult(emptyMap(), blankIndexes.associateWith { "Teks kosong" }))
+            return
+        }
+        val sendableTexts = sendableIndexes.map { texts[it] }
+        if (sourceLanguage == targetLanguage) {
+            val resolved = LinkedHashMap<Int, String>()
+            sendableIndexes.forEach { resolved[it] = texts[it] }
+            onSuccess(BatchTranslationResult(resolved, blankIndexes.associateWith { "Teks kosong" }))
+            return
+        }
+
+        val targetCode = deepLTargetCode(targetLanguage)
+        if (targetCode == null) {
+            onFailure(IllegalArgumentException("Bahasa target tidak didukung DeepL: $targetLanguage"))
+            return
+        }
+
+        val textArray = JSONArray()
+        sendableTexts.forEach { textArray.put(it) }
+        val json = JSONObject()
+            .put("text", textArray)
+            .put("target_lang", targetCode)
+            .apply {
+                deepLSourceCode(sourceLanguage)?.let { put("source_lang", it) }
+            }
+            .toString()
+
+        val request = Request.Builder()
+            .url(endpointForKey())
+            .header("Authorization", "DeepL-Auth-Key $apiKey")
+            .post(json.toRequestBody(JSON))
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) = onFailure(e)
+
+            override fun onResponse(call: Call, response: okhttp3.Response) {
+                response.use {
+                    val responseBody = it.body?.string().orEmpty()
+                    if (!it.isSuccessful) {
+                        onFailure(
+                            IllegalStateException(
+                                "DeepL gagal (HTTP ${it.code}): ${responseBody.take(160)}"
+                            )
+                        )
+                        return
+                    }
+                    try {
+                        val translations = JSONObject(responseBody).getJSONArray("translations")
+                        if (translations.length() != sendableTexts.size) {
+                            onFailure(
+                                IllegalStateException(
+                                    "DeepL mengembalikan ${translations.length()} terjemahan untuk ${sendableTexts.size} teks"
+                                )
+                            )
+                            return
+                        }
+                        val resolved = LinkedHashMap<Int, String>()
+                        val failed = LinkedHashMap<Int, String>(blankIndexes.associateWith { "Teks kosong" })
+                        for (position in sendableTexts.indices) {
+                            // Map back through sendableIndexes so the caller always receives the
+                            // index of the text it originally asked about, blanks included.
+                            val originalIndex = sendableIndexes[position]
+                            val value = translations.getJSONObject(position).optString("text", "")
+                            if (value.isBlank()) {
+                                failed[originalIndex] = "DeepL mengembalikan teks kosong"
+                            } else {
+                                resolved[originalIndex] = value
+                            }
+                        }
+                        onSuccess(BatchTranslationResult(resolved, failed))
                     } catch (e: Exception) {
                         onFailure(IllegalStateException("Respons DeepL tidak valid", e))
                     }

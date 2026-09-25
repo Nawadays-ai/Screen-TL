@@ -52,7 +52,8 @@ android {
             }
         }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -82,9 +83,6 @@ dependencies {
     // ML Kit Translation
     implementation("com.google.mlkit:translate:17.0.3")
 
-    // OkHttp untuk API DeepL & Gemini
+    // OkHttp untuk API DeepL & OpenRouter
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-
-    // Coroutines untuk proses di latar belakang
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 }

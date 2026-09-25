@@ -2,6 +2,7 @@ package com.example.screentranslator
 
 import android.os.Bundle
 import android.widget.Button
+import android.widget.ImageButton
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import java.text.SimpleDateFormat
@@ -15,7 +16,7 @@ class PerformanceActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_performance)
         PerformanceLogStore.initialize(applicationContext)
-        findViewById<Button>(R.id.btnBackPerformance).setOnClickListener { finish() }
+        findViewById<ImageButton>(R.id.btnBackPerformance).setOnClickListener { finish() }
         findViewById<Button>(R.id.btnClearPerformance).setOnClickListener {
             PerformanceLogStore.clear()
             updatePerformance()
@@ -45,6 +46,15 @@ class PerformanceActivity : AppCompatActivity() {
                 append("OCR: ").append(formatMs(entry.ocrMs)).append("\n")
                 append("Terjemahan: ").append(formatMs(entry.translationMs)).append("\n")
                 append("Tampilkan: ").append(formatMs(entry.displayMs)).append("\n")
+                entry.ocrUnits?.let { append("Unit OCR: ").append(it).append("\n") }
+                if (entry.cacheHits != null || entry.providerRequests != null) {
+                    append("Cache hit / request provider: ")
+                        .append(entry.cacheHits ?: 0)
+                        .append(" / ")
+                        .append(entry.providerRequests ?: 0)
+                        .append("\n")
+                }
+                entry.timeoutStage?.let { append("Timeout: ").append(it).append("\n") }
                 append("Lainnya: ").append(entry.unaccountedMs).append(" ms\n")
                 append("TOTAL: ").append(entry.totalMs).append(" ms")
             }

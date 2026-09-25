@@ -5,9 +5,13 @@ import android.content.Context
 object ApiSettings {
     private const val PREFS = "screen_tl_api_settings"
     private const val KEY_MANUAL_PROVIDER = "manual_provider"
-    private const val KEY_GEMINI_ENABLED = "gemini_enabled"
-    private const val KEY_GEMINI_VERIFIED = "gemini_verified"
     private const val KEY_DEEPL_ENABLED = "deepl_enabled"
+
+    // Legacy keys of the removed Gemini provider. They are kept only so an existing
+    // install can have its stale secret and flags cleaned up once during initialize().
+    private const val LEGACY_GEMINI_KEY = "gemini_api_key"
+    private const val LEGACY_GEMINI_ENABLED = "gemini_enabled"
+    private const val LEGACY_GEMINI_VERIFIED = "gemini_verified"
     private const val KEY_DEEPL_VERIFIED = "deepl_verified"
     private const val KEY_OPENROUTER_ENABLED = "openrouter_enabled"
     private const val KEY_OPENROUTER_VERIFIED = "openrouter_verified"
@@ -30,6 +34,11 @@ object ApiSettings {
             val appContext = context.applicationContext
             preferences = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             keyStore = SecureApiKeyStore(appContext)
+            // Gemini support was removed because every model in its rotation was
+            // permanently overloaded. Purge leftovers from older installs so no
+            // orphaned encrypted secret stays behind.
+            keyStore.clear(LEGACY_GEMINI_KEY)
+            preferences.edit().remove(LEGACY_GEMINI_ENABLED).remove(LEGACY_GEMINI_VERIFIED).apply()
         }
     }
 
@@ -41,43 +50,7 @@ object ApiSettings {
 
     fun setManualProvider(provider: String) {
         ensureInitialized()
-        preferences.edit().putString(KEY_MANUAL_PROVIDER, PROVIDER_ML_KIT).apply()
-    }
-
-    // ---------- Gemini ----------
-    fun getGeminiKey(): String? {
-        ensureInitialized()
-        return keyStore.get("gemini_api_key")
-    }
-
-    fun setGeminiKey(key: String) {
-        ensureInitialized()
-        keyStore.put("gemini_api_key", key.trim())
-        preferences.edit().putBoolean(KEY_GEMINI_VERIFIED, false).apply()
-    }
-
-    fun clearGeminiKey() {
-        ensureInitialized()
-        keyStore.clear("gemini_api_key")
-        preferences.edit().putBoolean(KEY_GEMINI_VERIFIED, false).putBoolean(KEY_GEMINI_ENABLED, false).apply()
-    }
-
-    fun isGeminiVerified(): Boolean = initialized().let { preferences.getBoolean(KEY_GEMINI_VERIFIED, false) }
-
-    fun setGeminiVerified(value: Boolean) {
-        ensureInitialized()
-        preferences.edit().putBoolean(KEY_GEMINI_VERIFIED, value).apply()
-    }
-
-    fun isGeminiEnabled(): Boolean = initialized().let { preferences.getBoolean(KEY_GEMINI_ENABLED, false) }
-
-    fun setGeminiEnabled(value: Boolean) {
-        ensureInitialized()
-        preferences.edit().putBoolean(KEY_GEMINI_ENABLED, value).apply()
-        if (value) {
-            preferences.edit().putBoolean(KEY_DEEPL_ENABLED, false)
-                .putBoolean(KEY_OPENROUTER_ENABLED, false).apply()
-        }
+        preferences.edit().putString(KEY_MANUAL_PROVIDER, provider).apply()
     }
 
     // ---------- DeepL ----------
@@ -111,8 +84,7 @@ object ApiSettings {
         ensureInitialized()
         preferences.edit().putBoolean(KEY_DEEPL_ENABLED, value).apply()
         if (value) {
-            preferences.edit().putBoolean(KEY_GEMINI_ENABLED, false)
-                .putBoolean(KEY_OPENROUTER_ENABLED, false).apply()
+            preferences.edit().putBoolean(KEY_OPENROUTER_ENABLED, false).apply()
         }
     }
 
@@ -150,8 +122,7 @@ object ApiSettings {
         ensureInitialized()
         preferences.edit().putBoolean(KEY_OPENROUTER_ENABLED, value).apply()
         if (value) {
-            preferences.edit().putBoolean(KEY_GEMINI_ENABLED, false)
-                .putBoolean(KEY_DEEPL_ENABLED, false).apply()
+            preferences.edit().putBoolean(KEY_DEEPL_ENABLED, false).apply()
         }
     }
 

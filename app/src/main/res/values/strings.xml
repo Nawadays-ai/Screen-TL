@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Screen Translator</string>
+    <string name="history">Riwayat</string>
+    <string name="performance">Performa</string>
+    <string name="settings">Pengaturan</string>
+    <string name="swap">Tukar</string>
+    <string name="start_translation">Mulai Terjemahan</string>
+    <string name="stop_translation">Berhenti</string>
+    <string name="realtime">Real-Time</string>
+    <string name="klip">Klip</string>
+    <string name="cancel">Batal</string>
+    <string name="exit">Keluar</string>
+    <string name="manual_tl">Manual TL</string>
+</resources>

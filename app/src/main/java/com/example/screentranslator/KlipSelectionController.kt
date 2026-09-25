@@ -19,9 +19,6 @@ import android.view.View
 import android.view.WindowManager
 import android.graphics.PixelFormat
 import android.widget.Toast
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 object KlipSelectionController {
     private const val TAG = "ScreenTL-Klip"
@@ -41,6 +38,7 @@ object KlipSelectionController {
     private var service: FloatingService? = null
     private var clipOverlayView: KlipResultOverlayView? = null
     private var selectionExists = false
+    private var performanceTrace: ScreenTLPerformanceTrace? = null
 
     fun start(context: Context, sourceView: View) {
         if (isActive) return
@@ -50,18 +48,22 @@ object KlipSelectionController {
         }
         val root = sourceView.rootView ?: return
         val wm = owner.getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return
-        val capture = readField<ScreenCaptureManager>(owner, "screenCaptureManager")
-        val ocr = readField<OcrManager>(owner, "ocrManager")
-        val translator = readField<TranslationManager>(owner, "translationManager")
+        val capture = owner.getScreenCaptureManager()
+        val ocr = owner.getOcrManager()
+        val translator = owner.getTranslationManager()
         if (capture == null || ocr == null || translator == null) {
             toast(owner, "Klip belum siap. Pastikan Translator aktif.")
             return
         }
 
-        runCatching { invokePrivate(owner, "removeTranslationOverlay") }
+        // Klip owns the capture surface while it runs: stop Real-Time and drop any pending
+        // Manual capture so their timeouts cannot cancel this capture or close this trace.
+        runCatching { owner.prepareForKlipPublic() }
+        runCatching { owner.removeTranslationOverlayPublic() }
         selectionExists = false
         hasClipOverlay = false
         isActive = true
+        performanceTrace = null
         service = owner
         windowManager = wm
         hostRoot = root
@@ -72,7 +74,14 @@ object KlipSelectionController {
         val display = owner.resources.displayMetrics
         val selectionView = KlipMaskView(
             owner,
-            onConfirm = { rect -> finishSelection(rect, capture, ocr, translator) },
+            onConfirm = { rect ->
+                finishSelection(
+                    rect = rect,
+                    capture = capture,
+                    ocr = ocr,
+                    translator = translator
+                )
+            },
             onCancel = { cancel() }
         ) { exists -> selectionExists = exists }
         maskView = selectionView
@@ -114,7 +123,10 @@ object KlipSelectionController {
         if (!isActive && !hasClipOverlay) return
         val owner = service ?: return
 
-        readField<ScreenCaptureManager>(owner, "screenCaptureManager")?.cancelPendingCapture()
+        owner.getScreenCaptureManager()?.cancelPendingCapture()
+        owner.getScreenCaptureManager()?.disarmCaptureFallback()
+        performanceTrace?.finish("klip cancelled")
+        performanceTrace = null
 
         clipOverlayView?.let { view ->
             runCatching { windowManager?.removeView(view) }
@@ -144,18 +156,38 @@ object KlipSelectionController {
             return
         }
 
+        // Capture mask geometry at confirmation time (view is laid out and attached)
+        val selectionSpaceWidth = maskView?.width ?: 0
+        val selectionSpaceHeight = maskView?.height ?: 0
+        val selectionOrigin = maskView?.let { view ->
+            IntArray(2).also { view.getLocationOnScreen(it) }
+        } ?: intArrayOf(0, 0)
+
         // Keep the mask visible while capture/OCR/translation are running.
         // The selected interior is transparent, so the crop remains untouched.
         selectionExists = true
         setClipCancelVisible(owner.findViewByIdRoot(), true)
         toast(owner, "Area dikonfirmasi. Memproses…")
 
+        capture.armCaptureFallback()
         mainHandler.postDelayed({
-            if (!isActive) return@postDelayed
+            if (!isActive) {
+                capture.disarmCaptureFallback()
+                return@postDelayed
+            }
 
-            val requested = capture.captureOnce { bitmap ->
+            val trace = ScreenTLPerformanceTrace.start("Klip")
+            performanceTrace = trace
+            val requested = capture.captureOnce({ bitmap ->
+                capture.disarmCaptureFallback()
                 try {
-                    val crop = cropBitmap(bitmap, selection)
+                    val crop = cropBitmap(
+                        bitmap = bitmap,
+                        selection = selection,
+                        selectionSpaceWidth = selectionSpaceWidth,
+                        selectionSpaceHeight = selectionSpaceHeight,
+                        selectionOrigin = selectionOrigin
+                    )
                     bitmap.recycle()
 
                     if (crop == null) {
@@ -167,7 +199,7 @@ object KlipSelectionController {
                     toast(owner, "Memproses OCR area Klip…")
 
                     ocr.recognize(
-                        crop,
+                        bitmap = crop,
                         onSuccess = { detected ->
                             Log.i(TAG, "Klip OCR completed; blocks=${detected.size}")
 
@@ -177,12 +209,10 @@ object KlipSelectionController {
                                 return@recognize
                             }
 
-                            val combinedSource = detected
-                                .map { it.text.trim() }
-                                .filter { it.isNotBlank() }
-                                .joinToString("\n\n")
+                            val validDetected = detected
+                                .filter { it.text.trim().isNotBlank() }
 
-                            if (combinedSource.isBlank()) {
+                            if (validDetected.isEmpty()) {
                                 crop.recycle()
                                 fail("Teks Klip kosong")
                                 return@recognize
@@ -191,7 +221,7 @@ object KlipSelectionController {
                             translateKlip(
                                 owner = owner,
                                 translator = translator,
-                                sourceText = combinedSource,
+                                detectedTexts = validDetected,
                                 selection = selection,
                                 crop = crop
                             )
@@ -199,13 +229,14 @@ object KlipSelectionController {
                         onFailure = { exception ->
                             runCatching { crop.recycle() }
                             fail("OCR Klip gagal: ${exception.message ?: "Unknown error"}")
-                        }
+                        },
+                        trace = trace
                     )
                 } catch (e: Exception) {
                     runCatching { bitmap.recycle() }
                     fail("Gagal memproses area Klip: ${e.message ?: "Unknown error"}")
                 }
-            }
+            }, trace)
 
             if (!requested) {
                 fail("Gagal mengambil screenshot")
@@ -214,9 +245,9 @@ object KlipSelectionController {
     }
 
     private fun translateKlip(
-        owner: Context,
+        owner: FloatingService,
         translator: TranslationManager,
-        sourceText: String,
+        detectedTexts: List<DetectedText>,
         selection: Rect,
         crop: Bitmap
     ) {
@@ -225,64 +256,24 @@ object KlipSelectionController {
             return
         }
 
-        try {
-            translator.translate(
-                sourceText,
-                onSuccess = { translated ->
-                    if (!isActive) {
-                        crop.recycle()
-                        return@translate
-                    }
-
-                    val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-                    val source = readField<String>(owner, "sourceLanguage") ?: "Jepang"
-                    val target = readField<String>(owner, "targetLanguage") ?: "Indonesia"
-
-                    TranslationHistory.add(
-                        buildString {
-                            append("[").append(time).append("]\n")
-                            append("TL: ").append(translator.getProviderName()).append(" (Klip)\n")
-                            append(source).append(" → ").append(target).append("\n\n")
-                            append(sourceText)
-                            append("\n→ ")
-                            append(translated)
-                        }
-                    )
-
-                    showResult(
-                        owner = owner,
-                        translatedText = translated,
-                        selection = selection,
-                        crop = crop
-                    )
-                    isActive = false
-                    hasClipOverlay = true
-                    hostRoot?.let { setClipCancelVisible(it, true) }
-                    toast(owner, "Klip selesai")
-                },
-                onFailure = { exception ->
-                    if (!isActive) {
-                        crop.recycle()
-                        return@translate
-                    }
-
-                    val message = "Gagal diterjemahkan: ${exception.message ?: "Unknown error"}"
-                    showResult(
-                        owner = owner,
-                        translatedText = message,
-                        selection = selection,
-                        crop = crop
-                    )
-                    isActive = false
-                    hasClipOverlay = true
-                    hostRoot?.let { setClipCancelVisible(it, true) }
-                    toast(owner, "Klip selesai dengan error terjemahan")
+        TranslationPipeline(translator, owner.getSourceLanguage(), owner.getTargetLanguage(), "Klip", { !isActive }, performanceTrace)
+            .run(detectedTexts) { result ->
+                if (!isActive) {
+                    crop.recycle()
+                    return@run
                 }
-            )
-        } catch (e: Exception) {
-            runCatching { crop.recycle() }
-            fail("Terjemahan Klip gagal: ${e.message ?: "Unknown error"}")
-        }
+                runCatching { TranslationHistory.add(result.historyEntry) }
+                showResult(
+                    owner = owner,
+                    translatedText = result.overlayItems.joinToString("\n\n") { item -> item.translatedText },
+                    selection = selection,
+                    crop = crop
+                )
+                isActive = false
+                hasClipOverlay = true
+                hostRoot?.let { setClipCancelVisible(it, true) }
+                toast(owner, "Klip selesai")
+            }
     }
 
     private fun showResult(
@@ -293,7 +284,8 @@ object KlipSelectionController {
     ) {
         val wm = windowManager ?: run {
             crop.recycle()
-            ScreenTLPerformanceTrace.current()?.finish("klip result window unavailable")
+            performanceTrace?.finish("klip result window unavailable")
+            performanceTrace = null
             return
         }
 
@@ -330,37 +322,49 @@ object KlipSelectionController {
         }
 
         runCatching {
-            ScreenTLPerformanceTrace.current()?.mark("display_start")
+            performanceTrace?.mark("display_start")
             wm.addView(view, params)
             // Remove the mask only after the result window has been attached.
             cleanupMaskOnly()
-            ScreenTLPerformanceTrace.current()?.mark("displayed")
-            ScreenTLPerformanceTrace.current()?.finish("klip displayed")
+            performanceTrace?.mark("displayed")
+            performanceTrace?.finish("klip displayed")
+            performanceTrace = null
         }.onFailure {
             clipOverlayView = null
             crop.recycle()
             Log.e(TAG, "Failed to show Klip result overlay", it)
-            ScreenTLPerformanceTrace.current()?.finish("klip display failed")
+            performanceTrace?.finish("klip display failed")
+            performanceTrace = null
             cleanupMaskOnly()
         }
     }
 
-    private fun cropBitmap(bitmap: Bitmap, selection: Rect): Bitmap? {
+    private fun cropBitmap(
+        bitmap: Bitmap,
+        selection: Rect,
+        selectionSpaceWidth: Int,
+        selectionSpaceHeight: Int,
+        selectionOrigin: IntArray
+    ): Bitmap? {
         val screenW = bitmap.width
         val screenH = bitmap.height
+        val originX = selectionOrigin.getOrNull(0) ?: 0
+        val originY = selectionOrigin.getOrNull(1) ?: 0
 
-        val displayW =
-            hostRoot?.resources?.displayMetrics?.widthPixels?.coerceAtLeast(1) ?: screenW
-        val displayH =
-            hostRoot?.resources?.displayMetrics?.heightPixels?.coerceAtLeast(1) ?: screenH
+        // Selection coordinates are local to the mask window. MediaProjection returns
+        // screen coordinates, so translate by the mask's actual on-screen origin instead
+        // of scaling the selection to the bitmap height (which caused vertical drift).
+        val left = (selection.left + originX).coerceIn(0, screenW - 1)
+        val top = (selection.top + originY).coerceIn(0, screenH - 1)
+        val right = (selection.right + originX).coerceIn(left + 1, screenW)
+        val bottom = (selection.bottom + originY).coerceIn(top + 1, screenH)
 
-        val scaleX = screenW.toFloat() / displayW.toFloat()
-        val scaleY = screenH.toFloat() / displayH.toFloat()
-
-        val left = (selection.left * scaleX).toInt().coerceIn(0, screenW - 1)
-        val top = (selection.top * scaleY).toInt().coerceIn(0, screenH - 1)
-        val right = (selection.right * scaleX).toInt().coerceIn(left + 1, screenW)
-        val bottom = (selection.bottom * scaleY).toInt().coerceIn(top + 1, screenH)
+        Log.i(
+            TAG,
+            "Klip crop mapping: selection=${selection.left},${selection.top},${selection.right},${selection.bottom} " +
+                "space=${selectionSpaceWidth}x${selectionSpaceHeight} origin=${originX},${originY} " +
+                "bitmap=${screenW}x${screenH} crop=$left,$top,$right,$bottom"
+        )
 
         if (right - left < MIN_SELECTION_PX || bottom - top < MIN_SELECTION_PX) {
             return null
@@ -381,7 +385,7 @@ object KlipSelectionController {
         }
         maskView = null
         hostRoot?.let { root -> setClipCancelVisible(root, false) }
-        service?.let { runCatching { invokePrivate(it, "updateRemoveOverlayButton") } }
+        service?.let { it.updateRemoveOverlayButtonPublic() }
     }
 
     private fun setClipCancelVisible(root: View, visible: Boolean) {
@@ -391,7 +395,9 @@ object KlipSelectionController {
 
     private fun fail(message: String) {
         val owner = service
-        ScreenTLPerformanceTrace.current()?.finish("klip failed")
+        owner?.getScreenCaptureManager()?.disarmCaptureFallback()
+        performanceTrace?.finish("klip failed")
+        performanceTrace = null
 
         clipOverlayView?.let { view ->
             runCatching { windowManager?.removeView(view) }
@@ -418,20 +424,6 @@ object KlipSelectionController {
             }
         }
         return null
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    private inline fun <reified T> readField(target: Any, name: String): T? =
-        runCatching {
-            val field = target.javaClass.getDeclaredField(name)
-            field.isAccessible = true
-            field.get(target) as? T
-        }.getOrNull()
-
-    private fun invokePrivate(target: Any, name: String) {
-        val method = target.javaClass.getDeclaredMethod(name)
-        method.isAccessible = true
-        method.invoke(target)
     }
 
     private fun Context.findViewByIdRoot(): View =

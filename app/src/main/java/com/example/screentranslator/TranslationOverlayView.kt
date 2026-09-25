@@ -1,7 +1,6 @@
 package com.example.screentranslator
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
@@ -72,8 +71,11 @@ class TranslationOverlayView(context: Context) : View(context) {
     }
 
     fun clearTranslations() {
-        renderItems = emptyList(); groupColors = emptyList(); itemGroups = emptyList()
-        visibility = View.GONE; invalidate()
+        renderItems = emptyList()
+        groupColors = emptyList()
+        itemGroups = emptyList()
+        visibility = View.GONE
+        invalidate()
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -254,7 +256,10 @@ class TranslationOverlayView(context: Context) : View(context) {
     }
 
     override fun onDetachedFromWindow() {
-        renderItems = emptyList(); groupColors = emptyList(); itemGroups = emptyList(); super.onDetachedFromWindow()
+        renderItems = emptyList()
+        groupColors = emptyList()
+        itemGroups = emptyList()
+        super.onDetachedFromWindow()
     }
 }
 
@@ -266,6 +271,5 @@ data class TranslationOverlayItem(
     val bottom: Int,
     val sourceTextSizePx: Float = 0f,
     val backgroundColor: Int = Color.BLACK,
-    var blurredPatch: Bitmap? = null,
     val orientation: TextLayoutAnalyzer.WritingOrientation = TextLayoutAnalyzer.WritingOrientation.HORIZONTAL
 )

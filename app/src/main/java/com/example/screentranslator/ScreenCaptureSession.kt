@@ -11,9 +11,4 @@ object ScreenCaptureSession {
         this.resultCode = resultCode
         this.data = data
     }
-
-    fun clear() {
-        resultCode = -1
-        data = null
-    }
 }

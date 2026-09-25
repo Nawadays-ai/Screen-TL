@@ -13,7 +13,11 @@ data class PerformanceLogEntry(
     val translationMs: Long?,
     val displayMs: Long?,
     val totalMs: Long,
-    val result: String
+    val result: String,
+    val ocrUnits: Int? = null,
+    val cacheHits: Int? = null,
+    val providerRequests: Int? = null,
+    val timeoutStage: String? = null
 ) {
     /** Time not covered by the named stages; useful for finding hidden waits/overhead. */
     val unaccountedMs: Long
@@ -72,6 +76,10 @@ object PerformanceLogStore {
         put("displayMs", entry.displayMs ?: JSONObject.NULL)
         put("totalMs", entry.totalMs)
         put("result", entry.result)
+        put("ocrUnits", entry.ocrUnits ?: JSONObject.NULL)
+        put("cacheHits", entry.cacheHits ?: JSONObject.NULL)
+        put("providerRequests", entry.providerRequests ?: JSONObject.NULL)
+        put("timeoutStage", entry.timeoutStage ?: JSONObject.NULL)
     }
 
     private fun fromJson(json: JSONObject): PerformanceLogEntry = PerformanceLogEntry(
@@ -82,9 +90,19 @@ object PerformanceLogStore {
         translationMs = json.optLongOrNull("translationMs"),
         displayMs = json.optLongOrNull("displayMs"),
         totalMs = json.optLong("totalMs"),
-        result = json.optString("result", "completed")
+        result = json.optString("result", "completed"),
+        ocrUnits = json.optIntOrNull("ocrUnits"),
+        cacheHits = json.optIntOrNull("cacheHits"),
+        providerRequests = json.optIntOrNull("providerRequests"),
+        timeoutStage = json.optStringOrNull("timeoutStage")
     )
 
     private fun JSONObject.optLongOrNull(name: String): Long? =
         if (isNull(name) || !has(name)) null else optLong(name)
+
+    private fun JSONObject.optIntOrNull(name: String): Int? =
+        if (isNull(name) || !has(name)) null else optInt(name)
+
+    private fun JSONObject.optStringOrNull(name: String): String? =
+        if (isNull(name) || !has(name)) null else optString(name).takeIf { it.isNotBlank() }
 }

@@ -1,7 +1,5 @@
 package com.example.screentranslator
 
-import android.os.Handler
-import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 
@@ -9,9 +7,7 @@ import android.util.Log
 class ScreenTLPerformanceTrace(private val operation: String) {
     companion object {
         private const val TAG = "ScreenTL-Perf"
-        private val mainHandler = Handler(Looper.getMainLooper())
         @Volatile private var active: ScreenTLPerformanceTrace? = null
-        private var finishRunnable: Runnable? = null
 
         fun start(operation: String): ScreenTLPerformanceTrace {
             val trace = ScreenTLPerformanceTrace(operation)
@@ -24,6 +20,7 @@ class ScreenTLPerformanceTrace(private val operation: String) {
 
     private val startedAt = SystemClock.elapsedRealtime()
     private val events = mutableListOf<Pair<String, Long>>()
+    private val isFinished = java.util.concurrent.atomic.AtomicBoolean(false)
 
     fun mark(stage: String) {
         val elapsed = SystemClock.elapsedRealtime() - startedAt
@@ -32,6 +29,13 @@ class ScreenTLPerformanceTrace(private val operation: String) {
     }
 
     fun finish(result: String = "completed") {
+        // Several paths can reach finish for the same trace: the capture manager rejecting the
+        // request, the caller timing out, and a late callback arriving afterwards. Report only
+        // the first one, so the performance log cannot show the same operation twice.
+        if (!isFinished.compareAndSet(false, true)) {
+            Log.i(TAG, "$operation | TOTAL ${SystemClock.elapsedRealtime() - startedAt}ms | $result (already finished, ignored)")
+            return
+        }
         val elapsed = SystemClock.elapsedRealtime() - startedAt
         val snapshot = synchronized(events) { events.toList() }
         Log.i(TAG, "$operation | TOTAL ${elapsed}ms | $result")
@@ -44,16 +48,15 @@ class ScreenTLPerformanceTrace(private val operation: String) {
                 translationMs = durationBetweenFirstToLast(snapshot, "translation_request", setOf("translation_response", "translation_failed")),
                 displayMs = durationBetween(snapshot, "display_start", "displayed"),
                 totalMs = elapsed,
-                result = result
+                result = result,
+                ocrUnits = metadataInt(snapshot, "ocr_geometry_complete", "detected"),
+                cacheHits = snapshot.count { isStage(it.first, "translation_cache_hit") },
+                providerRequests = snapshot.count { isStage(it.first, "translation_request") },
+                timeoutStage = snapshot.lastOrNull { isStage(it.first, "timeout") }
+                    ?.first?.substringAfter("timeout ")
             )
         )
         if (active === this) active = null
-    }
-
-    fun finishWhenIdle(delayMs: Long = 500L, result: String = "completed") {
-        finishRunnable?.let(mainHandler::removeCallbacks)
-        finishRunnable = Runnable { finish(result) }
-        mainHandler.postDelayed(finishRunnable!!, delayMs)
     }
 
     /**
@@ -78,4 +81,9 @@ class ScreenTLPerformanceTrace(private val operation: String) {
         }?.second ?: return null
         return (endAt - startAt).coerceAtLeast(0L)
     }
+
+    private fun metadataInt(events: List<Pair<String, Long>>, stage: String, name: String): Int? =
+        events.lastOrNull { isStage(it.first, stage) }
+            ?.first
+            ?.let { Regex("\\b$name=(\\d+)").find(it)?.groupValues?.getOrNull(1)?.toIntOrNull() }
 }

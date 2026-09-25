@@ -10,7 +10,7 @@ import kotlin.math.roundToInt
 /** Converts ML Kit paragraph/line geometry into rendering geometry for the Manual overlay. */
 object TextLayoutAnalyzer {
     enum class WritingOrientation { HORIZONTAL, VERTICAL }
-    data class Result(val left:Int,val top:Int,val right:Int,val bottom:Int,val sourceTextSizePx:Float,val backgroundColor:Int,val orientation:WritingOrientation=WritingOrientation.HORIZONTAL,val blurredPatch:Bitmap?=null)
+    data class Result(val left:Int,val top:Int,val right:Int,val bottom:Int,val sourceTextSizePx:Float,val backgroundColor:Int,val orientation:WritingOrientation=WritingOrientation.HORIZONTAL)
     fun isVerticalLine(line:Line):Boolean{val box=line.boundingBox?:return false;if(box.width()<=0||box.height()<=0)return false;val ratio=box.height().toFloat()/box.width().toFloat();if(ratio<1.30f)return false;val e=line.elements.mapNotNull{it.boundingBox}.filter{it.width()>0&&it.height()>0};if(e.size<2)return ratio>=1.55f;val v=e.zipWithNext().count{(a,b)->abs(b.centerX()-a.centerX())<=box.width()*0.75f&&b.centerY()>=a.centerY()-box.height()*0.08f};val h=e.zipWithNext().count{(a,b)->abs(b.centerY()-a.centerY())<=box.height()*0.12f&&b.centerX()>=a.centerX()-box.width()*0.08f};return v>=h}
     fun isVerticalBlock(block:TextBlock):Boolean{val l=block.lines;if(l.isEmpty())return false;val v=l.count(::isVerticalLine);return v>0&&(l.size==1||v.toFloat()/l.size>=0.5f)}
     fun verticalBlockText(block:TextBlock):String=block.lines.filter{it.text.isNotBlank()}.sortedByDescending{it.boundingBox?.centerX()?:0}.joinToString(""){it.text.trim()}.trim()

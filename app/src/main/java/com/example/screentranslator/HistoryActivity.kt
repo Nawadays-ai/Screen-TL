@@ -2,6 +2,7 @@ package com.example.screentranslator
 
 import android.os.Bundle
 import android.widget.Button
+import android.widget.ImageButton
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 
@@ -13,7 +14,7 @@ class HistoryActivity : AppCompatActivity() {
         setContentView(R.layout.activity_history)
         TranslationHistory.initialize(applicationContext)
 
-        findViewById<Button>(R.id.btnBackHistory).setOnClickListener { finish() }
+        findViewById<ImageButton>(R.id.btnBackHistory).setOnClickListener { finish() }
         findViewById<Button>(R.id.btnClearHistory).setOnClickListener {
             TranslationHistory.clear()
             updateHistory()
