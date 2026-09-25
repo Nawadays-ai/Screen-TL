@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
+import android.media.Image
 import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
@@ -22,6 +23,16 @@ class ScreenCaptureManager(
 
     companion object {
         private const val TAG = "ScreenTL-Capture"
+
+        /**
+         * How long a capture waits for a genuinely new frame before falling back to the most
+         * recent remembered one.
+         *
+         * MediaProjection only delivers a frame when screen content changes, so a capture
+         * requested after the UI has already settled would otherwise wait forever and the
+         * caller's timeout would fire with nothing to show.
+         */
+        private const val CAPTURE_FALLBACK_DELAY_MS = 400L
     }
 
     private var mediaProjection: MediaProjection? = null
@@ -39,6 +50,19 @@ class ScreenCaptureManager(
 
     @Volatile
     private var captureTrace: ScreenTLPerformanceTrace? = null
+
+    /**
+     * Most recent decoded idle frame. Populated only while [rememberingFrame] is armed, because
+     * decoding every idle frame would cost a full-screen bitmap copy on each screen update.
+     */
+    @Volatile
+    private var latestFrame: Bitmap? = null
+
+    @Volatile
+    private var rememberingFrame = false
+
+    @Volatile
+    private var fallbackRunnable: Runnable? = null
 
     private val handlerThread = HandlerThread("ScreenCaptureThread").apply { start() }
     private val handler = Handler(handlerThread.looper)
@@ -82,6 +106,7 @@ class ScreenCaptureManager(
             captureRequested = false
             onImageCaptured = null
             captureTrace = null
+            cancelCaptureFallback()
             reconfigureDisplay(metrics.widthPixels, metrics.heightPixels, metrics.densityDpi)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to reconfigure capture for current display", e)
@@ -117,19 +142,87 @@ class ScreenCaptureManager(
         if (captureRequested) {
             Log.w(TAG, "captureOnce rejected: another capture is already pending")
             activeTrace.mark("capture_rejected_busy")
+            // Finish here as well: leaving this trace active would strand it and let a later
+            // flow's marks land on a trace nobody ever reports.
+            activeTrace.finish("capture rejected (busy)")
             return false
         }
         onImageCaptured = callback
         captureTrace = activeTrace
         captureRequested = true
+        scheduleCaptureFallback(activeTrace)
         Log.i(TAG, "captureOnce requested; waiting for next ImageReader frame")
         return true
+    }
+
+    /**
+     * Starts remembering delivered frames so a later capture can fall back to the most recent
+     * one. Call this before the UI settle delay, so the frame produced by the menu closing is
+     * the one remembered.
+     */
+    fun armCaptureFallback() {
+        rememberingFrame = true
+    }
+
+    /** Stops remembering and releases the remembered frame. Safe to call more than once. */
+    fun disarmCaptureFallback() {
+        rememberingFrame = false
+        synchronized(latestFrameLock) {
+            latestFrame?.let { if (!it.isRecycled) it.recycle() }
+            latestFrame = null
+        }
+    }
+
+    private val latestFrameLock = Any()
+
+    private fun scheduleCaptureFallback(trace: ScreenTLPerformanceTrace) {
+        cancelCaptureFallback()
+        val runnable = Runnable {
+            fallbackRunnable = null
+            if (!captureRequested) return@Runnable
+            // Take the remembered frame atomically so a concurrent disarm cannot recycle it
+            // between the read and the copy below.
+            val remembered = synchronized(latestFrameLock) {
+                val frame = latestFrame
+                latestFrame = null
+                frame
+            }
+            if (remembered == null || remembered.isRecycled) {
+                Log.i(TAG, "Capture fallback skipped: no remembered frame available yet")
+                return@Runnable
+            }
+            captureRequested = false
+            captureTrace = null
+            val callback = onImageCaptured
+            onImageCaptured = null
+            Log.i(TAG, "Capture fallback: reusing last remembered frame ${remembered.width}x${remembered.height}")
+            trace.mark("capture_fallback_used")
+            // Report it under the normal stage name so the capture timing is still recorded.
+            trace.mark("screenshot_ready ${remembered.width}x${remembered.height}")
+            val handedOut = try {
+                Bitmap.createBitmap(remembered)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to copy remembered frame for capture fallback", e)
+                return@Runnable
+            } finally {
+                if (!remembered.isRecycled) remembered.recycle()
+            }
+            if (callback != null) callback.invoke(handedOut) else handedOut.recycle()
+        }
+        fallbackRunnable = runnable
+        handler.postDelayed(runnable, CAPTURE_FALLBACK_DELAY_MS)
+    }
+
+    private fun cancelCaptureFallback() {
+        fallbackRunnable?.let(handler::removeCallbacks)
+        fallbackRunnable = null
     }
 
     fun cancelPendingCapture() {
         captureRequested = false
         onImageCaptured = null
         captureTrace = null
+        cancelCaptureFallback()
         Log.i(TAG, "Pending capture cancelled")
     }
 
@@ -138,6 +231,8 @@ class ScreenCaptureManager(
         captureRequested = false
         onImageCaptured = null
         captureTrace = null
+        cancelCaptureFallback()
+        disarmCaptureFallback()
         virtualDisplay?.release()
         virtualDisplay = null
         imageReader?.close()
@@ -210,6 +305,19 @@ class ScreenCaptureManager(
         }
     }
 
+    private fun decodeFrame(image: Image, width: Int, height: Int): Bitmap {
+        val plane = image.planes[0]
+        val pixelStride = plane.pixelStride
+        val rowStride = plane.rowStride
+        val rowPadding = rowStride - pixelStride * width
+        val bitmapWidth = width + rowPadding / pixelStride
+        val bitmap = Bitmap.createBitmap(bitmapWidth, height, Bitmap.Config.ARGB_8888)
+        bitmap.copyPixelsFromBuffer(plane.buffer)
+        val cropped = Bitmap.createBitmap(bitmap, 0, 0, width, height)
+        if (cropped !== bitmap) bitmap.recycle()
+        return cropped
+    }
+
     private fun createImageReader(width: Int, height: Int): ImageReader {
         val reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
         reader.setOnImageAvailableListener({ availableReader ->
@@ -217,36 +325,46 @@ class ScreenCaptureManager(
                 Log.w(TAG, "ImageReader signaled but acquireLatestImage() returned null")
                 return@setOnImageAvailableListener
             }
+
             if (!captureRequested) {
+                if (rememberingFrame) {
+                    try {
+                        val remembered = decodeFrame(image, width, height)
+                        synchronized(latestFrameLock) {
+                            latestFrame?.let { if (!it.isRecycled) it.recycle() }
+                            latestFrame = remembered
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to remember idle frame", e)
+                    }
+                }
                 image.close()
                 return@setOnImageAvailableListener
             }
+
             captureRequested = false
+            cancelCaptureFallback()
+            val trace = captureTrace
+            var fresh: Bitmap? = null
             try {
-                val trace = captureTrace
-                val plane = image.planes[0]
-                val pixelStride = plane.pixelStride
-                val rowStride = plane.rowStride
-                val rowPadding = rowStride - pixelStride * width
-                val bitmapWidth = width + rowPadding / pixelStride
-                Log.i(TAG, "Capturing frame: image=${image.width}x${image.height}, pixelStride=$pixelStride, rowStride=$rowStride, padding=$rowPadding, bitmap=${bitmapWidth}x$height")
+                Log.i(TAG, "Capturing frame: image=${image.width}x${image.height}")
                 trace?.mark("image_reader_frame")
-                val bitmap = Bitmap.createBitmap(bitmapWidth, height, Bitmap.Config.ARGB_8888)
-                bitmap.copyPixelsFromBuffer(plane.buffer)
-                image.close()
-                val croppedBitmap = Bitmap.createBitmap(bitmap, 0, 0, width, height)
-                if (croppedBitmap !== bitmap) bitmap.recycle()
-                Log.i(TAG, "Fresh screen frame captured successfully: ${croppedBitmap.width}x${croppedBitmap.height}")
-                trace?.mark("screenshot_ready ${croppedBitmap.width}x${croppedBitmap.height}")
-                val callback = onImageCaptured
-                onImageCaptured = null
-                captureTrace = null
-                callback?.invoke(croppedBitmap) ?: croppedBitmap.recycle()
+                val decoded = decodeFrame(image, width, height)
+                Log.i(TAG, "Fresh screen frame captured successfully: ${decoded.width}x${decoded.height}")
+                trace?.mark("screenshot_ready ${decoded.width}x${decoded.height}")
+                fresh = decoded
             } catch (e: Exception) {
-                image.close()
-                captureTrace?.mark("capture_conversion_failed")
+                trace?.mark("capture_conversion_failed")
                 Log.e(TAG, "Failed to convert ImageReader frame to Bitmap", e)
+            } finally {
+                image.close()
             }
+
+            val callback = onImageCaptured
+            onImageCaptured = null
+            captureTrace = null
+            val ready = fresh
+            if (callback != null && ready != null) callback.invoke(ready) else ready?.recycle()
         }, handler)
         return reader
     }

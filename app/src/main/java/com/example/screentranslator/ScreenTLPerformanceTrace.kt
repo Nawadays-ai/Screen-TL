@@ -20,6 +20,7 @@ class ScreenTLPerformanceTrace(private val operation: String) {
 
     private val startedAt = SystemClock.elapsedRealtime()
     private val events = mutableListOf<Pair<String, Long>>()
+    private val isFinished = java.util.concurrent.atomic.AtomicBoolean(false)
 
     fun mark(stage: String) {
         val elapsed = SystemClock.elapsedRealtime() - startedAt
@@ -28,6 +29,13 @@ class ScreenTLPerformanceTrace(private val operation: String) {
     }
 
     fun finish(result: String = "completed") {
+        // Several paths can reach finish for the same trace: the capture manager rejecting the
+        // request, the caller timing out, and a late callback arriving afterwards. Report only
+        // the first one, so the performance log cannot show the same operation twice.
+        if (!isFinished.compareAndSet(false, true)) {
+            Log.i(TAG, "$operation | TOTAL ${SystemClock.elapsedRealtime() - startedAt}ms | $result (already finished, ignored)")
+            return
+        }
         val elapsed = SystemClock.elapsedRealtime() - startedAt
         val snapshot = synchronized(events) { events.toList() }
         Log.i(TAG, "$operation | TOTAL ${elapsed}ms | $result")

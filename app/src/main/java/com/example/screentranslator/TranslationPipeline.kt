@@ -43,7 +43,8 @@ class TranslationPipeline(
     private val sourceLanguage: String,
     private val targetLanguage: String,
     private val modeLabel: String,
-    private val isCancelled: () -> Boolean
+    private val isCancelled: () -> Boolean,
+    private val trace: ScreenTLPerformanceTrace? = null
 ) {
 
     private data class UnitGroup(
@@ -101,7 +102,8 @@ class TranslationPipeline(
                     group.failure = exception.message ?: "Unknown error"
                     resolveNext(orderedGroups, index + 1, onDone)
                 },
-                onCacheHit = { group.resolvedFromCache = true }
+                onCacheHit = { group.resolvedFromCache = true },
+                trace = trace
             )
         } catch (exception: Exception) {
             group.failure = exception.message ?: "Unknown error"

@@ -55,6 +55,7 @@ class FloatingService : Service() {
     private var isSubMenuVisible = false
     private var manualTranslationPending = false
     private var manualOverlayVisible = false
+    private var manualTrace: ScreenTLPerformanceTrace? = null
     private var fabScreenX = 100
     private var fabScreenY = 300
 
@@ -62,6 +63,7 @@ class FloatingService : Service() {
     private var manualCaptureTimeout: Runnable? = null
     private var manualProcessTimeout: Runnable? = null
     private var realtimeLoop: Runnable? = null
+    private var realtimeFrameTrace: ScreenTLPerformanceTrace? = null
 
     private var screenCaptureManager: ScreenCaptureManager? = null
     private var ocrManager: OcrManager? = null
@@ -77,6 +79,26 @@ class FloatingService : Service() {
     fun getTargetLanguage(): String = targetLanguage
     fun removeTranslationOverlayPublic() { removeTranslationOverlay() }
     fun updateRemoveOverlayButtonPublic() { updateRemoveOverlayButton() }
+
+    /**
+     * Klip takes over the screen, so nothing else may race it for capture or for the active
+     * performance trace. A pending Manual capture left behind here used to cancel Klip's own
+     * capture and close Klip's trace when its timeout finally fired.
+     */
+    fun prepareForKlipPublic() {
+        stopRealtimeTranslation("Real-Time dihentikan karena Klip aktif")
+        cancelPendingManualCapture()
+    }
+
+    private fun cancelPendingManualCapture() {
+        cancelManualCaptureTimeout()
+        cancelManualProcessTimeout()
+        manualTranslationPending = false
+        screenCaptureManager?.cancelPendingCapture()
+        screenCaptureManager?.disarmCaptureFallback()
+        manualTrace?.finish("manual cancelled")
+        manualTrace = null
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -212,6 +234,7 @@ class FloatingService : Service() {
 
     private fun startRealtimeTranslation() {
         if (manualTranslationPending) { showToast("Manual TL masih diproses"); return }
+        if (KlipSelectionController.isActive) { showToast("Selesaikan atau batalkan Klip dulu"); return }
         val manager = screenCaptureManager; val ocr = ocrManager; val translator = translationManager
         if (manager == null || ocr == null || translator == null) { showToast("Real-Time belum siap"); return }
         if (isRealtimeActive) return
@@ -235,77 +258,105 @@ class FloatingService : Service() {
         val manager = screenCaptureManager ?: run { stopRealtimeTranslation("Screen Capture tidak siap"); return }
         if (!isRealtimeActive || generation != realtimeGeneration) return
         isRealtimeBusy = true
-        val requested = manager.captureOnce { bitmap ->
-            if (!isRealtimeActive || generation != realtimeGeneration) { bitmap.recycle(); isRealtimeBusy = false; return@captureOnce }
+        // Own the frame's trace explicitly instead of letting captureOnce create an implicit one.
+        val frameTrace = ScreenTLPerformanceTrace.start("TranslateFlow")
+        realtimeFrameTrace = frameTrace
+        val requested = manager.captureOnce({ bitmap ->
+            if (!isRealtimeActive || generation != realtimeGeneration) { bitmap.recycle(); isRealtimeBusy = false; frameTrace.finish("realtime frame discarded"); return@captureOnce }
             val ocr = ocrManager; val translator = translationManager
-            if (ocr == null || translator == null) { bitmap.recycle(); isRealtimeBusy = false; scheduleRealtimeCapture(generation, REALTIME_INTERVAL_MS); return@captureOnce }
+            if (ocr == null || translator == null) { bitmap.recycle(); isRealtimeBusy = false; frameTrace.finish("realtime unavailable"); scheduleRealtimeCapture(generation, REALTIME_INTERVAL_MS); return@captureOnce }
             try { ocr.recognize(bitmap, onSuccess = { detectedTexts ->
-                if (!isRealtimeActive || generation != realtimeGeneration) { isRealtimeBusy = false; return@recognize }
-                if (detectedTexts.isEmpty()) { isRealtimeBusy = false; scheduleRealtimeCapture(generation, REALTIME_INTERVAL_MS); return@recognize }
+                if (!isRealtimeActive || generation != realtimeGeneration) { isRealtimeBusy = false; frameTrace.finish("realtime cancelled"); return@recognize }
+                if (detectedTexts.isEmpty()) { isRealtimeBusy = false; frameTrace.finish("realtime no text"); scheduleRealtimeCapture(generation, REALTIME_INTERVAL_MS); return@recognize }
                 val frameWidth = bitmap.width; val frameHeight = bitmap.height
-                val trace = ScreenTLPerformanceTrace.current()
-                TranslationPipeline(translator, sourceLanguage, targetLanguage, "Real-Time") { !isRealtimeActive || generation != realtimeGeneration }
+                val trace = frameTrace
+                TranslationPipeline(translator, sourceLanguage, targetLanguage, "Real-Time", { !isRealtimeActive || generation != realtimeGeneration }, frameTrace)
                     .run(detectedTexts) { result ->
                         if (isRealtimeActive && generation == realtimeGeneration && result.overlayItems.isNotEmpty()) {
                             trace?.mark("display_start")
                             showTranslationOverlay(result.overlayItems, frameWidth, frameHeight)
                             trace?.mark("displayed")
                             trace?.finish("realtime displayed")
+                        } else {
+                            trace?.finish("realtime skipped")
                         }
+                        if (realtimeFrameTrace === trace) realtimeFrameTrace = null
                         isRealtimeBusy = false
                         if (isRealtimeActive && generation == realtimeGeneration) scheduleRealtimeCapture(generation, REALTIME_INTERVAL_MS)
                     }
-            }, onFailure = { exception -> Log.e(TAG, "Realtime OCR failed", exception); isRealtimeBusy = false; if (isRealtimeActive && generation == realtimeGeneration) scheduleRealtimeCapture(generation, REALTIME_INTERVAL_MS) }) }
-            catch (exception: Exception) { Log.e(TAG, "Realtime OCR invocation threw", exception); bitmap.recycle(); isRealtimeBusy = false; scheduleRealtimeCapture(generation, REALTIME_INTERVAL_MS) }
+            }, onFailure = { exception -> Log.e(TAG, "Realtime OCR failed", exception); frameTrace.finish("realtime OCR failed"); isRealtimeBusy = false; if (isRealtimeActive && generation == realtimeGeneration) scheduleRealtimeCapture(generation, REALTIME_INTERVAL_MS) }, trace = frameTrace) }
+            catch (exception: Exception) { Log.e(TAG, "Realtime OCR invocation threw", exception); bitmap.recycle(); frameTrace.finish("realtime OCR threw"); isRealtimeBusy = false; scheduleRealtimeCapture(generation, REALTIME_INTERVAL_MS) }
+        }, frameTrace)
+        if (!requested) {
+            frameTrace.finish("realtime capture rejected")
+            isRealtimeBusy = false
+            if (isRealtimeActive && generation == realtimeGeneration) scheduleRealtimeCapture(generation, REALTIME_INTERVAL_MS)
         }
-        if (!requested) { isRealtimeBusy = false; if (isRealtimeActive && generation == realtimeGeneration) scheduleRealtimeCapture(generation, REALTIME_INTERVAL_MS) }
     }
 
     private fun stopRealtimeTranslation(message: String = "Real-Time Translator Diberhentikan") {
         if (!isRealtimeActive && realtimeLoop == null) return
         isRealtimeActive = false; isRealtimePreparing = false; isRealtimeBusy = false; realtimeGeneration++
-        realtimeLoop?.let(mainHandler::removeCallbacks); realtimeLoop = null; screenCaptureManager?.cancelPendingCapture(); removeTranslationOverlay(); fabMain.setImageResource(android.R.drawable.ic_menu_compass); showToast(message)
+        realtimeLoop?.let(mainHandler::removeCallbacks); realtimeLoop = null; screenCaptureManager?.cancelPendingCapture(); realtimeFrameTrace?.finish("realtime stopped"); realtimeFrameTrace = null; removeTranslationOverlay(); fabMain.setImageResource(android.R.drawable.ic_menu_compass); showToast(message)
     }
 
     private fun triggerManualTranslation() {
         if (manualTranslationPending) { showToast("Terjemahan manual masih diproses"); return }
+        // Manual and Real-Time share one capture surface and one active performance trace, so
+        // letting them overlap misattributes marks and rejects captures. Keep them exclusive.
+        if (KlipSelectionController.isActive) { showToast("Selesaikan atau batalkan Klip dulu"); return }
+        if (isRealtimeActive) { showToast("Hentikan Real-Time dulu sebelum Manual TL"); return }
         val manager = screenCaptureManager; val ocr = ocrManager; val translator = translationManager
         if (manager == null || ocr == null || translator == null) { showToast("Translator belum siap"); return }
         manualTranslationPending = true; removeTranslationOverlay(); hideSubMenu(); showToast("Mengambil gambar layar...")
-        mainHandler.postDelayed({ if (manualTranslationPending) requestManualCapture(manager, ocr, translator) }, MANUAL_CAPTURE_UI_SETTLE_MS)
+        manager.armCaptureFallback()
+        mainHandler.postDelayed({
+            if (manualTranslationPending) requestManualCapture(manager, ocr, translator) else manager.disarmCaptureFallback()
+        }, MANUAL_CAPTURE_UI_SETTLE_MS)
     }
 
     private fun requestManualCapture(manager: ScreenCaptureManager, ocr: OcrManager, translator: TranslationManager) {
-        if (!manualTranslationPending) return
-        val requested = manager.captureOnce { bitmap ->
+        if (!manualTranslationPending) { manager.disarmCaptureFallback(); return }
+        val trace = ScreenTLPerformanceTrace.start("TranslateFlow")
+        manualTrace = trace
+        val requested = manager.captureOnce({ bitmap ->
+            manager.disarmCaptureFallback()
             cancelManualCaptureTimeout(); showToast("Screenshot didapat. Memproses OCR..."); startManualProcessTimeout(manager)
             try { ocr.recognize(bitmap, onSuccess = { detectedTexts ->
                 if (detectedTexts.isEmpty()) { finishManualTranslation("OCR tidak menemukan teks"); return@recognize }
-                try { translator.prepare(onReady = { runManualPipeline(translator, detectedTexts, bitmap.width, bitmap.height) }, onFailure = { exception -> finishManualTranslation("Model/API terjemahan gagal: ${exception.message ?: "Unknown error"}") }) }
+                try { translator.prepare(onReady = { runManualPipeline(translator, detectedTexts, bitmap.width, bitmap.height) }, onFailure = { exception -> finishManualTranslation("Model/API terjemahan gagal: ${exception.message ?: "Unknown error"}") }, trace = trace) }
                 catch (exception: Exception) { finishManualTranslation("Gagal menyiapkan translator: ${exception.message ?: "Unknown error"}") }
-            }, onFailure = { exception -> finishManualTranslation("OCR gagal: ${exception.message ?: "Unknown error"}") }) }
+            }, onFailure = { exception -> finishManualTranslation("OCR gagal: ${exception.message ?: "Unknown error"}") }, trace = trace) }
             catch (exception: Exception) { Log.e(TAG, "OCR invocation threw", exception); finishManualTranslation("Proses OCR gagal: ${exception.message ?: "Unknown error"}") }
+        }, trace)
+        if (!requested) {
+            manualTranslationPending = false; manager.disarmCaptureFallback()
+            showToast("Gagal mengambil screenshot")
+            trace.finish("manual capture rejected")
+            if (manualTrace === trace) manualTrace = null
+            return
         }
-        if (!requested) { manualTranslationPending = false; showToast("Gagal mengambil screenshot"); ScreenTLPerformanceTrace.current()?.finish("manual capture rejected"); return }
-        manualCaptureTimeout = Runnable { if (manualTranslationPending) { manager.cancelPendingCapture(); manualTranslationPending = false; ScreenTLPerformanceTrace.current()?.finish("manual capture timeout"); showToast("Screenshot tidak masuk dalam 3 detik. Coba lagi.") } }
+        manualCaptureTimeout = Runnable { if (manualTranslationPending) { manager.cancelPendingCapture(); manager.disarmCaptureFallback(); manualTranslationPending = false; manualTrace?.finish("manual capture timeout"); manualTrace = null; showToast("Screenshot tidak masuk dalam ${MANUAL_CAPTURE_TIMEOUT_MS / 1000} detik. Coba lagi.") } }
         mainHandler.postDelayed(manualCaptureTimeout!!, MANUAL_CAPTURE_TIMEOUT_MS)
     }
 
     private fun startManualProcessTimeout(manager: ScreenCaptureManager) {
-        cancelManualProcessTimeout(); manualProcessTimeout = Runnable { if (manualTranslationPending) { manager.cancelPendingCapture(); manualTranslationPending = false; ScreenTLPerformanceTrace.current()?.finish("manual process timeout"); showToast("Proses terjemahan terlalu lama. Coba lagi.") } }; mainHandler.postDelayed(manualProcessTimeout!!, MANUAL_PROCESS_TIMEOUT_MS)
+        cancelManualProcessTimeout(); manualProcessTimeout = Runnable { if (manualTranslationPending) { manager.cancelPendingCapture(); manualTranslationPending = false; manualTrace?.finish("manual process timeout"); manualTrace = null; showToast("Proses terjemahan terlalu lama. Coba lagi.") } }; mainHandler.postDelayed(manualProcessTimeout!!, MANUAL_PROCESS_TIMEOUT_MS)
     }
 
     private fun runManualPipeline(translator: TranslationManager, units: List<DetectedText>, sourceWidth: Int, sourceHeight: Int) {
-        TranslationPipeline(translator, sourceLanguage, targetLanguage, "Manual") { !manualTranslationPending }
+        TranslationPipeline(translator, sourceLanguage, targetLanguage, "Manual", { !manualTranslationPending }, manualTrace)
             .run(units) { result ->
                 if (!manualTranslationPending) return@run
                 try {
                     TranslationHistory.add(result.historyEntry)
-                    val trace = ScreenTLPerformanceTrace.current()
+                    val trace = manualTrace
                     trace?.mark("display_start")
                     showTranslationOverlay(result.overlayItems, sourceWidth, sourceHeight)
                     trace?.mark("displayed")
                     trace?.finish("manual displayed")
+                    // Release ownership now so finishManualTranslation cannot finish it again.
+                    manualTrace = null
                     manualOverlayVisible = result.overlayItems.isNotEmpty()
                     updateRemoveOverlayButton()
                     finishManualTranslation("Terjemahan selesai: ${result.ocrUnits} baris. Overlay ditampilkan.")
@@ -316,7 +367,15 @@ class FloatingService : Service() {
             }
     }
 
-    private fun finishManualTranslation(message: String) { cancelManualCaptureTimeout(); cancelManualProcessTimeout(); manualTranslationPending = false; val trace = ScreenTLPerformanceTrace.current(); if (message.contains("terlalu lama", true)) trace?.mark("timeout manual process"); if (trace != null && (message.contains("gagal", true) || message.contains("terlalu lama", true) || message.contains("tidak", true))) trace.finish("manual failed"); showToast(message) }
+    private fun finishManualTranslation(message: String) {
+        cancelManualCaptureTimeout(); cancelManualProcessTimeout(); manualTranslationPending = false
+        screenCaptureManager?.disarmCaptureFallback()
+        val trace = manualTrace
+        if (message.contains("terlalu lama", true)) trace?.mark("timeout manual process")
+        if (trace != null && (message.contains("gagal", true) || message.contains("terlalu lama", true) || message.contains("tidak", true))) trace.finish("manual failed")
+        manualTrace = null
+        showToast(message)
+    }
     private fun updateRemoveOverlayButton() { if (::btnRemoveOverlay.isInitialized) btnRemoveOverlay.visibility = if (manualOverlayVisible && overlayView != null) View.VISIBLE else View.GONE }
     private fun cancelManualCaptureTimeout() { manualCaptureTimeout?.let(mainHandler::removeCallbacks); manualCaptureTimeout = null }
     private fun cancelManualProcessTimeout() { manualProcessTimeout?.let(mainHandler::removeCallbacks); manualProcessTimeout = null }

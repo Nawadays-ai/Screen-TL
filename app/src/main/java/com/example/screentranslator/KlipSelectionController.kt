@@ -56,6 +56,9 @@ object KlipSelectionController {
             return
         }
 
+        // Klip owns the capture surface while it runs: stop Real-Time and drop any pending
+        // Manual capture so their timeouts cannot cancel this capture or close this trace.
+        runCatching { owner.prepareForKlipPublic() }
         runCatching { owner.removeTranslationOverlayPublic() }
         selectionExists = false
         hasClipOverlay = false
@@ -121,6 +124,7 @@ object KlipSelectionController {
         val owner = service ?: return
 
         owner.getScreenCaptureManager()?.cancelPendingCapture()
+        owner.getScreenCaptureManager()?.disarmCaptureFallback()
         performanceTrace?.finish("klip cancelled")
         performanceTrace = null
 
@@ -165,12 +169,17 @@ object KlipSelectionController {
         setClipCancelVisible(owner.findViewByIdRoot(), true)
         toast(owner, "Area dikonfirmasi. Memproses…")
 
+        capture.armCaptureFallback()
         mainHandler.postDelayed({
-            if (!isActive) return@postDelayed
+            if (!isActive) {
+                capture.disarmCaptureFallback()
+                return@postDelayed
+            }
 
             val trace = ScreenTLPerformanceTrace.start("Klip")
             performanceTrace = trace
             val requested = capture.captureOnce({ bitmap ->
+                capture.disarmCaptureFallback()
                 try {
                     val crop = cropBitmap(
                         bitmap = bitmap,
@@ -247,7 +256,7 @@ object KlipSelectionController {
             return
         }
 
-        TranslationPipeline(translator, owner.getSourceLanguage(), owner.getTargetLanguage(), "Klip") { !isActive }
+        TranslationPipeline(translator, owner.getSourceLanguage(), owner.getTargetLanguage(), "Klip", { !isActive }, performanceTrace)
             .run(detectedTexts) { result ->
                 if (!isActive) {
                     crop.recycle()
@@ -386,6 +395,7 @@ object KlipSelectionController {
 
     private fun fail(message: String) {
         val owner = service
+        owner?.getScreenCaptureManager()?.disarmCaptureFallback()
         performanceTrace?.finish("klip failed")
         performanceTrace = null
 
