@@ -99,7 +99,7 @@ class TranslationOverlayView(context: Context) : View(context) {
         val scaleY = height.toFloat() / sourceHeight.toFloat()
         val coordinateOffsetY = if (toleranceRatio > 1.5f) klipStatusBarOffsetPx() else 0f
 
-        renderItems.forEachIndexed { index, renderItem ->
+        renderItems.forEachIndexed { _, renderItem ->
             val left = renderItem.left * scaleX
             val top = renderItem.top * scaleY + coordinateOffsetY
             val right = renderItem.right * scaleX
@@ -117,8 +117,9 @@ class TranslationOverlayView(context: Context) : View(context) {
             val bottom = renderItem.bottom * scaleY + coordinateOffsetY
             if (right <= left || bottom <= top) return@forEachIndexed
             textPaint.textScaleX = 1f
+            // Size is set before measuring: measureText and fontMetrics below both depend on it,
+            // and drawStyledLine re-applies the same size for its own passes.
             textPaint.textSize = renderItem.textSize * scaleY
-            applyGlyphStyle(renderItem.item, textPaint.textSize)
             val padding = renderItem.horizontalPadding * scaleX
             val lineHeight = renderItem.lineSpacing * scaleY
             val totalTextHeight = lineHeight * renderItem.lines.size
@@ -132,7 +133,7 @@ class TranslationOverlayView(context: Context) : View(context) {
                     TextLayoutAnalyzer.TextAlignment.RIGHT -> (right - padding - lineWidth).coerceAtLeast(left + padding)
                     TextLayoutAnalyzer.TextAlignment.CENTER -> left + ((right - left - lineWidth) / 2f).coerceAtLeast(padding)
                 }
-                canvas.drawText(line, lineLeft, firstBaseline + lineIndex * lineHeight, textPaint)
+                drawStyledLine(canvas, line, lineLeft, firstBaseline + lineIndex * lineHeight, renderItem.item, renderItem.textSize * scaleY)
             }
         }
         textPaint.textScaleX = 1f; textPaint.color = Color.WHITE; textPaint.alpha = 255
@@ -156,37 +157,49 @@ class TranslationOverlayView(context: Context) : View(context) {
         0.2126f * Color.red(color) + 0.7152f * Color.green(color) + 0.0722f * Color.blue(color)
 
     /**
-     * Applies the sampled glyph style so the translation is drawn the way the game draws its own
-     * text: the original fill colour, an outline when the original had one, and a small drop
-     * shadow that lifts the line off the panel — the standard recipe for game UI type.
+     * Draws one line of translated text in the style sampled from the game's own text.
+     *
+     * The outline is drawn as a separate pass underneath the fill rather than through
+     * [Paint.Style.FILL_AND_STROKE]. A Paint carries one colour for both passes, so
+     * FILL_AND_STROKE can only ever outline a glyph in its own fill colour, which is not the
+     * white-fill/black-outline recipe game UI actually uses. Drawing the line twice costs one
+     * extra drawText per line and gives the outline its own colour.
      *
      * When no style was sampled, or the sampled fill does not separate from the panel colour
      * enough ([minFillSeparation]), the classic white/black fill is used instead with a
      * contrasting outline, which stays readable on any panel. [textSize] is the rendered size, so
      * stroke and shadow shrink together with a font that had to fit its box.
      */
-    private fun applyGlyphStyle(item: TranslationOverlayItem, textSize: Float) {
+    private fun drawStyledLine(canvas: Canvas, line: String, x: Float, baseline: Float, item: TranslationOverlayItem, textSize: Float) {
         val style = item.glyphStyle?.takeIf { it.separation >= minFillSeparation }
         val fill = style?.fill ?: chooseTextColor(item.backgroundColor)
         val fillLuminance = luminanceOf(fill)
-        val stroke: Int
+        val strokeColor: Int
         val drawStroke: Boolean
         if (style != null) {
             drawStroke = style.hasStroke && abs(luminanceOf(style.stroke) - fillLuminance) >= minStrokeContrast
-            stroke = style.stroke
+            strokeColor = style.stroke
         } else {
             drawStroke = true
-            stroke = if (fillLuminance >= 140f) Color.BLACK else Color.WHITE
+            strokeColor = if (fillLuminance >= 140f) Color.BLACK else Color.WHITE
         }
-        textPaint.color = fill
-        textPaint.alpha = 255
-        textPaint.style = if (drawStroke) Paint.Style.FILL_AND_STROKE else Paint.Style.FILL
+
+        textPaint.textSize = textSize
         textPaint.strokeJoin = Paint.Join.ROUND
         textPaint.strokeWidth = textSize * strokeWidthRatio
-        // Paint has setStrokeColor() but no getStrokeColor(), so Kotlin cannot synthesise a
-        // `strokeColor` property here; the setter has to be called as a method.
-        textPaint.setStrokeColor(stroke)
         textPaint.setShadowLayer(textSize * shadowRadiusRatio, textSize * shadowOffsetRatio, textSize * shadowOffsetRatio, shadowColor)
+
+        if (drawStroke) {
+            textPaint.style = Paint.Style.STROKE
+            textPaint.color = strokeColor
+            textPaint.alpha = 255
+            canvas.drawText(line, x, baseline, textPaint)
+        }
+
+        textPaint.style = Paint.Style.FILL
+        textPaint.color = fill
+        textPaint.alpha = 255
+        canvas.drawText(line, x, baseline, textPaint)
     }
 
     /**
