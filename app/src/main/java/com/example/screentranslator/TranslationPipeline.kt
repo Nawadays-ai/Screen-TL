@@ -168,6 +168,8 @@ class TranslationPipeline(
             bottom = bottom,
             sourceTextSizePx = sourceTextSizePx,
             backgroundColor = backgroundColor,
-            orientation = orientation
+            orientation = orientation,
+            glyphStyle = glyphStyle,
+            alignment = alignment
         )
 }

@@ -8,6 +8,7 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import android.view.View
 import android.view.WindowInsets
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /** Renders translated OCR blocks while keeping screenshot coordinates 1:1. */
@@ -39,6 +40,21 @@ class TranslationOverlayView(context: Context) : View(context) {
      */
     private val maxWidthRatio = 1.6f
     private val bubbleWidthRatio = 2.80f
+
+    /**
+     * Tahap 1 — glyph style thresholds.
+     *
+     * The sampled fill is only trusted when it separates from the panel colour by this much
+     * luminance; below it the text was too low-contrast against its own background for the
+     * sampling to mean anything. The stroke is only drawn when it contrasts the fill clearly
+     * enough to read as an outline instead of a fat anti-aliasing rim.
+     */
+    private val minFillSeparation = 60f
+    private val minStrokeContrast = 40f
+    private val strokeWidthRatio = 0.045f
+    private val shadowRadiusRatio = 0.03f
+    private val shadowOffsetRatio = 0.018f
+    private val shadowColor = Color.argb(102, 0, 0, 0)
 
     private data class RenderItem(
         val item: TranslationOverlayItem,
@@ -108,8 +124,7 @@ class TranslationOverlayView(context: Context) : View(context) {
             if (right <= left || bottom <= top) return@forEachIndexed
             textPaint.textScaleX = 1f
             textPaint.textSize = renderItem.textSize * scaleY
-            textPaint.color = chooseTextColor(renderItem.item.backgroundColor)
-            textPaint.alpha = 255
+            applyGlyphStyle(renderItem.item, textPaint.textSize)
             val padding = renderItem.horizontalPadding * scaleX
             val lineHeight = renderItem.lineSpacing * scaleY
             val totalTextHeight = lineHeight * renderItem.lines.size
@@ -118,11 +133,17 @@ class TranslationOverlayView(context: Context) : View(context) {
             val firstBaseline = startTop - metrics.ascent
             renderItem.lines.forEachIndexed { lineIndex, line ->
                 val lineWidth = textPaint.measureText(line)
-                val lineLeft = left + ((right - left - lineWidth) / 2f).coerceAtLeast(padding)
+                val lineLeft = when (renderItem.item.alignment) {
+                    TextLayoutAnalyzer.TextAlignment.LEFT -> left + padding
+                    TextLayoutAnalyzer.TextAlignment.RIGHT -> (right - padding - lineWidth).coerceAtLeast(left + padding)
+                    TextLayoutAnalyzer.TextAlignment.CENTER -> left + ((right - left - lineWidth) / 2f).coerceAtLeast(padding)
+                }
                 canvas.drawText(line, lineLeft, firstBaseline + lineIndex * lineHeight, textPaint)
             }
         }
         textPaint.textScaleX = 1f; textPaint.color = Color.WHITE; textPaint.alpha = 255
+        textPaint.style = Paint.Style.FILL
+        textPaint.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
     }
 
     private fun klipStatusBarOffsetPx(): Float {
@@ -141,6 +162,41 @@ class TranslationOverlayView(context: Context) : View(context) {
     private fun chooseTextColor(backgroundColor: Int): Int {
         val luminance = 0.2126f * Color.red(backgroundColor) + 0.7152f * Color.green(backgroundColor) + 0.0722f * Color.blue(backgroundColor)
         return if (luminance < 150f) Color.WHITE else Color.BLACK
+    }
+
+    private fun luminanceOf(color: Int): Float =
+        0.2126f * Color.red(color) + 0.7152f * Color.green(color) + 0.0722f * Color.blue(color)
+
+    /**
+     * Applies the sampled glyph style so the translation is drawn the way the game draws its own
+     * text: the original fill colour, an outline when the original had one, and a small drop
+     * shadow that lifts the line off the panel — the standard recipe for game UI type.
+     *
+     * When no style was sampled, or the sampled fill does not separate from the panel colour
+     * enough ([minFillSeparation]), the classic white/black fill is used instead with a
+     * contrasting outline, which stays readable on any panel. [textSize] is the rendered size, so
+     * stroke and shadow shrink together with a font that had to fit its box.
+     */
+    private fun applyGlyphStyle(item: TranslationOverlayItem, textSize: Float) {
+        val style = item.glyphStyle?.takeIf { it.separation >= minFillSeparation }
+        val fill = style?.fill ?: chooseTextColor(item.backgroundColor)
+        val fillLuminance = luminanceOf(fill)
+        val stroke: Int
+        val drawStroke: Boolean
+        if (style != null) {
+            drawStroke = style.hasStroke && abs(luminanceOf(style.stroke) - fillLuminance) >= minStrokeContrast
+            stroke = style.stroke
+        } else {
+            drawStroke = true
+            stroke = if (fillLuminance >= 140f) Color.BLACK else Color.WHITE
+        }
+        textPaint.color = fill
+        textPaint.alpha = 255
+        textPaint.style = if (drawStroke) Paint.Style.FILL_AND_STROKE else Paint.Style.FILL
+        textPaint.strokeJoin = Paint.Join.ROUND
+        textPaint.strokeWidth = textSize * strokeWidthRatio
+        textPaint.strokeColor = stroke
+        textPaint.setShadowLayer(textSize * shadowRadiusRatio, textSize * shadowOffsetRatio, textSize * shadowOffsetRatio, shadowColor)
     }
 
     /**
@@ -295,5 +351,7 @@ data class TranslationOverlayItem(
     val bottom: Int,
     val sourceTextSizePx: Float = 0f,
     val backgroundColor: Int = Color.BLACK,
-    val orientation: TextLayoutAnalyzer.WritingOrientation = TextLayoutAnalyzer.WritingOrientation.HORIZONTAL
+    val orientation: TextLayoutAnalyzer.WritingOrientation = TextLayoutAnalyzer.WritingOrientation.HORIZONTAL,
+    val glyphStyle: TextLayoutAnalyzer.GlyphStyle? = null,
+    val alignment: TextLayoutAnalyzer.TextAlignment = TextLayoutAnalyzer.TextAlignment.CENTER
 )

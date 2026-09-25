@@ -2,7 +2,7 @@
 
 > **Scope:** catatan kerja perubahan tampilan mode Manual (overlay menyatu dengan game) dan mode Klip (desain minimalis). Mode Real-Time di luar scope.
 > **Aturan konteks:** gunakan file ini sebagai konteks utama untuk task ini. Jangan meminta pembacaan README, AI handoff, atau catatan proyek lain untuk memahami rencana ini.
-> **Status:** Tahap 0 selesai. Tahap 1–3 belum dimulai. Tahap 4 ditunda (riset).
+> **Status:** Tahap 0 selesai. Tahap 1 selesai ditulis (kode), menunggu build + test perangkat oleh user. Tahap 2–3 belum dimulai. Tahap 4 ditunda (riset).
 > **Build policy:** jangan menjalankan Gradle/compile/APK lokal. User yang build dan test APK sendiri.
 
 ## Keputusan yang sudah selesai
@@ -32,21 +32,21 @@ Status: [DONE]
 
 ### Tahap 1 — Manual: tipografi match
 
-Status: [TODO] Tujuan: teks terjemahan terbaca sebagai teks game, bukan teks UI Android.
+Status: [CODE DONE] menunggu build + test perangkat.
 
-- [ ] **Sampling gaya glyph** di `TextLayoutAnalyzer.estimate()` (atau fungsi baru): piksel interior box dipisah 2 cluster luminans — cluster terang = fill teks asli, cluster gelap = outline/warna dasar teks. Hasil per unit: `textFill`, `strokeColor`, skor pemisahan (stddev/jarak cluster). Bila pemisahan lemah (teks tanpa outline, kontras rendah) → fallback: fill putih/hitam sesuai luminans seperti sekarang.
-- [ ] `TranslationOverlayItem` membawa field style baru (`textFill`, `strokeColor`, `alignment`) dari pipeline.
-- [ ] **Render outline:** `Paint.Style.FILL_AND_STROKE`, `strokeWidth ≈ 5% glyph height` (pakai `sourceTextSizePx`), `strokeJoin = ROUND`, warna dari `strokeColor`.
-- [ ] **Render drop shadow:** `textPaint.setShadowLayer(radius ≈ 2% glyph height, dx/dy ≈ 1.5%, hitam 40%)`. Fallback bila tidak muncul di hardware canvas: gambar teks dua kali (versi gelap offset dulu).
-- [ ] **Alignment:** dari bounding box baris ML Kit — semua left edge dalam selisih < 0.5 glyph height → rata kiri; selain itu → center. Berlaku untuk garis hasil wrap juga (sekarang selalu center).
-- [ ] Kontras utama: `textFill` dipakai hanya bila luminance-nya beda cukup dari warna patch (ambang awal: selisih luminance ≥ 60); kalau tidak, fallback putih/hitam + outline tetap jalan.
-- [ ] Pertahankan aturan ukuran/wrap/collision yang ada. Jangan ubah layout di Tahap ini.
+- [x] **Sampling gaya glyph** di `TextLayoutAnalyzer`: piksel interior box di-grid (~192 sampel), di-split oleh luminance dengan k-means 3 cluster. Cluster terjauh dari median background = fill; cluster di antaranya = stroke bila jaraknya dari background ≥ 15 dan dari fill ≥ 40 (kalau tidak, dianggap bukan outline dan tidak digambar). Cluster < 4% sampel di-merge ke tetangga terdekat. Box satu warna → `null` → fallback.
+- [x] `TranslationOverlayItem`/`DetectedText` membawa `glyphStyle` dan `alignment` dari analyzer lewat pipeline.
+- [x] **Render outline:** `FILL_AND_STROKE`, `strokeWidth = 4.5%` ukuran teks hasil render (≈5% glyph height), `strokeJoin = ROUND`.
+- [x] **Render drop shadow:** `setShadowLayer(radius 3% textSize, offset 1.8% textSize, hitam 40%)`. Teks tidak butuh software layer (shadow text didukung hardware canvas di semua API ≥ 24).
+- [x] **Alignment:** dari bounding box baris ML Kit — spread kiri ≤ 0.5 glyph → LEFT; spread kanan ≤ 0.5 glyph → RIGHT; selain itu CENTER. Multi-line block saja; single line dan bubble vertikal tetap CENTER. Diterapkan per baris hasil wrap.
+- [x] Guard kontras: fill dari sampling dipakai bila `separation ≥ 60` luminance dari warna patch; kalau tidak → fallback putih/hitam + outline kontras selalu aktif. Stroke sampling hanya dipakai bila kontras fill ≥ 40; kalau tidak, stroke fallback (fill terang → hitam, fill gelap → putih).
+- [x] Ukuran/wrap/collision/layout tidak diubah di Tahap ini.
 
 **Checklist test (user):**
-- Dialog box gelap: teks terjemahan punya outline gelap + shadow, fill meniru warna teks asli.
-- Panel/button terang: teks tetap kontras (tidak "tenggelam").
-- Teks asli rata kiri → terjemahan juga rata kiri; yang center tetap center.
-- Bubble vertikal JP: tetap terbaca, outline tidak membuat huruf "tebal berlebihan".
+- [ ] Dialog box gelap: teks terjemahan punya outline gelap + shadow, fill meniru warna teks asli.
+- [ ] Panel/button terang: teks tetap kontras (tidak "tenggelam").
+- [ ] Teks asli rata kiri → terjemahan juga rata kiri; yang center tetap center.
+- [ ] Bubble vertikal JP: tetap terbaca, outline tidak membuat huruf "tebal berlebihan".
 
 ### Tahap 2 — Manual: patch penuh
 
@@ -101,3 +101,4 @@ Spesifikasi:
 ## Log keputusan (tambahkan saat kerja berjalan)
 
 - 2026-09-25: dibuat; branch + referensi sesi sebelumnya diamankan sebagai `1639ed1`.
+- 2026-09-25 Tahap 1: sampling glyph pakai k-means 3 cluster (bukan 2 — outline sering menyatu dengan background pada 2 cluster, terutama teks terang di panel gelap). Threshold outline vs background diturunkan ke 15 luminance: dark-on-dark outline memang bedanya kecil, dan tebakan salah aman karena stroke sewarna panel praktis tak terlihat. Shadow pakai `setShadowLayer` langsung (teks didukung hardware canvas, tanpa software layer).
