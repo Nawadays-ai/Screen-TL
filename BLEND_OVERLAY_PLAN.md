@@ -2,7 +2,7 @@
 
 > **Scope:** catatan kerja perubahan tampilan mode Manual (overlay menyatu dengan game) dan mode Klip (desain minimalis). Mode Real-Time di luar scope.
 > **Aturan konteks:** gunakan file ini sebagai konteks utama untuk task ini. Jangan meminta pembacaan README, AI handoff, atau catatan proyek lain untuk memahami rencana ini.
-> **Status:** Tahap 0 selesai. Tahap 1 selesai ditulis; hasil test perangkat 2026-09-25 **gagal pada 2 poin** (tabrakan dengan teks source, kontras warna rendah) — keduanya sudah diperbaiki, menunggu test ulang. Tahap 2–3 belum dimulai. Tahap 4 ditunda (riset).
+> **Status:** Tahap 0 selesai. Tahap 1 selesai ditulis; 3 siklus test perangkat (2026-09-25) — siklus 1 & 2 diperbaiki di Tahap 1b/1c, menunggu test ulang. Tahap 2–3 belum dimulai. Tahap 4 ditunda (riset).
 > **Build policy:** APK **tidak pernah** dibangun lokal — keputusan user, bukan kekurangan setup. Build hanya via GitHub Actions, lalu user tes di perangkat. Yang boleh: type-check Kotlin terisolasi via compiler di Gradle cache (ringan, detik) untuk menangkap error sebelum CI.
 
 ## Keputusan yang sudah selesai
@@ -49,6 +49,8 @@ Status: [CODE DONE] menunggu build + test perangkat.
 - [ ] Bubble vertikal JP: tetap terbaca, outline tidak membuat huruf "tebal berlebihan".
 - [ ] **Teks panjang (2+ baris):** tidak ada baris yang keluar dari patch / menimpa teks asli.
 - [ ] **Semua panel:** teks selalu punya outline, tidak pernah fill polos tanpa tepi.
+- [ ] **Layar manyaragraf:** semua paragraf punya ukuran font yang konsisten satu sama lain;
+  tidak ada satu paragraf tiba-tiba sangat kecil sementara di atasnya besar.
 
 ### Tahap 1b — Perbaikan hasil test perangkat (2026-09-25)
 
@@ -78,6 +80,29 @@ melainkan masalah geometri dan kontras di sisi render:
 - [x] Bonus: `renderItems` dibersihkan sebelum build di `setTranslations` — sebelumnya
   `collidesWithOtherBox` mengukur box baru terhadap geometri frame sebelumnya, jadi frame
   pertama tidak punya deteksi tabrakan sama sekali.
+
+### Tahap 1c — Font size seragam lintas paragraf (2026-09-25)
+
+Status: [CODE DONE] terverifikasi 0 error compile (Kotlin 1.9.22 lokal, JDK 17).
+
+Test perangkat atas build `b32d261` (GH Actions #355, artifact 32.7 MB) menunjukkan masalah
+ketiga: **ukuran font antar-paragraf tidak konsisten**. Paragraf yang panjang membuat paragraf
+di bawahnya mengalah — sebagian jadi kecil, sebagian jadi sangat kecil. Branch `debugging`
+memiliki hasil yang jauh lebih enak dibaca untuk kasus yang sama.
+
+- [x] **Penyebab:** `buildRenderItem` menghitung `fitScale` **per item**, tanpa koherensi
+  antar-item. Setiap paragraf wrap berbeda, jadi tiap paragraf independen memutuskan seberapa
+  jauh menyusut → pola zig-zag, bukan proporsi.
+- [x] **Perbaikan (opsi A):** `setTranslations` jadi dua pass. `measureItem` mengukur kebutuhan
+  tinggi tiap item pada ukuran font-nya sendiri; `uniformScaleFor` mengambil **skala terkecil
+  yang dibutuhkan** di seluruh layar (dibatasi `minFontScale`); lalu `buildRenderItem` menerapkan
+  **satu faktor yang sama** ke semua item. Paragraf pendek tetap ukuran penuh, paragraf panjang
+  menarik semua paragraf lain turun dengan faktor yang sama — proporsional, bukan acak.
+- [x] Konsekuensi yang disepakati: terjemahan panjang **boleh meluber** dari panelnya sendiri
+  (sudah ada `clipRect` sebagai jaring pengaman), asalkan tidak lagi mengorbankan teks lain.
+- [ ] Catatan: `debugging` punya `buildOverlapGroups()` (union-find) yang **hilang** di branch ini.
+  Fungsinya menyamakan **warna** panel antar-box yang overlap — bukan ukuran font. Kalau test
+  berikutnya menemukan warna panel tidak konsisten, itu kandidatnya.
 
 ### Tahap 2 — Manual: patch penuh
 
@@ -136,6 +161,7 @@ Spesifikasi:
 - 2026-09-25: dibuat; branch + referensi sesi sebelumnya diamankan sebagai `1639ed1`.
 - 2026-09-25 Tahap 1: sampling glyph pakai k-means 3 cluster (bukan 2 — outline sering menyatu dengan background pada 2 cluster, terutama teks terang di panel gelap). Threshold outline vs background diturunkan ke 15 luminance: dark-on-dark outline memang bedanya kecil, dan tebakan salah aman karena stroke sewarna panel praktis tak terlihat. Shadow pakai `setShadowLayer` langsung (teks didukung hardware canvas, tanpa software layer).
 - 2026-09-25 Tahap 1b: hasil test perangkat men perteneciente dua cacat render, bukan cacat sampling. (1) Panel tidak pernah tumbuh vertikal untuk mode Manual (`toleranceRatio=1`), jadi terjemahan yang wrap meluber ke bawah patch dan menimpa teks asli — tidak ada `clipRect` di app saat itu. (2) Kontras fill diukur terhadap warna background asli, padahal `drawPanel` mengecat panel lebih gelap (0.62x) untuk panel terang; hasilnya fill game bisa menyatu dengan panelnya sendiri. Outline juga bisa mati justru ketika sampling dipercaya, padahal jalur fallback selalu menggambarnya. Semua diperbaiki di `TranslationOverlayView.kt`; `paintedPanelColor()` sekarang satu-satunya sumber warna panel.
+- 2026-09-25 Tahap 1c: test atas build `b32d261` (Actions #355) menunjukkan font size antar-paragraf tidak konsisten — paragraf panjang memaksa paragraf di bawahnya menyusut secara independen per item (`fitScale` dihitung per paragraf), sehingga hasilnya zig-zag acak dan sebagian teks jadi sangat kecil. Dipecah jadi dua pass: `measureItem` mengukur, `uniformScaleFor` memilih satu skala terkecil yang perlu di seluruh layar, `buildRenderItem` menerapkannya ke semua item. Konsekuensi yang disepakati user: terjemahan panjang boleh meluber dari panelnya sendiri, asalkan tidak mengorbankan paragraf lain. Catatan: `buildOverlapGroups()` yang ada di branch `debugging` hilang di branch ini — ia menyamakan **warna** antar-box overlap, bukan ukuran.
 
 
 ## Aturan kerja untuk sesi berikutnya

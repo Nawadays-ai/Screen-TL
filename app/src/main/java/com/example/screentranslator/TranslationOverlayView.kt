@@ -110,9 +110,39 @@ class TranslationOverlayView(context: Context) : View(context) {
         // of the previous frame. Previously the first frame after a capture had no collision
         // detection at all, and later frames compared against stale positions.
         renderItems = emptyList()
-        renderItems = translations.mapNotNull { buildRenderItem(it, this.sourceWidth, this.sourceHeight) }
+        // Two passes. A screen full of paragraphs is laid out twice: once to find out how much the
+        // text actually needs, and once with a single font scale applied to every item.
+        //
+        // Sizing each item on its own produces a zig-zag instead of a page: every paragraph wraps
+        // differently, so each one independently decides how far to shrink, and the screen ends up
+        // a mix of large and tiny text. One shared scale is what makes a long paragraph force every
+        // other paragraph down by the same amount rather than the one below it absorbing the cost.
+        val measured = translations.mapNotNull { measureItem(it, this.sourceWidth, this.sourceHeight) }
+        val uniformScale = uniformScaleFor(measured)
+        renderItems = measured.mapNotNull { buildRenderItem(it, this.sourceWidth, this.sourceHeight, uniformScale) }
         visibility = if (renderItems.isEmpty()) View.GONE else View.VISIBLE
         invalidate()
+    }
+
+    /**
+     * The single font scale every item on screen is rendered at.
+     *
+     * Each item reports the shrink it would need on its own. The tightest of those wins, so
+     * nothing has to be clipped, and that factor is then applied to all of them: a paragraph that
+     * fits keeps its size while a crowded one shrinks, and the two stay in proportion. A long
+     * translation is allowed to run past its own panel here on purpose — the alternative is one
+     * paragraph silently starving every paragraph under it.
+     */
+    private fun uniformScaleFor(measured: List<MeasuredItem>): Float {
+        var worst = 1f
+        for (item in measured) {
+            val needed = item.requiredHeight
+            if (needed > item.availableHeight && needed > 0f) {
+                val scale = (item.availableHeight / needed).coerceIn(minFontScale, 1f)
+                if (scale < worst) worst = scale
+            }
+        }
+        return worst
     }
 
     fun clearTranslations() {
@@ -293,7 +323,33 @@ class TranslationOverlayView(context: Context) : View(context) {
     private fun adjustColor(color: Int, factor: Float): Int = Color.rgb((Color.red(color) * factor).roundToIntSafe(), (Color.green(color) * factor).roundToIntSafe(), (Color.blue(color) * factor).roundToIntSafe())
     private fun Float.roundToIntSafe(): Int = roundToInt().coerceIn(0, 255)
 
-    private fun buildRenderItem(item: TranslationOverlayItem, width: Int, height: Int): RenderItem? {
+    /** Everything pass 1 can learn about an item before a font scale is chosen for the screen. */
+    private data class MeasuredItem(
+        val item: TranslationOverlayItem,
+        val baseLeft: Float,
+        val baseTop: Float,
+        val boxLeft: Float,
+        val boxRight: Float,
+        val originalWidth: Float,
+        val originalBoxHeight: Float,
+        val horizontalPadding: Float,
+        val baseTextSize: Float,
+        val maxTextWidth: Float,
+        val originalBoxTop: Float,
+        val verticalPadding: Float,
+        val maxPanelHeight: Float,
+        val availableHeight: Float,
+        val requiredHeight: Float
+    )
+
+    /**
+     * First pass: lay the item out at its own size and report how much room the text wants.
+     *
+     * Only the measurements matter here. The font is not chosen yet, because choosing it per item
+     * is what makes a screen of paragraphs look ragged — [uniformScaleFor] compares these
+     * measurements across every item and settles on one size for all of them.
+     */
+    private fun measureItem(item: TranslationOverlayItem, width: Int, height: Int): MeasuredItem? {
         val baseLeft = item.left.coerceIn(0, width - 1).toFloat(); val baseTop = item.top.coerceIn(0, height - 1).toFloat()
         val baseRight = item.right.coerceIn(baseLeft.toInt() + 1, width).toFloat(); val baseBottom = item.bottom.coerceIn(baseTop.toInt() + 1, height).toFloat()
         if (baseRight <= baseLeft || baseBottom <= baseTop) return null
@@ -308,7 +364,6 @@ class TranslationOverlayView(context: Context) : View(context) {
         textPaint.textSize = baseTextSize
         val measuredWidth = normalized.split('\n').maxOfOrNull { textPaint.measureText(it) } ?: 0f
         val availableScreenWidth = (width - 8f).coerceAtLeast(originalWidth)
-
         val originalTextWidth = (originalWidth - horizontalPadding * 2f).coerceAtLeast(1f)
 
         // Grow only to the right, anchored on the control's left edge, so the panel reads as that
@@ -328,56 +383,46 @@ class TranslationOverlayView(context: Context) : View(context) {
         }
         boxRight = boxRight.coerceAtLeast(boxLeft + originalWidth)
 
-        var boxWidth = boxRight - boxLeft
-        var maxTextWidth = (boxWidth - horizontalPadding * 2f).coerceAtLeast(1f)
+        var maxTextWidth = (boxRight - boxLeft - horizontalPadding * 2f).coerceAtLeast(1f)
 
         // If growing would land on top of a neighbouring control, give the room back and let the
         // font shrink instead. The original control keeps its shape, which is the whole point.
         val originalBoxTop = (baseTop - (originalBoxHeight - originalHeight) / 2f).coerceAtLeast(0f)
         val originalBoxBottom = (originalBoxTop + originalBoxHeight).coerceAtMost(height.toFloat())
-        if (boxWidth > originalWidth && collidesWithOtherBox(boxLeft, originalBoxTop, boxRight, originalBoxBottom)) {
-            boxWidth = originalWidth
+        if (boxRight - boxLeft > originalWidth && collidesWithOtherBox(boxLeft, originalBoxTop, boxRight, originalBoxBottom)) {
             boxRight = boxLeft + originalWidth
             maxTextWidth = originalTextWidth
         }
 
-        // The panel is sized to the text it has to cover, not to the control it replaced.
-        //
-        // A translation is usually longer than the original line, so it wraps to more lines than
-        // the control has height for. Sizing the panel to the original height leaves the wrapped
-        // lines with nowhere to go: they spill past the opaque patch and land on the game's own
-        // glyphs, which is exactly the overlap this panel exists to prevent. Growing vertically
-        // until the text fits is the only way to keep the patch under the whole translation.
         val maxPanelHeight = (originalBoxHeight * if (isBubble) bubbleHeightRatio else maxHeightRatio)
             .coerceAtMost(height.toFloat())
         val verticalPadding = (originalBoxHeight * verticalPaddingRatio).coerceIn(2f, 8f)
+        val ownLines = wrapText(normalized, maxTextWidth, baseTextSize)
+        val required = baseTextSize * lineSpacingRatio * ownLines.size
+        // The room the panel can ever give the text: it may grow to the ceiling, but no further.
+        val available = (maxPanelHeight - verticalPadding * 2f).coerceAtLeast(1f)
+        return MeasuredItem(
+            item, baseLeft, baseTop, boxLeft, boxRight, originalWidth, originalBoxHeight,
+            horizontalPadding, baseTextSize, maxTextWidth, originalBoxTop, verticalPadding,
+            maxPanelHeight, available, required
+        )
+    }
 
-        var finalTextSize = baseTextSize
-        var lines = wrapText(normalized, maxTextWidth, finalTextSize)
-        // Height needed to hold every wrapped line plus its padding.
-        var needed = finalTextSize * lineSpacingRatio * lines.size + verticalPadding * 2f
-
-        // Grow vertically to fit, but no further than the ceiling: past that the font gives way
-        // instead, which costs legibility far less than covering a third of the screen.
-        val panelHeight = minOf(needed, maxPanelHeight)
-        if (needed > panelHeight) {
-            val available = (panelHeight - verticalPadding * 2f).coerceAtLeast(1f)
-            val fitScale = (available / (finalTextSize * lineSpacingRatio * lines.size)).coerceAtLeast(minFontScale)
-            finalTextSize = (finalTextSize * fitScale).coerceIn(minTextSizePx, baseTextSize)
-            lines = wrapText(normalized, maxTextWidth, finalTextSize)
-            needed = finalTextSize * lineSpacingRatio * lines.size + verticalPadding * 2f
-        }
+    private fun buildRenderItem(m: MeasuredItem, width: Int, height: Int, uniformScale: Float): RenderItem? {
+        val item = m.item
+        val normalized = normalizeParagraph(item.translatedText); if (normalized.isEmpty()) return null
+        val finalTextSize = (m.baseTextSize * uniformScale).coerceIn(minTextSizePx, m.baseTextSize)
+        val lines = wrapText(normalized, m.maxTextWidth, finalTextSize)
+        val needed = finalTextSize * lineSpacingRatio * lines.size + m.verticalPadding * 2f
+        val settledHeight = minOf(needed, m.maxPanelHeight)
 
         // Centre the grown panel on the original control, then shift it back inside the screen.
         // The shift is applied to both edges at once so a panel that cannot fit above its control
         // slides down whole rather than losing its bottom edge to the screen boundary.
-        val settledHeight = minOf(needed, maxPanelHeight)
-        var top = (originalBoxTop - (settledHeight - originalBoxHeight) / 2f).coerceAtLeast(0f)
+        var top = (m.originalBoxTop - (settledHeight - m.originalBoxHeight) / 2f).coerceAtLeast(0f)
         if (top + settledHeight > height.toFloat()) top = (height.toFloat() - settledHeight).coerceAtLeast(0f)
-        val boxTop = top
-        val boxBottom = top + settledHeight
         val lineSpacing = finalTextSize * lineSpacingRatio
-        return RenderItem(item, boxLeft, boxTop, boxRight, boxBottom, finalTextSize, horizontalPadding, lines, lineSpacing)
+        return RenderItem(item, m.boxLeft, top, m.boxRight, top + settledHeight, finalTextSize, m.horizontalPadding, lines, lineSpacing)
     }
 
     /**
