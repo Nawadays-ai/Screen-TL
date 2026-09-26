@@ -2,7 +2,7 @@
 
 > **Scope:** catatan kerja perubahan tampilan mode Manual (overlay menyatu dengan game) dan mode Klip (desain minimalis). Mode Real-Time di luar scope.
 > **Aturan konteks:** gunakan file ini sebagai konteks utama untuk task ini. Jangan meminta pembacaan README, AI handoff, atau catatan proyek lain untuk memahami rencana ini.
-> **Status:** Tahap 0 selesai. Tahap 1 selesai ditulis; 3 siklus test perangkat (2026-09-25) — siklus 1 & 2 diperbaiki di Tahap 1b/1c, menunggu test ulang. Tahap 2–3 belum dimulai. Tahap 4 ditunda (riset).
+> **Status:** Tahap 0 selesai. Tahap 1 selesai ditulis; 4 siklus test perangkat (2026-09-25/26) — siklus 1–3 diperbaiki di Tahap 1b/1c/1d, menunggu test ulang. Tahap 2–3 belum dimulai. Tahap 4 ditunda (riset).
 > **Build policy:** APK **tidak pernah** dibangun lokal — keputusan user, bukan kekurangan setup. Build hanya via GitHub Actions, lalu user tes di perangkat. Yang boleh: type-check Kotlin terisolasi via compiler di Gradle cache (ringan, detik) untuk menangkap error sebelum CI.
 
 ## Keputusan yang sudah selesai
@@ -51,6 +51,10 @@ Status: [CODE DONE] menunggu build + test perangkat.
 - [ ] **Semua panel:** teks selalu punya outline, tidak pernah fill polos tanpa tepi.
 - [ ] **Layar manyaragraf:** semua paragraf punya ukuran font yang konsisten satu sama lain;
   tidak ada satu paragraf tiba-tiba sangat kecil sementara di atasnya besar.
+- [ ] **Kalimat berdempet vertikal:** tidak saling rebut ruang; panel boleh menutupi, dan warnanya
+  menyatu satu sama lain (satu kelompok) alih-alih kartu-kartu berbeda warna.
+- [ ] **Tidak ada baris nyasar:** kalimat tidak terpotongBecome beberapa baris pendek padahal
+  ruang horizontal masih lega.
 
 ### Tahap 1b — Perbaikan hasil test perangkat (2026-09-25)
 
@@ -100,9 +104,35 @@ memiliki hasil yang jauh lebih enak dibaca untuk kasus yang sama.
   menarik semua paragraf lain turun dengan faktor yang sama — proporsional, bukan acak.
 - [x] Konsekuensi yang disepakati: terjemahan panjang **boleh meluber** dari panelnya sendiri
   (sudah ada `clipRect` sebagai jaring pengaman), asalkan tidak lagi mengorbankan teks lain.
-- [ ] Catatan: `debugging` punya `buildOverlapGroups()` (union-find) yang **hilang** di branch ini.
-  Fungsinya menyamakan **warna** panel antar-box yang overlap — bukan ukuran font. Kalau test
-  berikutnya menemukan warna panel tidak konsisten, itu kandidatnya.
+
+### Tahap 1d — Baris acak & box saling rebut (2026-09-26)
+
+Status: [CODE DONE] terverifikasi 0 error compile (Kotlin 1.9.22 lokal, JDK 17).
+
+Review user atas `980c7bd`: OCR benar membedakan paragraf dari kalimat, tapi terjemahan
+"seperti di enter kebawah padahal space masih banyak", dan kalimat yang berdempet vertikal
+saling rebut boundary box sehingga sebagian kecil / menumpuk.
+
+- [x] **Baris nyasar (`normalizeParagraph`).** DeepL menerjemahkan satu baris JP/CN dan
+  mengembalikan kalimat; ia bebas memecah kalimat itu ke beberapa baris diBalasan. `normalizeParagraph`
+  lama **mempertahankan** `\n` itu, jadi kalimat yang muat 1 baris tiba-tiba jadi 3 baris pendek →
+  panel lebih tinggi → paragraf di bawahnya makin sempit. Perbaikan: `\n` diperlakukan sebagai
+  whitespace biasa (`replace(Regex("[\\s]+"), " ")`). Teks sumber JP/CN tidak punya baris yang
+  bermakna, jadi tidak ada yang perlu dipertahankan; `wrapText` yang memutuskan baris dari
+  lebar yang benar-benar tersedia.
+  (Catatan: diagnosis awal sempat mengaitkannya ke prompt OpenRouter — provider yang dipakai
+  adalah **DeepL**, yang tidak punya prompt seperti itu.)
+- [x] **Box saling rebut (`collidesWithOtherBox` dihapus).** Bok yang tumbuh lalu ketemu box
+  lain akan **menyerahkan ruangnya**. Untuk kolom dialog yang berdempet vertikal, tiap baris
+  saling mengalah → zig-zag dan kadang benar-benar menumpuk. Ini diperparah oleh Tahap 1b/1c
+  sendiri, karena panel sekarang tumbuh vertikal sampai 1.6x sehingga lebih sering bertabrakan.
+  **Overlap adalah kondisi normal** untuk teks berdempet, bukan tabrakan yang harus dicegah.
+  `minFontScale` bersama sudah mencegah satu paragraf mengorbankan tetangganya.
+- [x] **`buildOverlapGroups()` dikembalikan** dari `debugging` (union-find).kotak yang
+  bersinggungan dijadikan satu kelompok dengan **warna panel dirata-ratakan**, jadi deretan baris
+  dari satu control digambar sebagai satu control — bukan kartu-kartu dengan warna berbeda.
+  Warna grup juga dipakai untuk算 kontras teks (`effectivePanelColor`), jadi panel dan teks
+  selalu sepakat soal warna yang benar-benar dicat. Growth **tidak** terpengaruh oleh pengelompokan.
 
 ### Tahap 2 — Manual: patch penuh
 
@@ -162,6 +192,7 @@ Spesifikasi:
 - 2026-09-25 Tahap 1: sampling glyph pakai k-means 3 cluster (bukan 2 — outline sering menyatu dengan background pada 2 cluster, terutama teks terang di panel gelap). Threshold outline vs background diturunkan ke 15 luminance: dark-on-dark outline memang bedanya kecil, dan tebakan salah aman karena stroke sewarna panel praktis tak terlihat. Shadow pakai `setShadowLayer` langsung (teks didukung hardware canvas, tanpa software layer).
 - 2026-09-25 Tahap 1b: hasil test perangkat men perteneciente dua cacat render, bukan cacat sampling. (1) Panel tidak pernah tumbuh vertikal untuk mode Manual (`toleranceRatio=1`), jadi terjemahan yang wrap meluber ke bawah patch dan menimpa teks asli — tidak ada `clipRect` di app saat itu. (2) Kontras fill diukur terhadap warna background asli, padahal `drawPanel` mengecat panel lebih gelap (0.62x) untuk panel terang; hasilnya fill game bisa menyatu dengan panelnya sendiri. Outline juga bisa mati justru ketika sampling dipercaya, padahal jalur fallback selalu menggambarnya. Semua diperbaiki di `TranslationOverlayView.kt`; `paintedPanelColor()` sekarang satu-satunya sumber warna panel.
 - 2026-09-25 Tahap 1c: test atas build `b32d261` (Actions #355) menunjukkan font size antar-paragraf tidak konsisten — paragraf panjang memaksa paragraf di bawahnya menyusut secara independen per item (`fitScale` dihitung per paragraf), sehingga hasilnya zig-zag acak dan sebagian teks jadi sangat kecil. Dipecah jadi dua pass: `measureItem` mengukur, `uniformScaleFor` memilih satu skala terkecil yang perlu di seluruh layar, `buildRenderItem` menerapkannya ke semua item. Konsekuensi yang disepakati user: terjemahan panjang boleh meluber dari panelnya sendiri, asalkan tidak mengorbankan paragraf lain. Catatan: `buildOverlapGroups()` yang ada di branch `debugging` hilang di branch ini — ia menyamakan **warna** antar-box overlap, bukan ukuran.
+- 2026-09-26 Tahap 1d: review atas `980c7bd` menemukan dua hal. (1) `normalizeParagraph` mempertahankan `\n` dari DeepL sebagai baris baru, padahal DeepL memecah kalimat sesuka hatinya → kalimat muat 1 baris jadi 3 baris pendek, panel makin tinggi, paragraf bawah makin sempit. Diubah: `\n` jadi whitespace biasa. Diagnosis awal sempat salah mengaitkannya ke prompt OpenRouter; provider yang dipakai DeepL. (2) `collidesWithOtherBox` membuat box yang tumbuhokersors ruang saat nabrak box lain — untuk kolom dialog berdempet vertikal tiap baris saling mengalah, diperparah oleh pertumbuhan vertikal Tahap 1b. Overlap adalah kondisi normal teks berdempet, jadi logikanya dihapus; `buildOverlapGroups()` (union-find) dari `debugging` dikembalikan untuk menyamakan **warna** panel antar-box overlap, dan warnanya juga dipakai untuk guard kontras teks.
 
 
 ## Aturan kerja untuk sesi berikutnya

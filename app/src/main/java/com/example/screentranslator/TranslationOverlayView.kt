@@ -93,6 +93,8 @@ class TranslationOverlayView(context: Context) : View(context) {
         val lineSpacing: Float
     ) { fun boxRect() = RectF(left, top, right, bottom) }
     private var renderItems: List<RenderItem> = emptyList()
+    private var itemGroups: List<Int> = emptyList()
+    private var groupColors: List<Int> = emptyList()
     private var sourceWidth = 1
     private var sourceHeight = 1
     private var toleranceRatio = 1f
@@ -106,9 +108,7 @@ class TranslationOverlayView(context: Context) : View(context) {
         this.sourceWidth = sourceWidth.coerceAtLeast(1)
         this.sourceHeight = sourceHeight.coerceAtLeast(1)
         this.toleranceRatio = toleranceRatio.coerceIn(1f, 3f)
-        // Cleared first so collidesWithOtherBox does not measure new boxes against the geometry
-        // of the previous frame. Previously the first frame after a capture had no collision
-        // detection at all, and later frames compared against stale positions.
+        // Cleared first so nothing measures the new boxes against the previous frame's geometry.
         renderItems = emptyList()
         // Two passes. A screen full of paragraphs is laid out twice: once to find out how much the
         // text actually needs, and once with a single font scale applied to every item.
@@ -120,6 +120,7 @@ class TranslationOverlayView(context: Context) : View(context) {
         val measured = translations.mapNotNull { measureItem(it, this.sourceWidth, this.sourceHeight) }
         val uniformScale = uniformScaleFor(measured)
         renderItems = measured.mapNotNull { buildRenderItem(it, this.sourceWidth, this.sourceHeight, uniformScale) }
+        buildOverlapGroups()
         visibility = if (renderItems.isEmpty()) View.GONE else View.VISIBLE
         invalidate()
     }
@@ -147,6 +148,8 @@ class TranslationOverlayView(context: Context) : View(context) {
 
     fun clearTranslations() {
         renderItems = emptyList()
+        itemGroups = emptyList()
+        groupColors = emptyList()
         visibility = View.GONE
         invalidate()
     }
@@ -158,7 +161,7 @@ class TranslationOverlayView(context: Context) : View(context) {
         val scaleY = height.toFloat() / sourceHeight.toFloat()
         val coordinateOffsetY = if (toleranceRatio > 1.5f) klipStatusBarOffsetPx() else 0f
 
-        renderItems.forEachIndexed { _, renderItem ->
+        renderItems.forEachIndexed { index, renderItem ->
             val left = renderItem.left * scaleX
             val top = renderItem.top * scaleY + coordinateOffsetY
             val right = renderItem.right * scaleX
@@ -166,10 +169,10 @@ class TranslationOverlayView(context: Context) : View(context) {
             if (right <= left || bottom <= top) return@forEachIndexed
             val box = RectF(left, top, right, bottom)
             val radius = ((bottom - top) * 0.12f).coerceIn(2f, 7f)
-            drawPanel(canvas, box, renderItem.item.backgroundColor, radius)
+            drawPanel(canvas, box, effectivePanelColor(index, renderItem.item.backgroundColor), radius)
         }
 
-        renderItems.forEachIndexed { _, renderItem ->
+        renderItems.forEachIndexed { index, renderItem ->
             val left = renderItem.left * scaleX
             val top = renderItem.top * scaleY + coordinateOffsetY
             val right = renderItem.right * scaleX
@@ -197,7 +200,7 @@ class TranslationOverlayView(context: Context) : View(context) {
                     TextLayoutAnalyzer.TextAlignment.RIGHT -> (right - padding - lineWidth).coerceAtLeast(left + padding)
                     TextLayoutAnalyzer.TextAlignment.CENTER -> left + ((right - left - lineWidth) / 2f).coerceAtLeast(padding)
                 }
-                drawStyledLine(canvas, line, lineLeft, firstBaseline + lineIndex * lineHeight, renderItem.item, renderItem.textSize * scaleY)
+                drawStyledLine(canvas, line, lineLeft, firstBaseline + lineIndex * lineHeight, renderItem.item, renderItem.textSize * scaleY, effectivePanelColor(index, renderItem.item.backgroundColor))
             }
             canvas.restore()
         }
@@ -235,12 +238,11 @@ class TranslationOverlayView(context: Context) : View(context) {
      * contrasting outline, which stays readable on any panel. [textSize] is the rendered size, so
      * stroke and shadow shrink together with a font that had to fit its box.
      */
-    private fun drawStyledLine(canvas: Canvas, line: String, x: Float, baseline: Float, item: TranslationOverlayItem, textSize: Float) {
+    private fun drawStyledLine(canvas: Canvas, line: String, x: Float, baseline: Float, item: TranslationOverlayItem, textSize: Float, panelColor: Int) {
         // Contrast is judged against the colour the panel is actually painted, not against the
         // colour that was sampled off the screen. drawPanel darkens a light control before filling
         // it, so a fill chosen against the original background can end up sitting almost on top of
         // the panel it is drawn on — which is how "the translation is hard to read" happens.
-        val panelColor = paintedPanelColor(item.backgroundColor)
         val style = item.glyphStyle?.takeIf { abs(luminanceOf(it.fill) - luminanceOf(panelColor)) >= minFillSeparation }
         val fill = style?.fill ?: chooseTextColor(panelColor)
         val fillLuminance = luminanceOf(fill)
@@ -288,9 +290,12 @@ class TranslationOverlayView(context: Context) : View(context) {
      *
      * The border is only drawn when the panel would otherwise blend into what surrounds it.
      */
-    private fun drawPanel(canvas: Canvas, box: RectF, baseColor: Int, radius: Float) {
-        val luminance = luminanceOf(baseColor)
-        canvas.drawRoundRect(box, radius, radius, panelPaint(baseColor, luminance))
+    private fun drawPanel(canvas: Canvas, box: RectF, paintedColor: Int, radius: Float) {
+        val luminance = luminanceOf(paintedColor)
+        backgroundPaint.shader = null
+        backgroundPaint.alpha = 255
+        backgroundPaint.color = paintedColor
+        canvas.drawRoundRect(box, radius, radius, backgroundPaint)
 
         // Only a faint edge on a light panel, where the fill could otherwise disappear into a pale
         // control. Dark panels keep the control's own edge and need nothing added.
@@ -302,6 +307,17 @@ class TranslationOverlayView(context: Context) : View(context) {
     }
 
     /**
+     * The painted colour for one box: its group colour when it was grouped, otherwise its own.
+     *
+     * Both the panel and the text read the result, so the contrast guard is always measured
+     * against the colour actually on screen.
+     */
+    private fun effectivePanelColor(index: Int, baseColor: Int): Int {
+        val groupId = itemGroups.getOrElse(index) { index }
+        return groupColors.getOrElse(groupId) { paintedPanelColor(baseColor) }
+    }
+
+    /**
      * The colour the panel is actually filled with for a given sampled background.
      *
      * Kept in one place because the text has to make the same decision: a fill colour chosen for
@@ -310,15 +326,6 @@ class TranslationOverlayView(context: Context) : View(context) {
      */
     private fun paintedPanelColor(baseColor: Int): Int =
         if (luminanceOf(baseColor) > 160f) adjustColor(baseColor, 0.62f) else adjustColor(baseColor, 0.86f)
-
-    private fun panelPaint(baseColor: Int, luminance: Float): Paint {
-        backgroundPaint.shader = null
-        backgroundPaint.alpha = 255
-        // Light controls need a slightly deeper fill so white text stays legible; dark ones stay
-        // close to the original so the control does not turn into a black hole.
-        backgroundPaint.color = paintedPanelColor(baseColor)
-        return backgroundPaint
-    }
 
     private fun adjustColor(color: Int, factor: Float): Int = Color.rgb((Color.red(color) * factor).roundToIntSafe(), (Color.green(color) * factor).roundToIntSafe(), (Color.blue(color) * factor).roundToIntSafe())
     private fun Float.roundToIntSafe(): Int = roundToInt().coerceIn(0, 255)
@@ -362,9 +369,8 @@ class TranslationOverlayView(context: Context) : View(context) {
 
         textPaint.textScaleX = 1f
         textPaint.textSize = baseTextSize
-        val measuredWidth = normalized.split('\n').maxOfOrNull { textPaint.measureText(it) } ?: 0f
+        val measuredWidth = textPaint.measureText(normalized)
         val availableScreenWidth = (width - 8f).coerceAtLeast(originalWidth)
-        val originalTextWidth = (originalWidth - horizontalPadding * 2f).coerceAtLeast(1f)
 
         // Grow only to the right, anchored on the control's left edge, so the panel reads as that
         // control revealing more room rather than as a new box hovering over the screen. A
@@ -383,17 +389,18 @@ class TranslationOverlayView(context: Context) : View(context) {
         }
         boxRight = boxRight.coerceAtLeast(boxLeft + originalWidth)
 
-        var maxTextWidth = (boxRight - boxLeft - horizontalPadding * 2f).coerceAtLeast(1f)
-
-        // If growing would land on top of a neighbouring control, give the room back and let the
-        // font shrink instead. The original control keeps its shape, which is the whole point.
+        val maxTextWidth = (boxRight - boxLeft - horizontalPadding * 2f).coerceAtLeast(1f)
         val originalBoxTop = (baseTop - (originalBoxHeight - originalHeight) / 2f).coerceAtLeast(0f)
-        val originalBoxBottom = (originalBoxTop + originalBoxHeight).coerceAtMost(height.toFloat())
-        if (boxRight - boxLeft > originalWidth && collidesWithOtherBox(boxLeft, originalBoxTop, boxRight, originalBoxBottom)) {
-            boxRight = boxLeft + originalWidth
-            maxTextWidth = originalTextWidth
-        }
 
+        // A box is allowed to grow over a neighbour without giving the space back.
+        //
+        // This used to hand the room back as soon as the grown box intersected another one, and
+        // on a column of stacked dialogue lines that made every line yield to the next: the first
+        // to grow was penalised for it, the one below was penalised for being long, and the column
+        // came out ragged with panels landing on top of each other. Adjacent lines are how dialogue
+        // is laid out in the first place, so the overlap is the normal case, not a collision. The
+        // shared font scale already stops one paragraph from starving its neighbours, and the
+        // per-item clip keeps each line inside its own patch.
         val maxPanelHeight = (originalBoxHeight * if (isBubble) bubbleHeightRatio else maxHeightRatio)
             .coerceAtMost(height.toFloat())
         val verticalPadding = (originalBoxHeight * verticalPaddingRatio).coerceIn(2f, 8f)
@@ -426,25 +433,61 @@ class TranslationOverlayView(context: Context) : View(context) {
     }
 
     /**
-     * Reports whether [probe] would overlap any other unit's box.
+     * Groups boxes that touch and gives each group one shared panel colour.
      *
-     * Overlap groups are not used for this: only pairs whose intersection is thin are treated as a
-     * collision, so a long paragraph and the line directly beneath it do not cancel each other's
-     * growth.
+     * Dialogue drawn as a stack of lines is a column of boxes that overlap by a few pixels, and
+     * each one samples the control it sits on slightly differently — sampling noise alone can put
+     * two adjacent lines a visible step apart. Painted independently they read as separate cards
+     * stacked on a background they clearly share.
+     *
+     * Union-find over the intersecting boxes, then one averaged colour per group, so a run of
+     * lines that form a single control is painted as that control. Growth is deliberately not
+     * affected here: overlapping neighbours are the normal case, and cancelling one box's growth
+     * on account of the next is what made a column of lines go ragged.
      */
-    private fun collidesWithOtherBox(probeLeft: Float, probeTop: Float, probeRight: Float, probeBottom: Float): Boolean {
-        val probe = RectF(probeLeft, probeTop, probeRight, probeBottom)
-        return renderItems.any { other ->
-            if (other.item.left == probeLeft.toInt() && other.item.top == probeTop.toInt()) return@any false
-            val rect = other.boxRect()
-            if (!RectF.intersects(probe, rect)) return@any false
-            val overlapX = minOf(probe.right, rect.right) - maxOf(probe.left, rect.left)
-            val overlapY = minOf(probe.bottom, rect.bottom) - maxOf(probe.top, rect.top)
-            overlapX > 2f && overlapY > 2f
+    private fun buildOverlapGroups() {
+        if (renderItems.isEmpty()) { itemGroups = emptyList(); groupColors = emptyList(); return }
+        val parent = IntArray(renderItems.size) { it }
+        fun find(value: Int): Int { var x = value; while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x] }; return x }
+        fun union(a: Int, b: Int) { val rootA = find(a); val rootB = find(b); if (rootA != rootB) parent[rootB] = rootA }
+        for (i in renderItems.indices) {
+            val a = renderItems[i].boxRect()
+            for (j in i + 1 until renderItems.size) if (RectF.intersects(a, renderItems[j].boxRect())) union(i, j)
+        }
+        val rootToGroup = linkedMapOf<Int, Int>(); val groups = IntArray(renderItems.size)
+        renderItems.indices.forEach { index -> val root = find(index); groups[index] = rootToGroup.getOrPut(root) { rootToGroup.size } }
+        itemGroups = groups.toList()
+        val sums = Array(rootToGroup.size) { FloatArray(4) }
+        renderItems.forEachIndexed { index, item ->
+            val group = itemGroups[index]
+            val color = paintedPanelColor(item.item.backgroundColor)
+            sums[group][0] = sums[group][0] + Color.red(color)
+            sums[group][1] = sums[group][1] + Color.green(color)
+            sums[group][2] = sums[group][2] + Color.blue(color)
+            sums[group][3] = sums[group][3] + 1f
+        }
+        groupColors = sums.map { sum ->
+            val count = sum[3].coerceAtLeast(1f)
+            Color.rgb((sum[0] / count).toInt().coerceIn(0, 255), (sum[1] / count).toInt().coerceIn(0, 255), (sum[2] / count).toInt().coerceIn(0, 255))
         }
     }
 
-    private fun normalizeParagraph(text: String): String = text.replace("\r\n", "\n").replace('\r', '\n').split('\n').joinToString("\n") { it.replace(Regex("[ \\t]+"), " ").trim() }.trim()
+    /**
+     * Flattens a translated block into a single run of text.
+     *
+     * Line breaks coming back from the translator are treated as plain whitespace rather than as
+     * structure. DeepL has no notion of the game's line layout - it translates a line of
+     * Japanese and returns a sentence, and it is free to return that sentence broken across
+     * lines wherever it likes. Honouring those breaks produced the opposite of what the panel
+     * wants: a sentence that would have fitted on one line arrived pre-split into three short
+     * ones, which needed a taller panel, and that taller panel then squeezed the block
+     * underneath it.
+     *
+     * The source is a Japanese or Chinese line, which carries no meaningful break of its own,
+     * so there is nothing to preserve. wrapText decides the line breaks from the width that
+     * was actually available.
+     */
+    private fun normalizeParagraph(text: String): String = text.replace(Regex("[\\s]+"), " ").trim()
 
     private fun wrapText(text: String, maxWidth: Float, textSize: Float): List<String> {
         textPaint.textSize = textSize
@@ -464,6 +507,8 @@ class TranslationOverlayView(context: Context) : View(context) {
 
     override fun onDetachedFromWindow() {
         renderItems = emptyList()
+        itemGroups = emptyList()
+        groupColors = emptyList()
         super.onDetachedFromWindow()
     }
 }
