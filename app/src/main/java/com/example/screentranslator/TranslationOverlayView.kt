@@ -94,6 +94,7 @@ class TranslationOverlayView(context: Context) : View(context) {
     ) { fun boxRect() = RectF(left, top, right, bottom) }
     private var renderItems: List<RenderItem> = emptyList()
     private var itemGroups: List<Int> = emptyList()
+    private var groupRects: List<RectF> = emptyList()
     private var groupColors: List<Int> = emptyList()
     private var sourceWidth = 1
     private var sourceHeight = 1
@@ -149,6 +150,7 @@ class TranslationOverlayView(context: Context) : View(context) {
     fun clearTranslations() {
         renderItems = emptyList()
         itemGroups = emptyList()
+        groupRects = emptyList()
         groupColors = emptyList()
         visibility = View.GONE
         invalidate()
@@ -161,15 +163,19 @@ class TranslationOverlayView(context: Context) : View(context) {
         val scaleY = height.toFloat() / sourceHeight.toFloat()
         val coordinateOffsetY = if (toleranceRatio > 1.5f) klipStatusBarOffsetPx() else 0f
 
-        renderItems.forEachIndexed { index, renderItem ->
-            val left = renderItem.left * scaleX
-            val top = renderItem.top * scaleY + coordinateOffsetY
-            val right = renderItem.right * scaleX
-            val bottom = renderItem.bottom * scaleY + coordinateOffsetY
+        // One patch per group, not per box. A column of stacked lines is a single control, so it
+        // gets a single background; drawing each line's own rounded rect left visible seams and
+        // read as a stack of separate cards. The text pass below still runs per item.
+        groupRects.forEachIndexed { index, rect ->
+            if (index >= groupColors.size) return@forEachIndexed
+            val left = rect.left * scaleX
+            val top = rect.top * scaleY + coordinateOffsetY
+            val right = rect.right * scaleX
+            val bottom = rect.bottom * scaleY + coordinateOffsetY
             if (right <= left || bottom <= top) return@forEachIndexed
             val box = RectF(left, top, right, bottom)
             val radius = ((bottom - top) * 0.12f).coerceIn(2f, 7f)
-            drawPanel(canvas, box, effectivePanelColor(index, renderItem.item.backgroundColor), radius)
+            drawPanel(canvas, box, groupColors[index], radius)
         }
 
         renderItems.forEachIndexed { index, renderItem ->
@@ -440,24 +446,33 @@ class TranslationOverlayView(context: Context) : View(context) {
      * two adjacent lines a visible step apart. Painted independently they read as separate cards
      * stacked on a background they clearly share.
      *
-     * Union-find over the intersecting boxes, then one averaged colour per group, so a run of
-     * lines that form a single control is painted as that control. Growth is deliberately not
-     * affected here: overlapping neighbours are the normal case, and cancelling one box's growth
-     * on account of the next is what made a column of lines go ragged.
+     * Only a *vertical* stack counts. Dialogue set as a column of lines, and a paragraph set as
+     * a block, are both one control and want one patch; two controls that merely sit side by side
+     * are two controls, and merging their patches would erase a boundary the player relies on to
+     * tell them apart. Grouping therefore needs a real vertical run — a neighbour whose top sits
+     * above this box's bottom and whose left edge lines up — not just any intersection.
+     *
+     * The patch of a group is the union of its boxes, drawn once. The text inside stays per item:
+     * each line keeps its own translation, its own width and its own alignment, and only the
+     * background they sit on is shared.
      */
     private fun buildOverlapGroups() {
-        if (renderItems.isEmpty()) { itemGroups = emptyList(); groupColors = emptyList(); return }
+        if (renderItems.isEmpty()) { itemGroups = emptyList(); groupRects = emptyList(); groupColors = emptyList(); return }
         val parent = IntArray(renderItems.size) { it }
         fun find(value: Int): Int { var x = value; while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x] }; return x }
         fun union(a: Int, b: Int) { val rootA = find(a); val rootB = find(b); if (rootA != rootB) parent[rootB] = rootA }
         for (i in renderItems.indices) {
             val a = renderItems[i].boxRect()
-            for (j in i + 1 until renderItems.size) if (RectF.intersects(a, renderItems[j].boxRect())) union(i, j)
+            for (j in i + 1 until renderItems.size) {
+                val b = renderItems[j].boxRect()
+                if (RectF.intersects(a, b) && stacksVertically(a, b)) union(i, j)
+            }
         }
         val rootToGroup = linkedMapOf<Int, Int>(); val groups = IntArray(renderItems.size)
         renderItems.indices.forEach { index -> val root = find(index); groups[index] = rootToGroup.getOrPut(root) { rootToGroup.size } }
         itemGroups = groups.toList()
         val sums = Array(rootToGroup.size) { FloatArray(4) }
+        val bounds = Array(rootToGroup.size) { RectF() }
         renderItems.forEachIndexed { index, item ->
             val group = itemGroups[index]
             val color = paintedPanelColor(item.item.backgroundColor)
@@ -465,11 +480,35 @@ class TranslationOverlayView(context: Context) : View(context) {
             sums[group][1] = sums[group][1] + Color.green(color)
             sums[group][2] = sums[group][2] + Color.blue(color)
             sums[group][3] = sums[group][3] + 1f
+            val box = item.boxRect()
+            val target = bounds[group]
+            if (sums[group][3] == 1f) { target.set(box) } else {
+                target.left = minOf(target.left, box.left); target.top = minOf(target.top, box.top)
+                target.right = maxOf(target.right, box.right); target.bottom = maxOf(target.bottom, box.bottom)
+            }
         }
+        groupRects = bounds.toList()
         groupColors = sums.map { sum ->
             val count = sum[3].coerceAtLeast(1f)
             Color.rgb((sum[0] / count).toInt().coerceIn(0, 255), (sum[1] / count).toInt().coerceIn(0, 255), (sum[2] / count).toInt().coerceIn(0, 255))
         }
+    }
+
+    /**
+     * Whether two boxes are stacked in a column rather than sitting side by side.
+     *
+     * Side by side is two controls; one above the other is one control shown as several lines.
+     * The left edges have to agree, so a caption to the right of a dialogue box is never folded
+     * into it even when the two touch.
+     */
+    private fun stacksVertically(a: RectF, b: RectF): Boolean {
+        val overlapX = minOf(a.right, b.right) - maxOf(a.left, b.left)
+        if (overlapX <= 0f) return false
+        val narrower = minOf(a.width(), b.width())
+        val overlapY = minOf(a.bottom, b.bottom) - maxOf(a.top, b.top)
+        val verticalRun = a.top < b.top || b.top < a.top
+        // Touching counts, and a small vertical gap is the normal line pitch of a control.
+        return verticalRun && overlapX >= narrower * 0.5f && overlapY >= -narrower * 0.75f
     }
 
     /**
@@ -508,6 +547,7 @@ class TranslationOverlayView(context: Context) : View(context) {
     override fun onDetachedFromWindow() {
         renderItems = emptyList()
         itemGroups = emptyList()
+        groupRects = emptyList()
         groupColors = emptyList()
         super.onDetachedFromWindow()
     }

@@ -2,7 +2,7 @@
 
 > **Scope:** catatan kerja perubahan tampilan mode Manual (overlay menyatu dengan game) dan mode Klip (desain minimalis). Mode Real-Time di luar scope.
 > **Aturan konteks:** gunakan file ini sebagai konteks utama untuk task ini. Jangan meminta pembacaan README, AI handoff, atau catatan proyek lain untuk memahami rencana ini.
-> **Status:** Tahap 0 selesai. Tahap 1 selesai ditulis; 4 siklus test perangkat (2026-09-25/26) — siklus 1–3 diperbaiki di Tahap 1b/1c/1d, menunggu test ulang. Tahap 2–3 belum dimulai. Tahap 4 ditunda (riset).
+> **Status:** Tahap 0 selesai. Tahap 1 selesai ditulis; 5 siklus test perangkat (2026-09-25/26) — Tahap 1b/1c/1d sudah terverifikasi benar oleh user (paragraf sesuai), 1e menunggu test. Tahap 2–3 belum dimulai. Tahap 4 ditunda (riset).
 > **Build policy:** APK **tidak pernah** dibangun lokal — keputusan user, bukan kekurangan setup. Build hanya via GitHub Actions, lalu user tes di perangkat. Yang boleh: type-check Kotlin terisolasi via compiler di Gradle cache (ringan, detik) untuk menangkap error sebelum CI.
 
 ## Keputusan yang sudah selesai
@@ -51,8 +51,9 @@ Status: [CODE DONE] menunggu build + test perangkat.
 - [ ] **Semua panel:** teks selalu punya outline, tidak pernah fill polos tanpa tepi.
 - [ ] **Layar manyaragraf:** semua paragraf punya ukuran font yang konsisten satu sama lain;
   tidak ada satu paragraf tiba-tiba sangat kecil sementara di atasnya besar.
-- [ ] **Kalimat berdempet vertikal:** tidak saling rebut ruang; panel boleh menutupi, dan warnanya
-  menyatu satu sama lain (satu kelompok) alih-alih kartu-kartu berbeda warna.
+- [ ] **Kalimat berdempet vertikal:** tidak saling rebut ruang; panel menyatu jadi satu patch
+  tanpa seam/garis bulat di antaranya, dan warnanya seragam.
+- [ ] **Dua control berdampingan:** batas antar keduanya tetap terlihat (tidak ter-merge).
 - [ ] **Tidak ada baris nyasar:** kalimat tidak terpotongBecome beberapa baris pendek padahal
   ruang horizontal masih lega.
 
@@ -134,6 +135,28 @@ saling rebut boundary box sehingga sebagian kecil / menumpuk.
   Warna grup juga dipakai untuk算 kontras teks (`effectivePanelColor`), jadi panel dan teks
   selalu sepakat soal warna yang benar-benar dicat. Growth **tidak** terpengaruh oleh pengelompokan.
 
+### Tahap 1e — Boundary menyatu untuk kolom vertikal (2026-09-26)
+
+Status: [CODE DONE] terverifikasi 0 error compile (Kotlin 1.9.22 lokal, JDK 17).
+
+Tahap 1d menyamakan **warna** antar-box yang overlap, tapi tiap baris masih menggambar panel
+rounded-rect-nya sendiri sehingga seam dan garis bulat terlihat di antaranya — terbaca sebagai
+kartu bertumpuk, bukan satu panel. Paragraf sudah sesuai; yang tersisa adalah kalimat berdempet
+vertikal.
+
+- [x] **Satu panel per grup.** `buildOverlapGroups` kini juga menghitung **union rect** tiap
+  kelompok, dan `onDraw` menggambar **satu** rounded-rect per kelompok, bukan satu per item.
+  Teks **tetap per item** (diusulkan user): tiap baris mempertahankan terjemahan, lebar,
+  alignment, dan paddingnya sendiri — yang disatukan hanya background di bawahnya.
+- [x] **Pengelompokan dipersempit jadi kolom vertikal saja** (`stacksVertically`). Sebelumnya
+  *intersection apa pun* dianggap satu kelompok, sehingga dua control yang berdampingan bisa
+  ikut ter.merge dan batas yang relied pemain untuk membedakan keduanya ikut hilang. Sekarang
+  syaratnya: overlap horizontal ≥ 50% lebar yang lebih sempit, ada urutan vertikal (a.top
+  berbeda dari b.top), dan jarak vertikal ≤ 0.75× lebar. Caption di sebelah kanan kotak dialog
+  karena itu tidak pernah ikutovich-even Though sentuhnya.
+- [x] Warna grup tetap jadi sumber warna panel **dan** guard kontras teks (`effectivePanelColor`),
+  jadi yang digambar dan yang dinilai kontras selalu warna yang sama.
+
 ### Tahap 2 — Manual: patch penuh
 
 Status: [TODO] Tujuan: area di bawah teks tidak terlihat sebagai kotak blok.
@@ -193,6 +216,7 @@ Spesifikasi:
 - 2026-09-25 Tahap 1b: hasil test perangkat men perteneciente dua cacat render, bukan cacat sampling. (1) Panel tidak pernah tumbuh vertikal untuk mode Manual (`toleranceRatio=1`), jadi terjemahan yang wrap meluber ke bawah patch dan menimpa teks asli — tidak ada `clipRect` di app saat itu. (2) Kontras fill diukur terhadap warna background asli, padahal `drawPanel` mengecat panel lebih gelap (0.62x) untuk panel terang; hasilnya fill game bisa menyatu dengan panelnya sendiri. Outline juga bisa mati justru ketika sampling dipercaya, padahal jalur fallback selalu menggambarnya. Semua diperbaiki di `TranslationOverlayView.kt`; `paintedPanelColor()` sekarang satu-satunya sumber warna panel.
 - 2026-09-25 Tahap 1c: test atas build `b32d261` (Actions #355) menunjukkan font size antar-paragraf tidak konsisten — paragraf panjang memaksa paragraf di bawahnya menyusut secara independen per item (`fitScale` dihitung per paragraf), sehingga hasilnya zig-zag acak dan sebagian teks jadi sangat kecil. Dipecah jadi dua pass: `measureItem` mengukur, `uniformScaleFor` memilih satu skala terkecil yang perlu di seluruh layar, `buildRenderItem` menerapkannya ke semua item. Konsekuensi yang disepakati user: terjemahan panjang boleh meluber dari panelnya sendiri, asalkan tidak mengorbankan paragraf lain. Catatan: `buildOverlapGroups()` yang ada di branch `debugging` hilang di branch ini — ia menyamakan **warna** antar-box overlap, bukan ukuran.
 - 2026-09-26 Tahap 1d: review atas `980c7bd` menemukan dua hal. (1) `normalizeParagraph` mempertahankan `\n` dari DeepL sebagai baris baru, padahal DeepL memecah kalimat sesuka hatinya → kalimat muat 1 baris jadi 3 baris pendek, panel makin tinggi, paragraf bawah makin sempit. Diubah: `\n` jadi whitespace biasa. Diagnosis awal sempat salah mengaitkannya ke prompt OpenRouter; provider yang dipakai DeepL. (2) `collidesWithOtherBox` membuat box yang tumbuhokersors ruang saat nabrak box lain — untuk kolom dialog berdempet vertikal tiap baris saling mengalah, diperparah oleh pertumbuhan vertikal Tahap 1b. Overlap adalah kondisi normal teks berdempet, jadi logikanya dihapus; `buildOverlapGroups()` (union-find) dari `debugging` dikembalikan untuk menyamakan **warna** panel antar-box overlap, dan warnanya juga dipakai untuk guard kontras teks.
+- 2026-09-26 Tahap 1e: 1d menyamakan warna tapi tiap baris masih menggambar panel sendiri, jadi seam + garis bulat membuatnya terbaca sebagai kartu bertumpuk. `buildOverlapGroups` kini menghitung union rect per kelompok dan `onDraw` menggambar satu panel per kelompok; teks tetap per item sesuai usulan user (tiap baris punya terjemmaan, lebar, alignment sendiri — hanya background yang/shared). Pengelompokan dipersempit ke kolom vertikal saja lewat `stacksVertically` (overlap X ≥ 50% lebar sempit, ada urutan vertikal, jarak vertikal ≤ 0.75× lebar) supaya dua control berdampingan tidak ikut ter-merge dan batas yang membedakan keduanya tetap ada.
 
 
 ## Aturan kerja untuk sesi berikutnya
