@@ -19,8 +19,8 @@ data class DetectedText(
     val sourceTextSizePx: Float = 0f,
     val backgroundColor: Int = android.graphics.Color.BLACK,
     val orientation: TextLayoutAnalyzer.WritingOrientation = TextLayoutAnalyzer.WritingOrientation.HORIZONTAL,
-    val glyphStyle: TextLayoutAnalyzer.GlyphStyle? = null,
-    val alignment: TextLayoutAnalyzer.TextAlignment = TextLayoutAnalyzer.TextAlignment.CENTER
+    val alignment: TextLayoutAnalyzer.TextAlignment = TextLayoutAnalyzer.TextAlignment.CENTER,
+    val patchSample: TextLayoutAnalyzer.PatchSample? = null
 )
 
 class OcrManager(sourceLanguage: String) {
@@ -45,19 +45,19 @@ class OcrManager(sourceLanguage: String) {
                 if (blockText.isBlank()) continue
                 if (TextLayoutAnalyzer.isVerticalBlock(block)) {
                     val layout = TextLayoutAnalyzer.analyze(bitmap, block)
-                    if (layout != null) detectedTexts.add(DetectedText(TextLayoutAnalyzer.verticalBlockText(block), layout.left, layout.top, layout.right, layout.bottom, layout.sourceTextSizePx, layout.backgroundColor, TextLayoutAnalyzer.WritingOrientation.VERTICAL, layout.glyphStyle))
+                    if (layout != null) detectedTexts.add(DetectedText(TextLayoutAnalyzer.verticalBlockText(block), layout.left, layout.top, layout.right, layout.bottom, layout.sourceTextSizePx, layout.backgroundColor, TextLayoutAnalyzer.WritingOrientation.VERTICAL, patchSample = layout.patchSample))
                     continue
                 }
                 if (TextLayoutAnalyzer.shouldTreatAsParagraph(block)) {
                     val layout = TextLayoutAnalyzer.analyze(bitmap, block)
-                    if (layout != null) { detectedTexts.add(DetectedText(blockText, layout.left, layout.top, layout.right, layout.bottom, layout.sourceTextSizePx, layout.backgroundColor, layout.orientation, layout.glyphStyle, layout.alignment)); paragraphCount++ }
+                    if (layout != null) { detectedTexts.add(DetectedText(blockText, layout.left, layout.top, layout.right, layout.bottom, layout.sourceTextSizePx, layout.backgroundColor, layout.orientation, layout.alignment, layout.patchSample)); paragraphCount++ }
                 } else {
                     for (line in block.lines) {
                         val lineText = line.text.trim()
                         if (lineText.isBlank()) continue
                         val layout = TextLayoutAnalyzer.analyze(bitmap, line) ?: continue
                         if (layout.orientation == TextLayoutAnalyzer.WritingOrientation.VERTICAL) verticalCandidates.add(VerticalCandidate(lineText, line.boundingBox ?: continue, layout))
-                        else { detectedTexts.add(DetectedText(lineText, layout.left, layout.top, layout.right, layout.bottom, layout.sourceTextSizePx, layout.backgroundColor, layout.orientation, layout.glyphStyle, layout.alignment)); lineCount++ }
+                        else { detectedTexts.add(DetectedText(lineText, layout.left, layout.top, layout.right, layout.bottom, layout.sourceTextSizePx, layout.backgroundColor, layout.orientation, layout.alignment, layout.patchSample)); lineCount++ }
                     }
                 }
             }
@@ -65,7 +65,7 @@ class OcrManager(sourceLanguage: String) {
             for (group in verticalGroups) {
                 val layout = mergeVerticalLayouts(group) ?: continue
                 val text = group.sortedByDescending { it.box.centerX() }.joinToString("") { it.text }.trim()
-                if (text.isNotBlank()) detectedTexts.add(DetectedText(text, layout.left, layout.top, layout.right, layout.bottom, layout.sourceTextSizePx, layout.backgroundColor, TextLayoutAnalyzer.WritingOrientation.VERTICAL, layout.glyphStyle))
+                if (text.isNotBlank()) detectedTexts.add(DetectedText(text, layout.left, layout.top, layout.right, layout.bottom, layout.sourceTextSizePx, layout.backgroundColor, TextLayoutAnalyzer.WritingOrientation.VERTICAL, patchSample = layout.patchSample))
             }
             perfTrace?.mark("mlkit_result blocks=${visionText.textBlocks.size} lines=${visionText.textBlocks.sumOf { it.lines.size }}")
             perfTrace?.mark("ocr_geometry_complete paragraphs=$paragraphCount lines=$lineCount verticalGroups=${verticalGroups.size} detected=${detectedTexts.size}")
@@ -89,7 +89,15 @@ class OcrManager(sourceLanguage: String) {
     }
     private fun mergeVerticalLayouts(group: List<VerticalCandidate>): TextLayoutAnalyzer.Result? {
         if (group.isEmpty()) return null
-        return TextLayoutAnalyzer.Result(group.minOf { it.layout.left }, group.minOf { it.layout.top }, group.maxOf { it.layout.right }, group.maxOf { it.layout.bottom }, group.map { it.layout.sourceTextSizePx }.average().toFloat(), group.first().layout.backgroundColor, TextLayoutAnalyzer.WritingOrientation.VERTICAL, group.first().layout.glyphStyle)
+        // A merged column is several stacked boxes, so the top band comes from the topmost member
+        // and the bottom band from the bottommost one. Averaging all of them instead would let a
+        // single mid-column bubble dominate the gradient of the whole panel.
+        val ordered = group.sortedBy { it.box.top }
+        val patchSample = TextLayoutAnalyzer.PatchSample(
+            topColor = ordered.first().layout.patchSample?.topColor ?: group.first().layout.backgroundColor,
+            bottomColor = ordered.last().layout.patchSample?.bottomColor ?: group.first().layout.backgroundColor
+        )
+        return TextLayoutAnalyzer.Result(group.minOf { it.layout.left }, group.minOf { it.layout.top }, group.maxOf { it.layout.right }, group.maxOf { it.layout.bottom }, group.map { it.layout.sourceTextSizePx }.average().toFloat(), group.first().layout.backgroundColor, TextLayoutAnalyzer.WritingOrientation.VERTICAL, patchSample = patchSample)
     }
     fun close() {
         recognizer.close()

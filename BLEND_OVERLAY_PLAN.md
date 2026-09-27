@@ -34,12 +34,12 @@ Status: [DONE]
 
 Status: [CODE DONE] menunggu build + test perangkat.
 
-- [x] **Sampling gaya glyph** di `TextLayoutAnalyzer`: piksel interior box di-grid (~192 sampel), di-split oleh luminance dengan k-means 3 cluster. Cluster terjauh dari median background = fill; cluster di antaranya = stroke bila jaraknya dari background ≥ 15 dan dari fill ≥ 40 (kalau tidak, dianggap bukan outline dan tidak digambar). Cluster < 4% sampel di-merge ke tetangga terdekat. Box satu warna → `null` → fallback.
-- [x] `TranslationOverlayItem`/`DetectedText` membawa `glyphStyle` dan `alignment` dari analyzer lewat pipeline.
-- [x] **Render outline:** `FILL_AND_STROKE`, `strokeWidth = 4.5%` ukuran teks hasil render (≈5% glyph height), `strokeJoin = ROUND`.
+- [x] ~~**Sampling gaya glyph** di `TextLayoutAnalyzer`~~ — **DIBATALKAN di Tahap 2.** Clustering k-means + `GlyphStyle` dihapus seluruhnya karena teks Manual sekarang selalu hitam/putih solid (lihat Tahap 2). Riwayat implementasi tetap dicatat di sini sebagai rujukan.
+- [x] `TranslationOverlayItem`/`DetectedText` membawa `alignment` dan `patchSample` dari analyzer lewat pipeline.
+- [x] **Render outline:** dua pass terpisah (`STROKE` lalu `FILL`), `strokeWidth = 4.5%` ukuran teks hasil render, `strokeJoin = ROUND`. Bukan `FILL_AND_STROKE`: satu Paint hanya punya satu warna, jadi `FILL_AND_STROKE` hanya bisa outline dengan warna fill-nya sendiri.
 - [x] **Render drop shadow:** `setShadowLayer(radius 3% textSize, offset 1.8% textSize, hitam 40%)`. Teks tidak butuh software layer (shadow text didukung hardware canvas di semua API ≥ 24).
 - [x] **Alignment:** dari bounding box baris ML Kit — spread kiri ≤ 0.5 glyph → LEFT; spread kanan ≤ 0.5 glyph → RIGHT; selain itu CENTER. Multi-line block saja; single line dan bubble vertikal tetap CENTER. Diterapkan per baris hasil wrap.
-- [x] Guard kontras: fill dari sampling dipakai bila `separation ≥ 60` luminance dari warna patch; kalau tidak → fallback putih/hitam + outline kontras selalu aktif. Stroke sampling hanya dipakai bila kontras fill ≥ 40; kalau tidak, stroke fallback (fill terang → hitam, fill gelap → putih).
+- [x] ~~Guard kontras berbasis `separation`~~ — **DIBATALKAN di Tahap 2.** Kontras kini dihitung terhadap warna panel yang benar-benar dicat (lihat Tahap 2), bukan terhadap sampling warna glyph.
 - [x] Ukuran/wrap/collision/layout tidak diubah di Tahap ini.
 
 **Checklist test (user):** — terverifikasi di perangkat s.d. `5210af7` kecuali yang bertanda.
@@ -51,8 +51,8 @@ Status: [CODE DONE] menunggu build + test perangkat.
   seam/garis bulat, warnanya seragam.
 - [x] Tidak ada baris nyasar: kalimat tidak terpecah jadi beberapa baris pendek padahal ruang
   horizontal masih lega.
-- [ ] Dialog box gelap: outline gelap + shadow, fill meniru warna teks asli.
-- [ ] Panel/button terang: teks tetap kontras (tidak "tenggelam").
+- [ ] ~~Dialog box gelap: outline gelap + shadow, fill meniru warna teks asli.~~ **Tidak berlaku lagi** — sejak Tahap 2 fill selalu hitam/putih solid. Ganti jadi: "Dialog box gelap: teks putih solid + outline hitam, tetap terbaca."
+- [ ] Panel/button terang: teks tetap kontras (tidak "tenggelam"). **Penting di Tahap 2** — panel sekarang bergradien, jadi kontras dihitung terhadap stop gradien yang paling buruk, bukan warna rata.
 - [ ] Teks asli rata kiri → terjemahan juga rata kiri; yang center tetap center.
 - [ ] Dua control berdampingan: batas antar keduanya tetap terlihat (tidak ter-merge).
 - [ ] Bubble vertikal JP: tetap terbaca, outline tidak membuat huruf "tebal berlebihan".
@@ -132,7 +132,7 @@ saling rebut boundary box sehingga sebagian kecil / menumpuk.
 - [x] **`buildOverlapGroups()` dikembalikan** dari `debugging` (union-find).kotak yang
   bersinggungan dijadikan satu kelompok dengan **warna panel dirata-ratakan**, jadi deretan baris
   dari satu control digambar sebagai satu control — bukan kartu-kartu dengan warna berbeda.
-  Warna grup juga dipakai untuk算 kontras teks (`effectivePanelColor`), jadi panel dan teks
+  Warna grup juga dipakai untuk menghitung kontras teks (`effectivePanelColor`), jadi panel dan teks
   selalu sepakat soal warna yang benar-benar dicat. Growth **tidak** terpengaruh oleh pengelompokan.
 
 ### Tahap 1e — Boundary menyatu untuk kolom vertikal (2026-09-26)
@@ -206,21 +206,33 @@ kiri teks sumber dan terbaca salah tempat.
 
 ### Tahap 2 — Manual: patch penuh
 
-Status: [TODO] Tujuan: area di bawah teks tidak terlihat sebagai kotak blok.
+Status: [SELESAI — menunggu verifikasi perangkat] Tujuan: area di bawah teks tidak terlihat sebagai kotak blok.
 **Catatan:** Tahap 2 adalah soal patch terlihat *natural*, bukan soal patch *cukup menutup*.
 Keluhan "teks source masih terlihat" sudah ditangani di Tahap 1b lewat geometri.
 
-- [ ] **Gradient vertical:** ganti 1 warna rata dengan `LinearGradient` — median strip atas ~15% dan strip bawah ~15% dari interior box (dialog box game umumnya bergradient).
-- [ ] **Feather edge:** tepi panel di-blur ±2–3px (scaled) supaya batas kotak tidak keras. Cara utama: `LAYER_TYPE_SOFTWARE` pada `TranslationOverlayView` + `BlurMaskFilter`. Bila frame turun → fallback: 2–3 cincin rounded-rect dengan alpha menurun.
-- [ ] **Deteksi UI-box vs scene art:** stddev piksel interior. Rendah (uniform) → cukup gradient patch. Tinggi → lanjut ke tier-2.
-- [ ] **Tier-2 scene-art patch:** ambil strip piksel tepat di kiri & kanan box, stretch/mirror masuk ke dalam box (render ke bitmap via software canvas), blur ringan, lalu feather. Tujuan: teks yang menempel di atas gambar scene tidak memblok scene dengan warna solid.
-- [ ] Border: pertahankan rules sekarang (hanya panel terang, alpha rendah) sebagai fallback kontras; feather membuatnya makin jarang perlu.
+- [x] **Gradient vertical:** ganti 1 warna rata dengan `LinearGradient` — median strip atas ~15% dan strip bawah ~15% dari interior box (dialog box game umumnya bergradient). Ketiga stop adalah blend RGB opaque; panel tetap digambar di alpha 255, jadi tidak adajeu yang tembus.
+- [x] **Feather edge:** cincin `Paint.Style.STROKE` dengan `strokeWidth = 2 × feather` (4–6px) di-*inset* sebesar `feather` (2–3px), lalu di-blur. Di-inset sebesar setengah lebar stroke supaya tepi stroke tepat flush dengan tepi panel — tidak ada satu pun piksel game yang belum tertutup panel yang bisa terkena blur. Cincin memakai `LinearGradient` yang sama dengan isi panel, kalau tidak tepi 4–6px itu jadi garis rata yang hard-step melawan gradien yang seharusnya dilembutkan. Fallback bentuk rounded-rect dipakai, jadi degrade di hardware canvas (mask filter diabaikan) tetap aman.
+- [x] **Deteksi UI-box vs scene art:** *dibatalkan.* Standar-deviasi interior tidak membedakan UI-box dari scene art secara reliable di layar game, dan ambangnya jadi konstanta yang tak terjustifikasi.
+- [x] **Tier-2 scene-art patch:** *dibatalkan.* Butuh piksel asli di dalam box, sedangkan yang tersedia hanya sampling+BBM. Versi yang sempat ditulis (menyalin strip kiri/kanan melebar) hanya menghasilkan coretan 1-D, bukan scene — lebih buruk daripada patch solid. Butuh bitmap capture hidup di pipeline; lihat "Utang terbuka".
+- [x] Border: pertahankan rules sekarang (hanya panel terang, alpha rendah) sebagai fallback kontras.
+- [x] Teks terjemahan: fill dan outline keduanya hitam/putih solid (permintaan eksplisit user), bukan warna glyph yang di-sampling. `GlyphStyle` beserta seluruh jalur sampling-nya dihapus karena tidak lagi dipakai.
+- [x] **Kontras teks dihitung dari rasio WCAG, bukan ambang tetap.** Panel bergradien tidak punya "satur warna", jadi ambang tetap (luminance 150) tidak berlaku: hitam dan putih tidak simetris — teks hitam baru terbaca di luminance ~80, sementara teks putih pelan-pelan memburuk seiring panel menjadi terang. `chooseTextColor` sekarang menghitung rasio kontras hitam vs putih terhadap stop **paling buruk** gradien dan memilih yang menang. Ini identik dengan ambang lama saat panel rata, dan selalu lebih baik saat bergradien. Drift gradien sendiri tetap dikunci `maxGradientDrift` (22 luminance) supaya panel tidak pernah menyapu seluruh rentang nada.
+  - Diverifikasi numerik: 297 kombinasi (11 luminance panel × 9 sampel × 3 skenario arah gradien) → **0 kasus di bawah 3:1**. Kasus balasan review (stop 30→80→200) dan kasus yang gagal pada versi ambang-150 (panel luminance 42) keduanya benar pada implementasi ini.
+- [x] **Sampel patch diagregasi per group, bukan "item pertama yang beririsan".** Dialog 3 baris adalah satu panel: kalau gradien diambil dari baris pertama, `bottomColor` jadi warna tepi bawah baris atas yang diregangkan ke dua baris lain. Aturannya sama dengan `mergeVerticalLayouts` di `OcrManager`: atas dari anggota teratas, bawah dari anggota terbawah. Bug ini juga bisa tertukar sampel dari group lain yang kebetulan beririsan.
+- [x] `sampleInterior` kini menghasilkan `SampleGrid` (satu `IntArray` per baris) sehingga pita atas/bawah diturunkan dari grid yang sama — bitmap dilewati **sekali** per box, bukan tiga kali. `backgroundColor` terverifikasi identik dengan versi lama pada 500 kasus acak.
 
-**Checklist test (user):**
+**Catatan performance:** `LAYER_TYPE_SOFTWARE` sengaja **tidak** dipasang. Overlay full-screen di software layer memaksa seluruh panel diraster di CPU tiap frame — risiko drop frame yang nyata, berlawanan dengan target "performa Manual tidak turun". `BlurMaskFilter` diabaikan pada hardware canvas, jadi cincin feather turun degrade menjadi garis inner biasa, bukan blur.
+
+**Review (subagent, read-only):** REQUEST CHANGES → 5 MAJOR ditangani. Putaran kedua: MAJOR "kontras gradien" **belum** benar pada perbaikan pertama — rata-rata stop extremes ternyata menghitung stop *tengah* (paling mudah dibaca), bukan terburuk, dan itu regresi dari warna rata. Diganti dengan rasio WCAG terhadap stop terburuk (lihat di atas) + harness numerik. Type-check terisolasi: `powershell -NoProfile -ExecutionPolicy Bypass -File .typecheck\check.ps1` → exit 0.
+
+**Checklist test (user):** — semua masih perlu dijalankan di perangkat
 - Dialog box bergradient: patch tidak terlihat sebagai persegi beda warna.
-- Teks di atas scene art (pohon/langit): scene tidak terblok solid, masih ada kontinuitas gambar.
 - Sudut/edge panel: tidak ada garis pemisah keras antara patch dan layar asli.
+- Teks terjemahan: putih solid di atas panel gelap, hitam solid di atas panel terang.
 - Performa Manual tidak turun terasa (frame capture → overlay).
+- ~~Teks di atas scene art~~ — tidak berlaku, tier-2 dibatalkan.
+
+**Utang terbuka:** scene-art continuity (Teks di atas pohon/langit) belum ada solusinya. Butuh keputusan: pertahankan bitmap capture sampai overlay selesai digambar, atau kirim potongan bitmap kecil per box. Keduanya menambah real memory cost pada jalur Manual.
 
 ### Tahap 3 — Klip: ink card minimalis
 

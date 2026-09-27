@@ -1,20 +1,28 @@
 package com.example.screentranslator
 
 import android.content.Context
+import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.Shader
 import android.graphics.Typeface
 import android.view.View
 import android.view.WindowInsets
-import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /** Renders translated OCR blocks while keeping screenshot coordinates 1:1. */
 class TranslationOverlayView(context: Context) : View(context) {
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; alpha = 255 }
+    private val featherPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; alpha = 255 }
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.2f }
+    private val featherRadiusRatio = 0.025f
+    /** How much of the sampled band-to-band luminance difference the gradient actually follows. */
+    private val gradientBlend = 0.45f
+    /** Hard cap on gradient drift, in luminance, so one panel can never span the full tonal range. */
+    private val maxGradientDrift = 22f
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
         color = Color.WHITE
@@ -69,32 +77,20 @@ class TranslationOverlayView(context: Context) : View(context) {
     private val leftSlideRatio = 0.20f
 
     /**
-     * Tahap 1 — glyph style thresholds.
+     * Tahap 1 — text stroke and shadow ratios.
      *
-     * The sampled fill is only trusted when it separates from the panel colour by this much
-     * luminance; below it the text was too low-contrast against its own background for the
-     * sampling to mean anything. The stroke is only drawn when it contrasts the fill clearly
-     * enough to read as an outline instead of a fat anti-aliasing rim.
+     * The stroke keeps a glyph legible on a panel that happens to sit close to the text colour,
+     * and the shadow lifts the glyph off whatever texture is behind the panel edge. Both scale
+     * with the rendered text size so a shrunken font gets a proportionally smaller rim.
      */
-    private val minFillSeparation = 60f
-    private val minStrokeContrast = 40f
     private val strokeWidthRatio = 0.045f
     private val shadowRadiusRatio = 0.03f
     private val shadowOffsetRatio = 0.018f
     private val shadowColor = Color.argb(102, 0, 0, 0)
 
-    /**
-     * Floor for the outline so translated text never loses its edge on a busy background.
-     *
-     * The sampled fill alone is not enough: it is trusted against the panel colour, and when it
-     * sits close to it the glyphs read as a smudge. A thin outline in whichever of black/white is
-     * further from the fill is invisible when it is wrong, and it is what keeps white text on a
-     * white panel or dark text on a dark panel legible.
-     */
-    private val minOutlineWidthRatio = 0.025f
-
     private data class RenderItem(
         val item: TranslationOverlayItem,
+        val patchSample: TextLayoutAnalyzer.PatchSample?,
         val left: Float,
         val top: Float,
         val right: Float,
@@ -108,6 +104,10 @@ class TranslationOverlayView(context: Context) : View(context) {
     private var itemGroups: List<Int> = emptyList()
     private var groupRects: List<RectF> = emptyList()
     private var groupColors: List<Int> = emptyList()
+    private var groupPatches: List<TextLayoutAnalyzer.PatchSample?> = emptyList()
+    // Repopulated every frame by drawPanel; the text pass reads it back so its contrast decision is
+    // made against the gradient stops that were really painted this frame.
+    private var paintedStops: Array<IntArray?> = emptyArray()
     private var sourceWidth = 1
     private var sourceHeight = 1
     private var toleranceRatio = 1f
@@ -132,7 +132,7 @@ class TranslationOverlayView(context: Context) : View(context) {
         // other paragraph down by the same amount rather than the one below it absorbing the cost.
         val measured = translations.mapNotNull { measureItem(it, this.sourceWidth, this.sourceHeight) }
         val uniformScale = uniformScaleFor(measured)
-        renderItems = measured.mapNotNull { buildRenderItem(it, this.sourceWidth, this.sourceHeight, uniformScale) }
+        renderItems = measured.mapNotNull { buildRenderItem(it, this.sourceHeight, uniformScale) }
         buildOverlapGroups()
         visibility = if (renderItems.isEmpty()) View.GONE else View.VISIBLE
         invalidate()
@@ -164,6 +164,8 @@ class TranslationOverlayView(context: Context) : View(context) {
         itemGroups = emptyList()
         groupRects = emptyList()
         groupColors = emptyList()
+        groupPatches = emptyList()
+        paintedStops = emptyArray()
         visibility = View.GONE
         invalidate()
     }
@@ -178,6 +180,13 @@ class TranslationOverlayView(context: Context) : View(context) {
         // One patch per group, not per box. A column of stacked lines is a single control, so it
         // gets a single background; drawing each line's own rounded rect left visible seams and
         // read as a stack of separate cards. The text pass below still runs per item.
+        //
+        // Each group's painted gradient stops are kept so the text pass can judge contrast against
+        // the colour it actually sits on. A panel is no longer one flat colour, and choosing the
+        // text colour from the pre-gradient average would let white text land on the lighter end of
+        // a gradient and sink into it.
+        val paintedStops = arrayOfNulls<IntArray>(groupRects.size)
+        this.paintedStops = paintedStops
         groupRects.forEachIndexed { index, rect ->
             if (index >= groupColors.size) return@forEachIndexed
             val left = rect.left * scaleX
@@ -187,7 +196,7 @@ class TranslationOverlayView(context: Context) : View(context) {
             if (right <= left || bottom <= top) return@forEachIndexed
             val box = RectF(left, top, right, bottom)
             val radius = ((bottom - top) * 0.12f).coerceIn(2f, 7f)
-            drawPanel(canvas, box, groupColors[index], radius)
+            paintedStops[index] = drawPanel(canvas, box, groupColors[index], radius, groupPatches.getOrNull(index))
         }
 
         renderItems.forEachIndexed { index, renderItem ->
@@ -218,7 +227,7 @@ class TranslationOverlayView(context: Context) : View(context) {
                     TextLayoutAnalyzer.TextAlignment.RIGHT -> (right - padding - lineWidth).coerceAtLeast(left + padding)
                     TextLayoutAnalyzer.TextAlignment.CENTER -> left + ((right - left - lineWidth) / 2f).coerceAtLeast(padding)
                 }
-                drawStyledLine(canvas, line, lineLeft, firstBaseline + lineIndex * lineHeight, renderItem.item, renderItem.textSize * scaleY, effectivePanelColor(index, renderItem.item.backgroundColor))
+                drawStyledLine(canvas, line, lineLeft, firstBaseline + lineIndex * lineHeight, renderItem.textSize * scaleY, textBackingLuminance(index))
             }
             canvas.restore()
         }
@@ -234,16 +243,35 @@ class TranslationOverlayView(context: Context) : View(context) {
         return inset.toFloat().coerceAtLeast(0f)
     }
 
-    private fun chooseTextColor(backgroundColor: Int): Int {
-        val luminance = 0.2126f * Color.red(backgroundColor) + 0.7152f * Color.green(backgroundColor) + 0.0722f * Color.blue(backgroundColor)
-        return if (luminance < 150f) Color.WHITE else Color.BLACK
+    /**
+     * Black or white, whichever contrasts more with the *worst* stop of the panel.
+     *
+     * A hard threshold is not enough once the panel is a gradient: the answer has to hold across the
+     * whole range the gradient covers, not just at its midpoint. Black and white are not symmetric —
+     * black text needs roughly luminance 80 to be readable, while white text degrades smoothly as
+     * the panel lightens — so "which side of 150" is not the same question as "which reads better".
+     * Both candidates are scored against the stop that favours them least and the better one wins,
+     * which is a strict improvement on thresholding for every input, and identical to it when the
+     * panel is flat.
+     */
+    private fun chooseTextColor(backingLuminance: Float): Int {
+        val blackRatio = contrastRatio(0f, backingLuminance)
+        val whiteRatio = contrastRatio(255f, backingLuminance)
+        return if (whiteRatio >= blackRatio) Color.WHITE else Color.BLACK
+    }
+
+    /** WCAG relative-contrast ratio between two luminances. */
+    private fun contrastRatio(first: Float, second: Float): Float {
+        val lighter = maxOf(first, second)
+        val darker = minOf(first, second)
+        return (lighter + 0.05f) / (darker + 0.05f)
     }
 
     private fun luminanceOf(color: Int): Float =
         0.2126f * Color.red(color) + 0.7152f * Color.green(color) + 0.0722f * Color.blue(color)
 
     /**
-     * Draws one line of translated text in the style sampled from the game's own text.
+     * Draws one line of translated text.
      *
      * The outline is drawn as a separate pass underneath the fill rather than through
      * [Paint.Style.FILL_AND_STROKE]. A Paint carries one colour for both passes, so
@@ -251,38 +279,19 @@ class TranslationOverlayView(context: Context) : View(context) {
      * white-fill/black-outline recipe game UI actually uses. Drawing the line twice costs one
      * extra drawText per line and gives the outline its own colour.
      *
-     * When no style was sampled, or the sampled fill does not separate from the panel colour
-     * enough ([minFillSeparation]), the classic white/black fill is used instead with a
-     * contrasting outline, which stays readable on any panel. [textSize] is the rendered size, so
-     * stroke and shadow shrink together with a font that had to fit its box.
+     * Manual overlay text is always solid black or white, filled opaque, with the opposite colour
+     * as its outline — a sampled glyph colour is a mid-tone that can sit on top of the replacement
+     * patch and read as grey, and the panel underneath is the only contrast that actually matters.
+     * [textSize] is the rendered size, so stroke and shadow shrink together with a font that had
+     * to fit its box.
      */
-    private fun drawStyledLine(canvas: Canvas, line: String, x: Float, baseline: Float, item: TranslationOverlayItem, textSize: Float, panelColor: Int) {
-        // Contrast is judged against the colour the panel is actually painted, not against the
-        // colour that was sampled off the screen. drawPanel darkens a light control before filling
-        // it, so a fill chosen against the original background can end up sitting almost on top of
-        // the panel it is drawn on — which is how "the translation is hard to read" happens.
-        val style = item.glyphStyle?.takeIf { abs(luminanceOf(it.fill) - luminanceOf(panelColor)) >= minFillSeparation }
-        val fill = style?.fill ?: chooseTextColor(panelColor)
-        val fillLuminance = luminanceOf(fill)
-
-        // The outline colour is always the one furthest from the fill. Black or white is a safe
-        // pick because whichever is wrong is the colour of the glyph's own interior, and a stroke
-        // drawn in the fill's own colour reads as a slightly bolder letter rather than an outline.
-        val contrastStroke = if (fillLuminance >= 128f) Color.BLACK else Color.WHITE
-        val strokeColor: Int
-        val drawStroke: Boolean
-        if (style != null && style.hasStroke && abs(luminanceOf(style.stroke) - fillLuminance) >= minStrokeContrast) {
-            strokeColor = style.stroke
-            drawStroke = true
-        } else {
-            strokeColor = contrastStroke
-            drawStroke = true
-        }
+    private fun drawStyledLine(canvas: Canvas, line: String, x: Float, baseline: Float, textSize: Float, backingLuminance: Float) {
+        val fill = chooseTextColor(backingLuminance)
+        val strokeColor = if (fill == Color.BLACK) Color.WHITE else Color.BLACK
 
         textPaint.textSize = textSize
         textPaint.strokeJoin = Paint.Join.ROUND
-        textPaint.strokeWidth = (textSize * if (drawStroke) strokeWidthRatio else minOutlineWidthRatio)
-            .coerceAtLeast(1f)
+        textPaint.strokeWidth = (textSize * strokeWidthRatio).coerceAtLeast(1f)
         textPaint.setShadowLayer(textSize * shadowRadiusRatio, textSize * shadowOffsetRatio, textSize * shadowOffsetRatio, shadowColor)
 
         // The outline goes down first so the fill covers its inner half; a stroke drawn after the
@@ -303,38 +312,115 @@ class TranslationOverlayView(context: Context) : View(context) {
      *
      * The previous version layered a four-stop gradient, a white wash and a black wash to fake
      * frosted glass. On top of a game screen that read as a translucent blob rather than as part
-     * of the interface, and the stacked washes also washed out the text. One solid fill keeps the
-     * control's own colour, so the overlay reads as that control showing its translation.
+     * of the interface, and the stacked washes also washed out the text. The fill is now derived
+     * only from the control's own sampled colour, so the overlay reads as that control showing its
+     * translation.
+     *
+     * A vertical gradient built from the sampled top/bottom bands adds back the vertical colour
+     * drift a real control has (a lit top edge, a shadowed bottom one) without letting any of the
+     * game show through: every stop is an opaque RGB blend and the panel is still drawn at full
+     * alpha. A 2-3px blurred ring just inside the panel edge keeps the patch from reading as a
+     * pasted rectangle.
      *
      * The border is only drawn when the panel would otherwise blend into what surrounds it.
      */
-    private fun drawPanel(canvas: Canvas, box: RectF, paintedColor: Int, radius: Float) {
-        val luminance = luminanceOf(paintedColor)
-        backgroundPaint.shader = null
+    private fun drawPanel(canvas: Canvas, box: RectF, paintedColor: Int, radius: Float, patch: TextLayoutAnalyzer.PatchSample?): IntArray {
+        val feather = (minOf(box.width(), box.height()) * featherRadiusRatio).coerceIn(2f, 3f)
+        val topColor = if (patch != null) gradientEnd(paintedColor, luminanceOf(patch.topColor)) else paintedColor
+        val bottomColor = if (patch != null) gradientEnd(paintedColor, luminanceOf(patch.bottomColor)) else paintedColor
+        val middleColor = bandAverage(topColor, bottomColor)
+        val stops = intArrayOf(topColor, middleColor, bottomColor)
+        val positions = floatArrayOf(0f, 0.5f, 1f)
+
         backgroundPaint.alpha = 255
-        backgroundPaint.color = paintedColor
+        backgroundPaint.color = Color.WHITE
+        backgroundPaint.shader = LinearGradient(box.left, box.top, box.left, box.bottom.coerceAtLeast(box.top + 1f), stops, positions, Shader.TileMode.CLAMP)
         canvas.drawRoundRect(box, radius, radius, backgroundPaint)
 
-        // Only a faint edge on a light panel, where the fill could otherwise disappear into a pale
-        // control. Dark panels keep the control's own edge and need nothing added.
+        // The ring is inset by half its own stroke width, so on the hardware path the stroke lands
+        // exactly flush with the panel edge and no part of it falls on a pixel the panel has not
+        // already covered. It carries the same gradient as the fill, otherwise the 4-6px of flat
+        // painted colour at the edge would hard-step against the drift it is meant to soften.
+        // BlurMaskFilter needs a software layer, and forcing one on a full-screen overlay would push
+        // every panel onto the CPU rasteriser each frame, so the view stays on the hardware canvas
+        // and the mask filter is ignored there. Consequence: the ring is a plain inner edge, not a
+        // blur, and if anyone ever does add a software layer this inset stops being enough — a
+        // Blur.NORMAL of radius `feather` would spread `feather` px past the stroke onto uncovered
+        // pixels. Widen the inset by the blur radius before doing that.
+        featherPaint.style = Paint.Style.STROKE
+        featherPaint.strokeWidth = feather * 2f
+        featherPaint.alpha = 255
+        featherPaint.maskFilter = BlurMaskFilter(feather, BlurMaskFilter.Blur.NORMAL)
+        featherPaint.shader = LinearGradient(box.left, box.top, box.left, box.bottom.coerceAtLeast(box.top + 1f), stops, positions, Shader.TileMode.CLAMP)
+        val ring = RectF(box.left + feather, box.top + feather, (box.right - feather).coerceAtLeast(box.left + feather), (box.bottom - feather).coerceAtLeast(box.top + feather))
+        canvas.drawRoundRect(ring, (radius - feather).coerceAtLeast(0f), (radius - feather).coerceAtLeast(0f), featherPaint)
+        featherPaint.maskFilter = null
+        featherPaint.shader = null
+        featherPaint.style = Paint.Style.FILL
+        backgroundPaint.shader = null
+
+        val luminance = luminanceOf(paintedColor)
         if (luminance > 160f) {
             borderPaint.color = Color.argb(38, 0, 0, 0)
             borderPaint.strokeWidth = (width / 1080f).coerceAtLeast(1f)
             canvas.drawRoundRect(box, radius, radius, borderPaint)
         }
+        // The caller needs the colours actually under the text so contrast is judged against them
+        // rather than against the flat average the panel started from.
+        return intArrayOf(topColor, middleColor, bottomColor)
     }
 
     /**
-     * The painted colour for one box: its group colour when it was grouped, otherwise its own.
+     * One gradient end: the painted colour nudged toward a sampled band, but never far.
      *
-     * Both the panel and the text read the result, so the contrast guard is always measured
-     * against the colour actually on screen.
+     * Reproducing a real control's lit-top/shadowed-bottom spread exactly can sweep the panel from
+     * near-black to near-white, and no single text colour stays readable across a range that wide —
+     * the text would sink into whichever end it was chosen against. The drift is therefore damped
+     * and then capped by [maxGradientDrift], keeping the whole gradient inside one narrow band of
+     * the painted colour. The panel still looks dimensional; the text can still be one solid
+     * black-or-white, which is the whole point of the Tahap 2 text rule.
      */
-    private fun effectivePanelColor(index: Int, baseColor: Int): Int {
-        val groupId = itemGroups.getOrElse(index) { index }
-        return groupColors.getOrElse(groupId) { paintedPanelColor(baseColor) }
+    private fun gradientEnd(paintedColor: Int, sampledLuminance: Float): Int {
+        val painted = luminanceOf(paintedColor)
+        val drift = ((sampledLuminance - painted) * gradientBlend).coerceIn(-maxGradientDrift, maxGradientDrift)
+        return shiftLuminance(paintedColor, drift)
     }
 
+    /** Moves a colour along the grey axis by [delta] luminance, keeping its hue ratio. */
+    private fun shiftLuminance(color: Int, delta: Float): Int {
+        if (delta == 0f) return color
+        val factor = (luminanceOf(color) + delta).coerceAtLeast(0f) / luminanceOf(color).coerceAtLeast(1f)
+        return Color.rgb(
+            (Color.red(color) * factor).roundToIntSafe(),
+            (Color.green(color) * factor).roundToIntSafe(),
+            (Color.blue(color) * factor).roundToIntSafe()
+        )
+    }
+
+    /** Channel-wise mean of the two gradient ends, used as the panel's mid stop. */
+    private fun bandAverage(first: Int, second: Int): Int = Color.rgb(
+        (Color.red(first) + Color.red(second)) / 2,
+        (Color.green(first) + Color.green(second)) / 2,
+        (Color.blue(first) + Color.blue(second)) / 2
+    )
+
+    /**
+     * The panel luminance the text of one item has to stay legible against.
+     *
+     * A panel is a vertical gradient, so there is no single panel colour: the text spans the top and
+     * bottom stops. The darkest stop is returned because it is the one that decides the answer for
+     * white text and the one that is easiest for black text, so it brackets both ends of the range
+     * rather than sampling it.
+     *
+     * Falls back to the group's painted colour when the panel was not drawn this frame (a group
+     * filtered out for being degenerate), so the text is never measured against a null.
+     */
+    private fun textBackingLuminance(index: Int): Float {
+        val groupId = itemGroups.getOrElse(index) { index }
+        val stops = paintedStops.getOrNull(groupId)
+        if (stops == null || stops.size < 3) return luminanceOf(groupColors.getOrElse(groupId) { Color.BLACK })
+        return stops.minOf { luminanceOf(it) }
+    }
     /**
      * The colour the panel is actually filled with for a given sampled background.
      *
@@ -461,7 +547,7 @@ class TranslationOverlayView(context: Context) : View(context) {
         )
     }
 
-    private fun buildRenderItem(m: MeasuredItem, width: Int, height: Int, uniformScale: Float): RenderItem? {
+    private fun buildRenderItem(m: MeasuredItem, height: Int, uniformScale: Float): RenderItem? {
         val item = m.item
         val normalized = normalizeParagraph(item.translatedText); if (normalized.isEmpty()) return null
         val finalTextSize = (m.baseTextSize * uniformScale).coerceIn(minTextSizePx, m.baseTextSize)
@@ -475,7 +561,7 @@ class TranslationOverlayView(context: Context) : View(context) {
         var top = (m.originalBoxTop - (settledHeight - m.originalBoxHeight) / 2f).coerceAtLeast(0f)
         if (top + settledHeight > height.toFloat()) top = (height.toFloat() - settledHeight).coerceAtLeast(0f)
         val lineSpacing = finalTextSize * lineSpacingRatio
-        return RenderItem(item, m.boxLeft, top, m.boxRight, top + settledHeight, finalTextSize, m.horizontalPadding, lines, lineSpacing)
+        return RenderItem(item, item.patchSample, m.boxLeft, top, m.boxRight, top + settledHeight, finalTextSize, m.horizontalPadding, lines, lineSpacing)
     }
 
     /**
@@ -497,7 +583,7 @@ class TranslationOverlayView(context: Context) : View(context) {
      * background they sit on is shared.
      */
     private fun buildOverlapGroups() {
-        if (renderItems.isEmpty()) { itemGroups = emptyList(); groupRects = emptyList(); groupColors = emptyList(); return }
+        if (renderItems.isEmpty()) { itemGroups = emptyList(); groupRects = emptyList(); groupColors = emptyList(); groupPatches = emptyList(); return }
         val parent = IntArray(renderItems.size) { it }
         fun find(value: Int): Int { var x = value; while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x] }; return x }
         fun union(a: Int, b: Int) { val rootA = find(a); val rootB = find(b); if (rootA != rootB) parent[rootB] = rootA }
@@ -531,6 +617,25 @@ class TranslationOverlayView(context: Context) : View(context) {
         groupColors = sums.map { sum ->
             val count = sum[3].coerceAtLeast(1f)
             Color.rgb((sum[0] / count).toInt().coerceIn(0, 255), (sum[1] / count).toInt().coerceIn(0, 255), (sum[2] / count).toInt().coerceIn(0, 255))
+        }
+        // The gradient is read off the group's own extremes, not off whichever member happens to be
+        // first: a three-line dialogue is one panel, and taking the first line's bottom band would
+        // stretch the colour of the top line's lower edge across the other two. Same rule the
+        // vertical merge in OcrManager applies to merged columns.
+        groupPatches = (0 until rootToGroup.size).map { group ->
+            val members = renderItems.indices.filter { itemGroups[it] == group }
+            val topmost = members.minByOrNull { renderItems[it].top }
+            val bottommost = members.maxByOrNull { renderItems[it].bottom }
+            val topColor = topmost?.let { renderItems[it].patchSample?.topColor }
+            val bottomColor = bottommost?.let { renderItems[it].patchSample?.bottomColor }
+            // One member missing its sample must not cost the whole group its gradient: fall back to
+            // the other end, then to the painted background, rather than dropping the patch.
+            when {
+                topColor != null && bottomColor != null -> TextLayoutAnalyzer.PatchSample(topColor, bottomColor)
+                topColor != null -> TextLayoutAnalyzer.PatchSample(topColor, topColor)
+                bottomColor != null -> TextLayoutAnalyzer.PatchSample(bottomColor, bottomColor)
+                else -> null
+            }
         }
     }
 
@@ -595,6 +700,8 @@ class TranslationOverlayView(context: Context) : View(context) {
         itemGroups = emptyList()
         groupRects = emptyList()
         groupColors = emptyList()
+        groupPatches = emptyList()
+        paintedStops = emptyArray()
         super.onDetachedFromWindow()
     }
 }
@@ -608,6 +715,6 @@ data class TranslationOverlayItem(
     val sourceTextSizePx: Float = 0f,
     val backgroundColor: Int = Color.BLACK,
     val orientation: TextLayoutAnalyzer.WritingOrientation = TextLayoutAnalyzer.WritingOrientation.HORIZONTAL,
-    val glyphStyle: TextLayoutAnalyzer.GlyphStyle? = null,
-    val alignment: TextLayoutAnalyzer.TextAlignment = TextLayoutAnalyzer.TextAlignment.CENTER
+    val alignment: TextLayoutAnalyzer.TextAlignment = TextLayoutAnalyzer.TextAlignment.CENTER,
+    val patchSample: TextLayoutAnalyzer.PatchSample? = null
 )
