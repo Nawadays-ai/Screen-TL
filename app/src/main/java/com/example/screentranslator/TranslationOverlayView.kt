@@ -57,6 +57,18 @@ class TranslationOverlayView(context: Context) : View(context) {
     private val bubbleWidthRatio = 2.80f
 
     /**
+     * How far a panel may slide left to stay on screen, as a fraction of its own width.
+     *
+     * The panel is anchored on the control's left edge and grows rightwards, so a long
+     * translation runs into the edge of the display and is forced onto another line even when the
+     * left side of the screen is empty. Sliding recovers that space before wrapping does.
+     *
+     * 20% is deliberately modest: enough to rescue the common case of a box near the right edge,
+     * small enough that a panel never travels across whatever sits to its left.
+     */
+    private val leftSlideRatio = 0.20f
+
+    /**
      * Tahap 1 — glyph style thresholds.
      *
      * The sampled fill is only trusted when it separates from the panel colour by this much
@@ -395,6 +407,23 @@ class TranslationOverlayView(context: Context) : View(context) {
         }
         boxRight = boxRight.coerceAtLeast(boxLeft + originalWidth)
 
+        // Slide left when growing right would push the panel off the screen.
+        //
+        // The panel is anchored on the left edge, so a translation longer than the control's width
+        // runs into the right edge of the display and then has nowhere to go but wrap onto another
+        // line. There is usually room on the *left* the panel is not using. Sliding recovers it
+        // first, and only wraps once there is no more slide left — buying lines of text is a much
+        // worse outcome than shifting a box a little.
+        //
+        // The slide is capped so a panel never travels far enough to cover what sits to its left:
+        // a name plate, a portrait or a menu label on the same row has to stay readable. Whatever
+        // the cap does not cover is left to the wrap.
+        val slideRoom = (width.toFloat() - (boxRight - baseLeft)).coerceAtLeast(0f)
+        val allowedSlide = (boxRight - boxLeft) * leftSlideRatio
+        val slide = minOf(slideRoom, allowedSlide).coerceAtLeast(0f)
+        boxLeft -= slide
+        boxRight -= slide
+
         val maxTextWidth = (boxRight - boxLeft - horizontalPadding * 2f).coerceAtLeast(1f)
         val originalBoxTop = (baseTop - (originalBoxHeight - originalHeight) / 2f).coerceAtLeast(0f)
 
@@ -495,20 +524,26 @@ class TranslationOverlayView(context: Context) : View(context) {
     }
 
     /**
-     * Whether two boxes are stacked in a column rather than sitting side by side.
+     * Whether two boxes belong to the same run of text rather than being two separate controls.
      *
-     * Side by side is two controls; one above the other is one control shown as several lines.
-     * The left edges have to agree, so a caption to the right of a dialogue box is never folded
-     * into it even when the two touch.
+     * Two boxes are one control when they overlap and sit at different heights — one above the
+     * other. How much they overlap horizontally is not required: ML Kit splits a single block of
+     * dialogue into lines that differ in width, and the widest line reaches well past the
+     * narrowest, so demanding a large horizontal overlap broke those runs apart and left every
+     * line with its own patch. A shared left edge, which is what a control drawn by the game
+     * actually has, is what tells the two apart instead.
+     *
+     * A vertical gap of up to a glyph width is still the same control: that is roughly the line
+     * pitch between two lines of the same box.
      */
     private fun stacksVertically(a: RectF, b: RectF): Boolean {
         val overlapX = minOf(a.right, b.right) - maxOf(a.left, b.left)
         if (overlapX <= 0f) return false
-        val narrower = minOf(a.width(), b.width())
+        val narrowest = minOf(a.width(), b.width())
         val overlapY = minOf(a.bottom, b.bottom) - maxOf(a.top, b.top)
         val verticalRun = a.top < b.top || b.top < a.top
         // Touching counts, and a small vertical gap is the normal line pitch of a control.
-        return verticalRun && overlapX >= narrower * 0.5f && overlapY >= -narrower * 0.75f
+        return verticalRun && overlapY >= -narrowest
     }
 
     /**

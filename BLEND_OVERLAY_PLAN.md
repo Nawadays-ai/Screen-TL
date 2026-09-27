@@ -157,6 +157,33 @@ vertikal.
 - [x] Warna grup tetap jadi sumber warna panel **dan** guard kontras teks (`effectivePanelColor`),
   jadi yang digambar dan yang dinilai kontras selalu warna yang sama.
 
+### Tahap 1f — Geser kiri + kelompok longgar (2026-09-26)
+
+Status: [CODE DONE] terverifikasi 0 error compile (Kotlin 1.9.22 lokal, JDK 17).
+
+ dua keluhan setelah test `5210af7`.
+
+- [x] **Panel tidak bergeser ke kiri sama sekali** (`leftSlideRatio = 0.20f`). Panel terkunci di
+  tepi kiri kontrol dan hanya tumbuh ke kanan, jadi terjemahan yang panjang_than control mentok di
+  tepi kanan layar dan **dipaksa wrap** ke baris tambahan — padahal sisi kiri layar kosong dan
+  tidak dipakai. Sekarang panel boleh bergeser ke kiri sebeser 20% lebarnya (angka dari user) untuk
+  menaungi ruang kosong itu, dan baru wrap setelah tidak ada ruang geser lagi. Sisa yang tidak
+  tertangani 20% tetap menjadi baris baru — itu batas yang disengaja, supaya panel tidak pernah
+  menutupi nama/ikon di sebelah kirinya.
+- [x] **Kelompok vertikal terlalu ketat.** `stacksVertically` sebelumnya mensyaratkan overlap
+  horizontal ≥ 50% lebar sempit; ML Kit memecah satu blok dialog jadi baris dengan lebar berbeda
+  (baris terpanjang jauh melewati baris terpendek), sehingga satu run baris terpecah jadi beberapa
+  kelompok dan tiap baris dapat patch sendiri — persis gejala "boundary terlihat membedakan tiap
+  kalimat / kadang mepet jadi satu". Syarat overlap horizontal **dihapus**; yang menentukan hanya
+  ada intersection + urutan vertikal + jarak vertikal ≤ 1× lebar tersempit. Dua control berdampingan
+  tetap tidak ter-merge karena `a.top != b.top` (sejajar horizontal = satu tinggi = bukan run vertikal).
+
+**Sisa yang masih terbuka (tidak dikerjakan di sini):**
+- [ ] Kontras panel/button **terang** (user: "untuk sekarang kontrasnya kurang").
+- [ ] **Bubble vertikal JP** — user: terjemahan jelek & tidak konsisten (ukuran teks varied, panel
+  kadang memenuhi layar padahal source kecil). Discussion terpisah, lihat catatan di bawah.
+- [ ] Manga OCR untuk bubble vertikal — **ditunda**, dikerjakan setelah plan ini selesai.
+
 ### Tahap 2 — Manual: patch penuh
 
 Status: [TODO] Tujuan: area di bawah teks tidak terlihat sebagai kotak blok.
@@ -218,6 +245,8 @@ Spesifikasi:
 - 2026-09-26 Tahap 1d: review atas `980c7bd` menemukan dua hal. (1) `normalizeParagraph` mempertahankan `\n` dari DeepL sebagai baris baru, padahal DeepL memecah kalimat sesuka hatinya → kalimat muat 1 baris jadi 3 baris pendek, panel makin tinggi, paragraf bawah makin sempit. Diubah: `\n` jadi whitespace biasa. Diagnosis awal sempat salah mengaitkannya ke prompt OpenRouter; provider yang dipakai DeepL. (2) `collidesWithOtherBox` membuat box yang tumbuh menyerah ruang saat nabrak box lain — untuk kolom dialog berdempet vertikal tiap baris saling mengalah, diperparah oleh pertumbuhan vertikal Tahap 1b. Overlap adalah kondisi normal teks berdempet, jadi logikanya dihapus; `buildOverlapGroups()` (union-find) dari `debugging` dikembalikan untuk menyamakan **warna** panel antar-box overlap, dan warnanya juga dipakai untuk guard kontras teks.
 - 2026-09-26 Tahap 1e: 1d menyamakan warna tapi tiap baris masih menggambar panel sendiri, jadi seam + garis bulat membuatnya terbaca sebagai kartu bertumpuk. `buildOverlapGroups` kini menghitung union rect per kelompok dan `onDraw` menggambar satu panel per kelompok; teks tetap per item sesuai usulan user (tiap baris punya terjemmaan, lebar, alignment sendiri — hanya background yang/shared). Pengelompokan dipersempit ke kolom vertikal saja lewat `stacksVertically` (overlap X ≥ 50% lebar sempit, ada urutan vertikal, jarak vertikal ≤ 0.75× lebar) supaya dua control berdampingan tidak ikut ter-merge dan batas yang membedakan keduanya tetap ada.
 - 2026-09-26 Test perangkat `5210af7`: **user mengonfirmasi hasilnya lebih baik dari sebelumnya**. Paragraf sudah sesuai sejak Tahap 1c; 1d/1e menutup kasus kalimat berdempet vertikal. Lima item checklist ditandai terverifikasi. Sisa checklist (dialog gelap, panel terang, alignment, dua control berdampingan, bubble vertikal JP) belum diuji khusus dan tetap terbuka. Struktur overlay Manual dianggap selesai untuk lingkup tipografi + patch solid; sisa pekerjaan adalah kerapian patch (Tahap 2) dan mode Klip (Tahap 3). Manga OCR untuk bubble vertikal **sengaja ditunda** — dikerjakan setelah Tahap 2/3 selesai, agar tidak dicampur dengan pekerjaan yang belum diverifikasi.
+- 2026-09-26 Tahap 1f: (1) Panel terkunci di tepi kiri & hanya tumbuh ke kanan → terjemahan panjang mentok di tepi kanan layar dan dipaksa wrap ke baris tambahan, padahal sisi kiri kosong. Ditambahkan `leftSlideRatio = 0.20f` (angka dari user) supaya panel bisa bergeser ke kiri recovering ruang itu sebelum wrap. (2) `stacksVertically` terlalu ketat (syarat overlap X ≥ 50% lebar sempit) — ML Kit memecah satu blok dialog jadi baris dengan lebar berbeda sehingga run baris terpecah jadi beberapa kelompok dan tiap baris dapat patch sendiri. Syarat overlap X dihapus; penentu sekarang hanya intersection + `a.top != b.top` + jarak vertikal ≤ 1× lebar tersempit. Sisa terbuka: kontras panel terang, bubble vertikal JP, dan manga OCR (ditunda terpisah).
+- 2026-09-26 Catatan bubble vertikal JP (untuk diskusi terpisah): pipeline vertikal **sudah ada lengkap** — `isVerticalLine`/`isVerticalBlock`/`groupVerticalCandidates`/`areSameBubbleColumn`/`verticalBlockText` (sorting `centerX` descending = kanan→kiri, benar untuk JP), plus `bubbleWidthRatio = 2.80f` di render. Jadi masalahnya bukan fitting/pipeline, tapi **akurasi OCR vertikal ML Kit** — user melaporkan manual & klip membaca akurat, tapi overlay jelek & inconsistent. Ini yang akan dibahas terpisah.
 
 
 ## Aturan kerja untuk sesi berikutnya
