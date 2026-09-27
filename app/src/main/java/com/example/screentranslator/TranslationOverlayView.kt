@@ -338,6 +338,11 @@ class TranslationOverlayView(context: Context) : View(context) {
     /**
      * The colour the panel is actually filled with for a given sampled background.
      *
+     * Both the panel and the text are painted at full alpha — nothing in the overlay is
+     * translucent, and a Patch that let the game show through would be unreadable on top of busy
+     * art. A light control is darkened here instead of being covered with a veil, so the panel
+     * stays opaque while gaining enough contrast for the text sitting on it.
+     *
      * Kept in one place because the text has to make the same decision: a fill colour chosen for
      * the game's own light control turns unreadable once the panel is darkened underneath it, so
      * both sides have to agree on the painted result rather than each re-deriving it.
@@ -409,20 +414,26 @@ class TranslationOverlayView(context: Context) : View(context) {
 
         // Slide left when growing right would push the panel off the screen.
         //
-        // The panel is anchored on the left edge, so a translation longer than the control's width
-        // runs into the right edge of the display and then has nowhere to go but wrap onto another
-        // line. There is usually room on the *left* the panel is not using. Sliding recovers it
-        // first, and only wraps once there is no more slide left — buying lines of text is a much
-        // worse outcome than shifting a box a little.
+        // Slide left only when the right side runs out of room.
         //
-        // The slide is capped so a panel never travels far enough to cover what sits to its left:
-        // a name plate, a portrait or a menu label on the same row has to stay readable. Whatever
-        // the cap does not cover is left to the wrap.
-        val slideRoom = (width.toFloat() - (boxRight - baseLeft)).coerceAtLeast(0f)
-        val allowedSlide = (boxRight - boxLeft) * leftSlideRatio
-        val slide = minOf(slideRoom, allowedSlide).coerceAtLeast(0f)
-        boxLeft -= slide
-        boxRight -= slide
+        // The panel is anchored on the control's left edge and grows rightwards, so a translation
+        // wider than the control can run into the edge of the display and have nowhere to go but
+        // wrap onto another line. When that happens, the space to the left of the control — usually
+        // empty, because the control itself starts there — is what makes one line enough.
+        //
+        // Sliding is the fallback, not the default. A panel that shifts whenever there is room ends
+        // up sitting left of the text it is translating, which reads as misplaced. So the overflow
+        // past the right edge is measured first: if the panel already fits, it does not move at
+        // all. Only an overflow is paid off by sliding, and only up to [leftSlideRatio] of the
+        // panel's own width, after which the remaining overflow wraps onto another line — a cap
+        // that keeps a panel from ever travelling across a name plate or portrait beside it.
+        val overflow = (boxRight - width.toFloat()).coerceAtLeast(0f)
+        if (overflow > 0f) {
+            val allowedSlide = (boxRight - boxLeft) * leftSlideRatio
+            val slide = minOf(overflow, allowedSlide)
+            boxLeft -= slide
+            boxRight -= slide
+        }
 
         val maxTextWidth = (boxRight - boxLeft - horizontalPadding * 2f).coerceAtLeast(1f)
         val originalBoxTop = (baseTop - (originalBoxHeight - originalHeight) / 2f).coerceAtLeast(0f)

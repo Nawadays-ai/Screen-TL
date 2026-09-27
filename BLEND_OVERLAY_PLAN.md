@@ -166,10 +166,12 @@ Status: [CODE DONE] terverifikasi 0 error compile (Kotlin 1.9.22 lokal, JDK 17).
 - [x] **Panel tidak bergeser ke kiri sama sekali** (`leftSlideRatio = 0.20f`). Panel terkunci di
   tepi kiri kontrol dan hanya tumbuh ke kanan, jadi terjemahan yang panjang_than control mentok di
   tepi kanan layar dan **dipaksa wrap** ke baris tambahan — padahal sisi kiri layar kosong dan
-  tidak dipakai. Sekarang panel boleh bergeser ke kiri sebeser 20% lebarnya (angka dari user) untuk
-  menaungi ruang kosong itu, dan baru wrap setelah tidak ada ruang geser lagi. Sisa yang tidak
-  tertangani 20% tetap menjadi baris baru — itu batas yang disengaja, supaya panel tidak pernah
-  menutupi nama/ikon di sebelah kirinya.
+  tidak dipakai. Sekarang panel boleh bergeser ke kiri sebesar 20% lebarnya (angka dari user)
+  **hanya ketika panel itu benar-benar meluber melewati tepi kanan layar**; kalau muat, panel
+  tidak bergerak sama sekali. Sisa yang tidak tertangani 20% tetap menjadi baris baru — itu batas
+  yang disengaja, supaya panel tidak pernah menutupi nama/ikon di sebelah kirinya.
+  (Koreksi: versi pertama menggeserpanel *selama ada ruang*, sehingga hampir semua panel meluncur
+  ke kiri dan terjemahan terlihatarching ke kiri dari teks sumber. Gejala ini dilaporkan user.)
 - [x] **Kelompok vertikal terlalu ketat.** `stacksVertically` sebelumnya mensyaratkan overlap
   horizontal ≥ 50% lebar sempit; ML Kit memecah satu blok dialog jadi baris dengan lebar berbeda
   (baris terpanjang jauh melewati baris terpendek), sehingga satu run baris terpecah jadi beberapa
@@ -183,6 +185,24 @@ Status: [CODE DONE] terverifikasi 0 error compile (Kotlin 1.9.22 lokal, JDK 17).
 - [ ] **Bubble vertikal JP** — user: terjemahan jelek & tidak konsisten (ukuran teks varied, panel
   kadang memenuhi layar padahal source kecil). Discussion terpisah, lihat catatan di bawah.
 - [ ] Manga OCR untuk bubble vertikal — **ditunda**, dikerjakan setelah plan ini selesai.
+
+### Tahap 1g — Koreksi geser-kiri (2026-09-26)
+
+Status: [CODE DONE] terverifikasi 0 error compile (Kotlin 1.9.22 lokal, JDK 17).
+
+Tahap 1f membuat panel meluncur ke kiri **hampir selalu** — logikanya "kalau ada ruang, pakai",
+padal yang benar "kalau tidak muat di kanan, baru geser". Akibatnya terjemahan duduk di sebelah
+kiri teks sumber dan terbaca salah tempat.
+
+- [x] **Geser hanya saat overflow.** `overflow = boxRight - width`; slide = `min(overflow, 20% lebar)`.
+  Kalau `overflow == 0`, panel **tidak bergerak** dan kembali persis di atas source seperti
+  sebelumnya. Kalau overflow ada, slide menutupi sebanyak mungkin, sisa overflow jadi wrap.
+- [x] Konfirmasi tidak ada transparansi: `backgroundPaint.alpha` dan `textPaint.alpha` sudah 255
+  di semua jalur (panel, outline, fill). Yang terasa transparan adalah `paintedPanelColor` yang
+  **menggelapkan** panel terang (0.62×) — itu opacity penuh, bukan veil. Dicatat di KDoc
+  `paintedPanelColor` supaya tidak disalahartikan lagi.
+  (Bila panel terang masih terasa "tembus", masalahnya kontras warna panel terhadap teks —
+  bukan alpha. Itu masuk daftar terbuka Tahap 1f.)
 
 ### Tahap 2 — Manual: patch penuh
 
