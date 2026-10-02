@@ -2,7 +2,7 @@
 
 > **Scope:** catatan kerja perubahan tampilan mode Manual (overlay menyatu dengan game) dan mode Klip (desain minimalis). Mode Real-Time di luar scope.
 > **Aturan konteks:** gunakan file ini sebagai konteks utama untuk task ini. Jangan meminta pembacaan README, AI handoff, atau catatan proyek lain untuk memahami rencana ini.
-> **Status:** Tahap 0 selesai. **Tahap 1b–1e terverifikasi di perangkat oleh user — hasilnya sesuai ("lebih baik dari sebelumnya").** Tahap 2–3 belum dimulai. Tahap 4 ditunda (riset). Struktur overlay Manual dianggap **[DONE] untuk lingkup tipografi + patch solid**; yang tersisa adalah kerapian patch (lihat Tahap 2).
+> **Status:** Tahap 0 selesai. **Tahap 1b–1e terverifikasi di perangkat oleh user — hasilnya sesuai ("lebih baik dari sebelumnya").** **Tahap 2 GAGAL verifikasi perangkat (2026-09-28): patch terukur tembus ~21% — lihat Tahap 2r.** Tahap 3 belum dimulai. Tahap 4 ditunda (riset). Struktur overlay Manual untuk lingkup tipografi **masih berlaku**; klaim "patch solid / tidak ada yang tembus" **dicabut** sampai Tahap 2r lewat.
 > **Build policy:** APK **tidak pernah** dibangun lokal — keputusan user, bukan kekurangan setup. Build hanya via GitHub Actions, lalu user tes di perangkat. Yang boleh: type-check Kotlin terisolasi via compiler di Gradle cache (ringan, detik) untuk menangkap error sebelum CI.
 
 ## Keputusan yang sudah selesai
@@ -206,11 +206,11 @@ kiri teks sumber dan terbaca salah tempat.
 
 ### Tahap 2 — Manual: patch penuh
 
-Status: [SELESAI — menunggu verifikasi perangkat] Tujuan: area di bawah teks tidak terlihat sebagai kotak blok.
+Status: [GAGAL verifikasi perangkat 2026-09-28 — akar dicarikan di Tahap 2r] Tujuan: area di bawah teks tidak terlihat sebagai kotak blok.
 **Catatan:** Tahap 2 adalah soal patch terlihat *natural*, bukan soal patch *cukup menutup*.
 Keluhan "teks source masih terlihat" sudah ditangani di Tahap 1b lewat geometri.
 
-- [x] **Gradient vertical:** ganti 1 warna rata dengan `LinearGradient` — median strip atas ~15% dan strip bawah ~15% dari interior box (dialog box game umumnya bergradient). Ketiga stop adalah blend RGB opaque; panel tetap digambar di alpha 255, jadi tidak adajeu yang tembus.
+- [x] **Gradient vertical:** ganti 1 warna rata dengan `LinearGradient` — median strip atas ~15% dan strip bawah ~15% dari interior box (dialog box game umumnya bergradient). Ketiga stop adalah blend RGB opaque; panel tetap digambar di alpha 255, jadi tidak ada yang tembus. **(Di perangkat 2026-09-28 klaim ini TIDAK terbukti: terukur ~21% bleed — lihat Tahap 2r Gerbang 0/1.)**
 - [x] **Feather edge:** cincin `Paint.Style.STROKE` dengan `strokeWidth = 2 × feather` (4–6px) di-*inset* sebesar `feather` (2–3px), lalu di-blur. Di-inset sebesar setengah lebar stroke supaya tepi stroke tepat flush dengan tepi panel — tidak ada satu pun piksel game yang belum tertutup panel yang bisa terkena blur. Cincin memakai `LinearGradient` yang sama dengan isi panel, kalau tidak tepi 4–6px itu jadi garis rata yang hard-step melawan gradien yang seharusnya dilembutkan. Fallback bentuk rounded-rect dipakai, jadi degrade di hardware canvas (mask filter diabaikan) tetap aman.
 - [x] **Deteksi UI-box vs scene art:** *dibatalkan.* Standar-deviasi interior tidak membedakan UI-box dari scene art secara reliable di layar game, dan ambangnya jadi konstanta yang tak terjustifikasi.
 - [x] **Tier-2 scene-art patch:** *dibatalkan.* Butuh piksel asli di dalam box, sedangkan yang tersedia hanya sampling+BBM. Versi yang sempat ditulis (menyalin strip kiri/kanan melebar) hanya menghasilkan coretan 1-D, bukan scene — lebih buruk daripada patch solid. Butuh bitmap capture hidup di pipeline; lihat "Utang terbuka".
@@ -233,6 +233,68 @@ Keluhan "teks source masih terlihat" sudah ditangani di Tahap 1b lewat geometri.
 - ~~Teks di atas scene art~~ — tidak berlaku, tier-2 dibatalkan.
 
 **Utang terbuka:** scene-art continuity (Teks di atas pohon/langit) belum ada solusinya. Butuh keputusan: pertahankan bitmap capture sampai overlay selesai digambar, atau kirim potongan bitmap kecil per box. Keduanya menambah real memory cost pada jalur Manual.
+
+### Tahap 2r — Koreksi hasil perangkat Tahap 2 (2026-09-28)
+
+Status: [RENCANA — menunggu eksekusi builder]. Verdict terukur: `.omd/visual-verdict/2026-09-28T22-28-57.json` (skor 54, revise).
+
+**Konteks:** user mengetes build terbaru Manual pada popup スキル詳細 (source JP vs hasil ID). Dua cacat terukur, satu non-cacat yang jangan disentuh:
+
+1. **Patch tembus (ghosting) — terukur, dan kini diverifikasi bebas-halo.** Uji ketat: baris yang **nol piksel gelap** di seluruh barisnya (jadi pasti tidak ada glyph, outline, maupun shadow terjemahan di sana) tetap menunjukkan output menuruti bentuk glyph Jepang. Panel B: 20 baris, delta **31,7 lux**, opasitas terhitung **0,81**. Uji radius-mask (buang setiap piksel dalam radius 10px dari inti glyph ID — inti = output gelap sementara sumbernya terang — lalu bandingkan) mengulang angka yang sama: slope 0,185–0,24 → opasitas **0,76–0,82**. Tiga metode, satu jawaban: **±20% cahaya game menembus panel.**
+   **`joint2.ps1` (2026-09-29, metode paling ketat sejauh ini).** Ekklusi inti tinta-terjemahan (out ≤ 45) dengan prefilled row-sum + **assertion**: himpunan terinklusi tidak boleh memuat satu pun out ≤ 45 (lolos; versi pertama `joint.ps1` senyap tidak mengeksklusi apa pun karena `$script:` tidak resolve di scriptblock dari string — angkanya jangan dipakai). Hasil pada interior panel, radius 6 dan 10, kedua-duanya sepakat sampai digit kedua:
+   - slope fit mid-tone **0,224 / 0,227** → opasitas efektif panel **0,78 / 0,77**
+   - pita out untuk JP-ink (src ≤ 100): **min 74,1 · p50 107,2 · p95 116,9** — tidak pernah turun ke nilai sumbernya sendiri, jadi ini **bukan** piksel tak-tercakup; kompositnya mulus dan monoton, bukan bimodal.
+   - pita out untuk light (src ≥ 235): p50 **139,7 / 139,1** (plateau panel).
+   Catatan penting: hasil **satu window alpha** juga menjelaskan sisi lain — teks hitam terjemahan punya floor luminansi **min 18 / p1 34**, bukan ~0. Kalau hanya panel yang tembus, teks harus tetap solid. Jadi yang tembus kemungkinan **bukan hanya warna panel**.
+   **→ Tapi prediksi itu TERGUGURKAN oleh angka (lihat 1b): teks hitam di atas sumber putih tercapai out = 29,2.** Window alpha 0,78 memblokir itu: floor-nya harus 0,22 × 247 ≈ **54**. Jadi teks TIDAK terdilusi; 29 itu antialiasing glyph tipis, bukan veil jendela.
+2. **Union panel rakus.** Grup body menyatu jadi satu rect x805–1560 y354–771 (~755×417 px) yang menelan label `◆説明` + seluruh body + baris efek sekaligus — terbaca sebagai satu blok abu raksasa, gejala "kotak asing" yang justru ingin dihapus Tahap 2. Diperparah kelonggaran `stacksVertically` Tahap 1f.
+3. **Bukan cacat — jangan disentuh:** sensus tinta membuktikan **0 dari 15.821** piksel tinta terjemahan digambar di kertas tanpa panel → `clipRect` per-item + panel-per-grup bekerja benar.
+
+**Gerbang 0 — [TERJAWAB 2026-09-28: build = commit yang benar, tapi APK TERPASANG belum terbukti].**
+User memberi run https://github.com/Nawadays-ai/Screen-TL/actions/runs/36342188064 → `head_sha = 6158081efe42bd1912037ed37bc472ed6c938395`, `workflow_dispatch`, success, artifact `ScreenTranslator-APK` 32,7 MB. Jadi CI yang dibangun memang Tahap 2. Hipotesis "CI membangun commit lama" **gugur**.
+- [ ] Yang masih terbuka: artifact harus **diunduh dan diinstall manual**. Signature mismatch (APK lama dari debug keystore ephemeral) membuat install gagal diam-diam dan HP tetap menjalankan versi lama. Cek di perangkat: Settings → Apps → Screen-TL → versi/tanggal update, atau **uninstall lalu install fresh** dari artifact run #362.
+  **Mekanisme kegagalan senyap kini terjelaskan dan sudah ditambal:** build CI `debug` tidak punya `applicationIdSuffix` dan memakai satu signing key yang sama, jadi build lama dan build baru identik dari sisi paket — `install -r` menimpa tanpa jejak yang bisa dilihat user. **Perbaikan terpasang:** `versionName` kini `"1.1 (run N)"` (N = `GITHUB_RUN_NUMBER`), jadi Settings → Apps langsung membuktikan build mana yang hidup, dan `showTranslationOverlay` mencetaknya di logcat. Gerbang 0 tidak akan pernah lagi jadi pertanyaan terbuka.
+- [ ] Kalau setelah install fresh ghost **hilang** → akar = APK lama; Tahap 2 valid, lanjut Gerbang 2 (geometry) saja.
+- [ ] Kalau ghost **masih ada** → masuk Gerbang 1. **Sudah dijawab 1b: bocor ada di jalur panel (`drawPanel`), bukan jendela.** Kedua perbaikan panel (opaque base + buang BlurMaskFilter) sudah terpasang di working tree, jadi build berikutnya mengetes keduanya sekaligus.
+
+**Kenapa "APK lama" tetap jadi tersangka pertama — dan batas jujur dari klaim itu.** Tidak ada satu pun nilai alpha selain 255 di jalur render `6158081`, tapi tiga metode independen sepakat di 0,80–0,83, **dan** teks terjemahan ikut terdilusi (Gerbang 1b) — pola yang tidak bisa dihasilkan kode ini. Riwayat commit memang punya alpha 220 (`b7158bf`) dan 190 (`55233df`) yang kebetulan duduk di sekitar rentang itu, tapi itu jalur gambar lama yang sudah dibuang, jadi **kecocokan angka ini bukan bukti** — cuma alasan tersangka itu layak dites lebih dulu.
+Yang membuat tesnya murah: **`versionName` konstan `"1.1"` dan `versionCode = max(2, GITHUB_RUN_NUMBER)`**, jadi MIUI tidak bisa dipakai membedakan build (semua APK CI tampil sebagai 1.1). Satu-satunya cara andal = **uninstall, install ulang dari artifact run #362**, lalu jalankan tool terima. Jangan coba menebak dari layar About — app tidak menampilkan versi.
+Catatan: user sudah melaporkan "terasa transparan" sejak Tahap 1f/1g, dan sesi sebelumnya menepisnya sebagai efek `paintedPanelColor` (gelap, bukan veil). Pengukuran sekarang menunjukkan keluhan user **benar** — itu alasan Gerbang 0/1 tidak boleh dilewati dengan tambal-warna.
+
+**Gerbang 1 — instrumentasi, satu frame, lalu hapus (hanya jika bleed nyata di instalasi fresh).**
+- [x] **Uji pembeda (1b) — TERJAWAB 2026-09-29: yang tembus HANYA PANEL, bukan jendela.** Buktinya geometri angka, bukan dugaan: teks hitam terjemahan di atas sumber terang mencapai **out = 29,2** (`dumppix.ps1`, di (835,515), src=(246,244,247) → out=(28,29,33)). Kalau jendela di-alpha 0,78, floor di posisi itu adalah 0,22×247 ≈ **54** — terukur 29, jadi prediksi jendela **gugur**. Sekaligus: pita JP-ink far-from-ID tidak pernah menyentuh nilai sumbernya sendiri (min 74,1, p50 107,2, plateau panel 139,7), jadi bocornya **di dalam warna panel**, persis jalur `drawPanel`.
+  Konsekuensi: pekerjaan ada di `drawPanel` (sudah dikerjakan, lihat bawah) + kemungkinan besar APK terpasang (Gerbang 0). Semua rencana "kejar alpha jendela" ditutup.
+- [ ] Logging sekali-di-render di `drawPanel`: `alpha` efektif `backgroundPaint`/`featherPaint`, ketiga stop warna, dan **`alpha` view** + `windowManager` params. Konfirmasi tidak ada `LAYER_TYPE_SOFTWARE` tak terduga (maskFilter + layer bisa mengubah komposit).
+- [ ] Guard anti-regresi numerik: uji `shiftLuminance`/`bandAverage`/`gradientEnd` menghasilkan **stop alpha=255 untuk semua 297 kombinasi** — ghost hanya bisa lahir dari stop ber-alpha < 255, alpha view/window, atau instalasi lama.
+- [ ] **Probe warna keras (paling murah dan paling decisif; kerjakan sebelum/logging daripada sesudah).** Ganti *sementara* isi `drawPanel` jadi warna keras tanpa shader dan tanpa feather: `backgroundPaint.color = Color.rgb(255, 0, 0); backgroundPaint.shader = null;` lalu matikan cincin feather. Build, tes layar yang sama, screenshot, jalankan tool terima:
+  - panel **merah murni**, teks JP hilang total, slope A ≈ 0 → jalur paint opaque; ghost tidak lahir dari `drawPanel`. Cari di jendela (Gerbang 1b) atau instalasi (Gerbang 0).
+  - panel merah tapi bayangan JP masih tembus → alpha menempel **di atas paint ini** (maskFilter/komposit), bukan soal warna. Ini menggugurkan semua rencana "haluskan gradien" dan memindahkan pekerjaan ke `FloatingService`.
+  - hasil **tidak berubah sama sekali** → APK terpasang bukan build ini; kembali ke Gerbang 0, jangan sentuh kode lagi.
+  Hapus probe setelah satu pembacaan — jangan di-commit.
+- [ ] **Uji pembeda (1b):** ghost mungkin berasal dari dua tempat berbeda, dan perbaikannya berbeda:
+  - *hanya panel* yang tembus → perbaiki `drawPanel`; teks terjemahan tetap hitam/putih solid, floor-nya ~0.
+  - *seluruh jendela* di-alpha → perbaiki `FloatingService.showTranslationOverlay` (view/window alpha); teks terjemahan **ikut** terdilusi (hitam tidak pernah sampai ~0).
+  Screenshot 2026-09-28 condong ke jalur kedua (floor tinta terjemahan **p1 = 34, min = 18**, bukan ~0). Tapi angka ini belum bebas-AA, jadi **jangan dipegang** — pastikan lewat instalasi fresh + logging. Kalau terkonfirmasi, ini bug jendela, bukan bug warna panel, dan semua usaha menyetop "wash" di panel akan gagal.
+   **Pembatas penting (terukur, dan ini yang paling mempersempit):** tombol FAB aplikasi di screenshot hasil muncul dengan warna **persis** `#6C5CE7` — terukur (109,92,232) pada 2.715 piksel, target (108,92,231). FAB adalah jendela lain dari app yang sama, lewat pipeline MIUI screenshot yang sama, dan ia **tidak terdilusi**. Jadi screenshot/Gallery tidak meredupkan warna, dan MIUI tidak meredupkan semua overlay secara global. Dilusi spesifik pada **jendela overlay terjemahan**. Kandidat tersisa hanya dua: `view.alpha`/`params.alpha` pada jendela itu, atau alpha yang menempel pada paint/shader jalur panel.
+
+**Gerbang 2 — geometry (tetap perlu apa pun hasil Gerbang 0).** [DIPASANG 2026-09-29 di working tree — lolos type-check lokal `check.ps1` exit 0]
+- [x] **Batas grup = batas control, bukan batas baris.** `stacksVertically` kini menolak merge bila tetangga tersempit < `siblingWidthRatio` (0,55) dari yang terlebar → label pendek seperti `◆説明` tidak lagi disedot ke body satu kolom.
+- [x] **Box ≥ lebar teks sumber.** `MeasuredItem.coveragePadding` = `originalBoxHeight × 0,05` clamp 2–6px, dipakai `measureItem` melebarkan `boxLeft`/`boxRight` (clamp tepi layar + guard jangan susut), dan `buildRenderItem` memasang `coverageFloor`: tinggi panel ≥ box sumber + padding, jadi panel tak pernah lebih pendek dari control yang ditutupi.
+- [x] **Padding penutup stroke.** Rim 5% tinggi glyph (= band 4–6% yang diminta catatan) terpasang lewat `coveragePadding`. Residu pita di luar box OCR (y327–351 dll.) bukan bocor dan memang tidak ada box-nya — tidak dikejar.
+- [ ] Pertahankan: `clipRect` per-item, satu panel per grup, teks per item, `normalizeParagraph`, geser-kiri-hanya-overflow, dua-pass uniform scale. **(semua utuh di working tree — diverifikasi dibaca ulang sebelum commit)**
+
+**Gerbang 3 — penerimaan ulang berbasis angka, bukan mata.**
+- [ ] Tool terima sudah jadi: **`.typecheck\blend-acceptance.ps1`** (read-only QA di PC, tidak masuk APK, tidak di-commit sebagai kode produksi — `.typecheck/` sudah gitignored). Eksekusi file `.ps1` diblokir execution policy di banyak mesin, jadi muat sebagai scriptblock:
+      ```
+      $t=[IO.File]::ReadAllText(".typecheck\blend-acceptance.ps1"); & ([ScriptBlock]::Create($t)) `
+        -Source <src.jpg> -Result <out.jpg> -X0 812 -Y0 655 -X1 1552 -Y1 772
+      ```
+      Keluaran tiga metrik + verdict, exit 0 = PASS. Ambang: **A slope ≤ 0,05** (cahaya game yang menembus), **B corr baris-bebas-tinta ≤ 0,20** (ghost murni), **C p1 ≤ 20** (teks tetap solid; informatif, tidak menggagalkan verdict). Metrik B **butuh rect satu panel** — tanpa rect ia mencari di seluruh frame dan tidak pernah ketemu baris yang lolos (game art gelap mengisi frame).
+      Nilai hari ini pada build terpasang: A 0,200 REVISE · B 0,989 REVISE · C p1 34 REVISE → VERDICT REVISE. Itu baseline yang harus turun.
+- [ ] Screenshot perangkat layar yang sama → jalankan tool → simpan verdict JSON baru di `.omd/visual-verdict/` → bandingkan dengan `.omd/visual-verdict/2026-09-28T22-28-57.json` (54/revise) sebagai bukti membaik.
+
+**Keputusan terbuka untuk user (bukan bug layout):** terjemahan 魔法攻撃力 → "Serangan Hukum" dan 魔法防御力 → "Kemampuan" salah — itu kualitas provider MT (DeepL/OpenRouter), di luar scope plan ini. Catat saja sebagai kandidat glosarium nanti.
+
 
 ### Tahap 3 — Klip: ink card minimalis
 
@@ -270,8 +332,7 @@ Spesifikasi:
 
 ## Log keputusan (tambahkan saat kerja berjalan)
 
-- 2026-09-25: dibuat; branch + referensi sesi sebelumnya diamankan sebagai `1639ed1`.
-- 2026-09-25 Tahap 1: sampling glyph pakai k-means 3 cluster (bukan 2 — outline sering menyatu dengan background pada 2 cluster, terutama teks terang di panel gelap). Threshold outline vs background diturunkan ke 15 luminance: dark-on-dark outline memang bedanya kecil, dan tebakan salah aman karena stroke sewarna panel praktis tak terlihat. Shadow pakai `setShadowLayer` langsung (teks didukung hardware canvas, tanpa software layer).
+- 2026-09-25: dibuat; branch + referensi sesi sebelumnya diamankan sebagai `1639ed1`.- 2026-09-25 Tahap 1: sampling glyph pakai k-means 3 cluster (bukan 2 — outline sering menyatu dengan background pada 2 cluster, terutama teks terang di panel gelap). Threshold outline vs background diturunkan ke 15 luminance: dark-on-dark outline memang bedanya kecil, dan tebakan salah aman karena stroke sewarna panel praktis tak terlihat. Shadow pakai `setShadowLayer` langsung (teks didukung hardware canvas, tanpa software layer).
 - 2026-09-25 Tahap 1b: hasil test perangkat men perteneciente dua cacat render, bukan cacat sampling. (1) Panel tidak pernah tumbuh vertikal untuk mode Manual (`toleranceRatio=1`), jadi terjemahan yang wrap meluber ke bawah patch dan menimpa teks asli — tidak ada `clipRect` di app saat itu. (2) Kontras fill diukur terhadap warna background asli, padahal `drawPanel` mengecat panel lebih gelap (0.62x) untuk panel terang; hasilnya fill game bisa menyatu dengan panelnya sendiri. Outline juga bisa mati justru ketika sampling dipercaya, padahal jalur fallback selalu menggambarnya. Semua diperbaiki di `TranslationOverlayView.kt`; `paintedPanelColor()` sekarang satu-satunya sumber warna panel.
 - 2026-09-25 Tahap 1c: test atas build `b32d261` (Actions #355) menunjukkan font size antar-paragraf tidak konsisten — paragraf panjang memaksa paragraf di bawahnya menyusut secara independen per item (`fitScale` dihitung per paragraf), sehingga hasilnya zig-zag acak dan sebagian teks jadi sangat kecil. Dipecah jadi dua pass: `measureItem` mengukur, `uniformScaleFor` memilih satu skala terkecil yang perlu di seluruh layar, `buildRenderItem` menerapkannya ke semua item. Konsekuensi yang disepakati user: terjemahan panjang boleh meluber dari panelnya sendiri, asalkan tidak mengorbankan paragraf lain. Catatan: `buildOverlapGroups()` yang ada di branch `debugging` hilang di branch ini — ia menyamakan **warna** antar-box overlap, bukan ukuran.
 - 2026-09-26 Tahap 1d: review atas `980c7bd` menemukan dua hal. (1) `normalizeParagraph` mempertahankan `\n` dari DeepL sebagai baris baru, padahal DeepL memecah kalimat sesuka hatinya → kalimat muat 1 baris jadi 3 baris pendek, panel makin tinggi, paragraf bawah makin sempit. Diubah: `\n` jadi whitespace biasa. Diagnosis awal sempat salah mengaitkannya ke prompt OpenRouter; provider yang dipakai DeepL. (2) `collidesWithOtherBox` membuat box yang tumbuh menyerah ruang saat nabrak box lain — untuk kolom dialog berdempet vertikal tiap baris saling mengalah, diperparah oleh pertumbuhan vertikal Tahap 1b. Overlap adalah kondisi normal teks berdempet, jadi logikanya dihapus; `buildOverlapGroups()` (union-find) dari `debugging` dikembalikan untuk menyamakan **warna** panel antar-box overlap, dan warnanya juga dipakai untuk guard kontras teks.
