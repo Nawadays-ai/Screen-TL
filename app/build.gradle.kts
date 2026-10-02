@@ -4,6 +4,7 @@ plugins {
 }
 
 val isCiBuild = System.getenv("CI") == "true"
+val ciRunNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
 val ciKeystoreFile = System.getenv("SCREEN_TL_KEYSTORE_FILE")
 val ciStorePassword = System.getenv("SCREEN_TL_KEYSTORE_PASSWORD")
 val ciKeyAlias = System.getenv("SCREEN_TL_KEY_ALIAS")
@@ -17,8 +18,12 @@ android {
         applicationId = "com.example.screentranslator"
         minSdk = 24
         targetSdk = 34
-        versionCode = maxOf(2, System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 2)
-        versionName = "1.1"
+        versionCode = maxOf(2, ciRunNumber ?: 2)
+        // The run number has to be readable on the device. Every CI build shares one package name
+        // and one signing key, so installing over an older build leaves no visible trace of which
+        // build won — and a stale install was measured producing a panel opacity the current source
+        // cannot generate. versionName is what Settings -> Apps shows, so put the run there.
+        versionName = if (ciRunNumber != null) "1.1 (run $ciRunNumber)" else "1.1"
     }
 
     if (isCiBuild) {

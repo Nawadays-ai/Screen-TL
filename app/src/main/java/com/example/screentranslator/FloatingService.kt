@@ -398,8 +398,14 @@ class FloatingService : Service() {
             gravity = Gravity.TOP or Gravity.START
             x = 0
             y = 0
+            // Stated rather than inherited. The default is 1.0, so this changes nothing on a stock
+            // renderer, but the panel compositing at roughly 0.8 opacity on the test device while
+            // the view drew nothing but alpha 255. An explicit 1f here means the overlay window's
+            // opacity is a value this file owns, not one it silently borrows.
+            alpha = 1f
         }
-        Log.i(TAG, "Showing translation overlay: ${sourceWidth}x${sourceHeight} provider=${translationManager?.getProviderName()}")
+        view.alpha = 1f
+        Log.i(TAG, "Showing translation overlay: ${sourceWidth}x${sourceHeight} provider=${translationManager?.getProviderName()} version=${packageManager.getPackageInfo(packageName, 0).versionName}")
         overlayView = view
         windowManager.addView(view, overlayParams)
     }
