@@ -352,56 +352,20 @@ class TranslationOverlayView(context: Context) : View(context) {
      * The border is only drawn when the panel would otherwise blend into what surrounds it.
      */
     private fun drawPanel(canvas: Canvas, box: RectF, paintedColor: Int, radius: Float, patch: TextLayoutAnalyzer.PatchSample?): IntArray {
-        val feather = (minOf(box.width(), box.height()) * featherRadiusRatio).coerceIn(2f, 3f)
-        val topColor = if (patch != null) gradientEnd(paintedColor, luminanceOf(patch.topColor)) else paintedColor
-        val bottomColor = if (patch != null) gradientEnd(paintedColor, luminanceOf(patch.bottomColor)) else paintedColor
-        val middleColor = bandAverage(topColor, bottomColor)
-        val stops = intArrayOf(topColor, middleColor, bottomColor)
-        val positions = floatArrayOf(0f, 0.5f, 1f)
-
-        // An opaque base goes down first. Paint.setAlpha does not force the colours a shader
-        // produces to be opaque — the gradient stops own their own alpha — so panel coverage must
-        // not depend on every stop being constructed correctly forever. This underlay makes show-
-        // through structurally impossible: whatever the gradient does afterwards, it lands on
-        // pixels this fill has already made opaque.
+        // TEMPORARY GERBANG-1 PROBE — REVERT AFTER ONE DEVICE READING (plan Tahap 2r).
+        // The fresh-install build 1.1 (run 364) still measures a panel compositing at ~0.67
+        // opacity inside the body panel (f median 0.33 over 14k JP-ink pixels, joint364/inside364),
+        // while text in the same window reaches out=5 (fully opaque). No paint in this file can
+        // produce that split. This probe replaces the whole panel paint path with ONE flat opaque
+        // fill — no shader, no ring, no border — so the next screenshot pair answers the only
+        // open question: does the ghost come from anything this function draws (panel reads flat
+        // 128 everywhere) or from compositing above the paint (the game still shows through)?
         backgroundPaint.shader = null
-        backgroundPaint.color = paintedColor
+        backgroundPaint.color = Color.rgb(128, 128, 128)
         backgroundPaint.alpha = 255
         canvas.drawRoundRect(box, radius, radius, backgroundPaint)
-
-        backgroundPaint.shader = LinearGradient(box.left, box.top, box.left, box.bottom.coerceAtLeast(box.top + 1f), stops, positions, Shader.TileMode.CLAMP)
-        canvas.drawRoundRect(box, radius, radius, backgroundPaint)
-
-        // The ring is inset by half its own stroke width, so the stroke lands exactly flush with
-        // the panel edge and no part of it falls on a pixel the panel has not already covered. It
-        // carries the same gradient as the fill, otherwise the 4-6px of flat painted colour at the
-        // edge would hard-step against the drift it is meant to soften.
-        //
-        // The ring used to also set a BlurMaskFilter. It is a no-op on the hardware canvas, so all
-        // it ever did was carry a hazard: a mask filter is the classic trigger for a software-layer
-        // fallback, and a software layer on a full-screen window composites differently. Measured
-        // device pixels showed the panel blending with the game at roughly 0.8 opacity while this
-        // file contained nothing but alpha 255, which is exactly the signature that hypothesis
-        // predicts — so the filter is gone rather than kept-and-hoped.
-        featherPaint.style = Paint.Style.STROKE
-        featherPaint.strokeWidth = feather * 2f
-        featherPaint.alpha = 255
-        featherPaint.shader = LinearGradient(box.left, box.top, box.left, box.bottom.coerceAtLeast(box.top + 1f), stops, positions, Shader.TileMode.CLAMP)
-        val ring = RectF(box.left + feather, box.top + feather, (box.right - feather).coerceAtLeast(box.left + feather), (box.bottom - feather).coerceAtLeast(box.top + feather))
-        canvas.drawRoundRect(ring, (radius - feather).coerceAtLeast(0f), (radius - feather).coerceAtLeast(0f), featherPaint)
-        featherPaint.shader = null
-        featherPaint.style = Paint.Style.FILL
-        backgroundPaint.shader = null
-
-        val luminance = luminanceOf(paintedColor)
-        if (luminance > 160f) {
-            borderPaint.color = Color.argb(38, 0, 0, 0)
-            borderPaint.strokeWidth = (width / 1080f).coerceAtLeast(1f)
-            canvas.drawRoundRect(box, radius, radius, borderPaint)
-        }
-        // The caller needs the colours actually under the text so contrast is judged against them
-        // rather than against the flat average the panel started from.
-        return intArrayOf(topColor, middleColor, bottomColor)
+        val probe = Color.rgb(128, 128, 128)
+        return intArrayOf(probe, probe, probe)
     }
 
     /**
