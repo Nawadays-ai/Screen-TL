@@ -1,7 +1,6 @@
 package com.example.screentranslator
 
 import android.content.Context
-import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
@@ -35,6 +34,35 @@ class TranslationOverlayView(context: Context) : View(context) {
 
     private val horizontalPaddingRatio = 0.14f
     private val verticalPaddingRatio = 0.10f
+
+    /**
+     * How far a panel overhangs the control it covers, as a fraction of that control's height.
+     *
+     * Coverage is the panel's first job: a patch that stops inside the source control leaves the
+     * game's own glyphs showing at the edge, which is the one failure that makes the translation
+     * unreadable. ML Kit's box hugs the detected glyphs, and a glyph's outline and antialiased
+     * rim sit outside that box, so a panel laid out on the box alone leaves a thin band of source
+     * text visible along whichever edge the box came up short on. This rim is what closes it.
+     *
+     * 5% of the control's height lands in the 4-6% band the Tahap 2r notes call for, which is a
+     * few pixels on game text and imperceptible against the panel it extends. It is deliberately
+     * not larger: the panel has to stay the control's size, and a generous rim would start
+     * covering whatever the control sits next to.
+     */
+    private val coveragePaddingRatio = 0.05f
+    private val minCoveragePaddingPx = 2f
+    private val maxCoveragePaddingPx = 6f
+
+    /**
+     * The width ratio below which a neighbour is a separate control rather than another line.
+     *
+     * Lines of one paragraph differ in width, so the merge cannot demand equal widths, but the
+     * spread within a paragraph is bounded: a line is a line, and even a short final line stays
+     * well past half the longest. A box far below that is a different kind of thing — `◆説明`
+     * above the body it titles, a short label above a block — and merging it in is what produced
+     * one grey slab covering label, body and effect lines at once instead of three controls.
+     */
+    private val siblingWidthRatio = 0.55f
     private val minTextSizePx = 8f
     private val maxTextSizePx = 96f
     private val minFontScale = 0.62f
@@ -317,10 +345,9 @@ class TranslationOverlayView(context: Context) : View(context) {
      * translation.
      *
      * A vertical gradient built from the sampled top/bottom bands adds back the vertical colour
-     * drift a real control has (a lit top edge, a shadowed bottom one) without letting any of the
-     * game show through: every stop is an opaque RGB blend and the panel is still drawn at full
-     * alpha. A 2-3px blurred ring just inside the panel edge keeps the patch from reading as a
-     * pasted rectangle.
+     * drift a real control has (a lit top edge, a shadowed bottom one). An opaque base fill goes
+     * down before the gradient so coverage never depends on the shader's stops keeping alpha 255,
+     * and a flush inner ring carries the same gradient so the panel edge does not hard-step.
      *
      * The border is only drawn when the panel would otherwise blend into what surrounds it.
      */
@@ -332,29 +359,36 @@ class TranslationOverlayView(context: Context) : View(context) {
         val stops = intArrayOf(topColor, middleColor, bottomColor)
         val positions = floatArrayOf(0f, 0.5f, 1f)
 
+        // An opaque base goes down first. Paint.setAlpha does not force the colours a shader
+        // produces to be opaque — the gradient stops own their own alpha — so panel coverage must
+        // not depend on every stop being constructed correctly forever. This underlay makes show-
+        // through structurally impossible: whatever the gradient does afterwards, it lands on
+        // pixels this fill has already made opaque.
+        backgroundPaint.shader = null
+        backgroundPaint.color = paintedColor
         backgroundPaint.alpha = 255
-        backgroundPaint.color = Color.WHITE
+        canvas.drawRoundRect(box, radius, radius, backgroundPaint)
+
         backgroundPaint.shader = LinearGradient(box.left, box.top, box.left, box.bottom.coerceAtLeast(box.top + 1f), stops, positions, Shader.TileMode.CLAMP)
         canvas.drawRoundRect(box, radius, radius, backgroundPaint)
 
-        // The ring is inset by half its own stroke width, so on the hardware path the stroke lands
-        // exactly flush with the panel edge and no part of it falls on a pixel the panel has not
-        // already covered. It carries the same gradient as the fill, otherwise the 4-6px of flat
-        // painted colour at the edge would hard-step against the drift it is meant to soften.
-        // BlurMaskFilter needs a software layer, and forcing one on a full-screen overlay would push
-        // every panel onto the CPU rasteriser each frame, so the view stays on the hardware canvas
-        // and the mask filter is ignored there. Consequence: the ring is a plain inner edge, not a
-        // blur, and if anyone ever does add a software layer this inset stops being enough — a
-        // Blur.NORMAL of radius `feather` would spread `feather` px past the stroke onto uncovered
-        // pixels. Widen the inset by the blur radius before doing that.
+        // The ring is inset by half its own stroke width, so the stroke lands exactly flush with
+        // the panel edge and no part of it falls on a pixel the panel has not already covered. It
+        // carries the same gradient as the fill, otherwise the 4-6px of flat painted colour at the
+        // edge would hard-step against the drift it is meant to soften.
+        //
+        // The ring used to also set a BlurMaskFilter. It is a no-op on the hardware canvas, so all
+        // it ever did was carry a hazard: a mask filter is the classic trigger for a software-layer
+        // fallback, and a software layer on a full-screen window composites differently. Measured
+        // device pixels showed the panel blending with the game at roughly 0.8 opacity while this
+        // file contained nothing but alpha 255, which is exactly the signature that hypothesis
+        // predicts — so the filter is gone rather than kept-and-hoped.
         featherPaint.style = Paint.Style.STROKE
         featherPaint.strokeWidth = feather * 2f
         featherPaint.alpha = 255
-        featherPaint.maskFilter = BlurMaskFilter(feather, BlurMaskFilter.Blur.NORMAL)
         featherPaint.shader = LinearGradient(box.left, box.top, box.left, box.bottom.coerceAtLeast(box.top + 1f), stops, positions, Shader.TileMode.CLAMP)
         val ring = RectF(box.left + feather, box.top + feather, (box.right - feather).coerceAtLeast(box.left + feather), (box.bottom - feather).coerceAtLeast(box.top + feather))
         canvas.drawRoundRect(ring, (radius - feather).coerceAtLeast(0f), (radius - feather).coerceAtLeast(0f), featherPaint)
-        featherPaint.maskFilter = null
         featherPaint.shader = null
         featherPaint.style = Paint.Style.FILL
         backgroundPaint.shader = null
@@ -453,6 +487,7 @@ class TranslationOverlayView(context: Context) : View(context) {
         val maxTextWidth: Float,
         val originalBoxTop: Float,
         val verticalPadding: Float,
+        val coveragePadding: Float,
         val maxPanelHeight: Float,
         val availableHeight: Float,
         val requiredHeight: Float
@@ -521,6 +556,16 @@ class TranslationOverlayView(context: Context) : View(context) {
             boxRight -= slide
         }
 
+        // Coverage rim: the panel is pushed out past the detected glyphs on every side, so the
+        // source text's own outline and antialiased rim cannot survive as a fringe along the edge
+        // of the patch. Applied after the slide so the rim can never drag the panel back off
+        // screen, and clamped so it can only ever widen the box, never shrink it below the
+        // control it is covering.
+        val coveragePadding = (originalBoxHeight * coveragePaddingRatio).coerceIn(minCoveragePaddingPx, maxCoveragePaddingPx)
+        boxLeft = (boxLeft - coveragePadding).coerceAtLeast(0f)
+        boxRight = (boxRight + coveragePadding).coerceAtMost(width.toFloat())
+        if (boxRight - boxLeft < originalWidth) boxRight = (boxLeft + originalWidth).coerceAtMost(width.toFloat())
+
         val maxTextWidth = (boxRight - boxLeft - horizontalPadding * 2f).coerceAtLeast(1f)
         val originalBoxTop = (baseTop - (originalBoxHeight - originalHeight) / 2f).coerceAtLeast(0f)
 
@@ -543,7 +588,7 @@ class TranslationOverlayView(context: Context) : View(context) {
         return MeasuredItem(
             item, baseLeft, baseTop, boxLeft, boxRight, originalWidth, originalBoxHeight,
             horizontalPadding, baseTextSize, maxTextWidth, originalBoxTop, verticalPadding,
-            maxPanelHeight, available, required
+            coveragePadding, maxPanelHeight, available, required
         )
     }
 
@@ -553,7 +598,18 @@ class TranslationOverlayView(context: Context) : View(context) {
         val finalTextSize = (m.baseTextSize * uniformScale).coerceIn(minTextSizePx, m.baseTextSize)
         val lines = wrapText(normalized, m.maxTextWidth, finalTextSize)
         val needed = finalTextSize * lineSpacingRatio * lines.size + m.verticalPadding * 2f
-        val settledHeight = minOf(needed, m.maxPanelHeight)
+
+        // The panel has to cover the control it replaces, not merely its own translation.
+        //
+        // Sizing it purely from the text let a short translation produce a short panel, and the
+        // rest of the control's own glyphs then stayed visible below the patch — measured as a row
+        // with zero replaced pixels and 51-269 pixels of untouched source ink. The Indonesian is
+        // routinely the shorter of the two here, so this is the common case, not an edge one. The
+        // floor is the control's height plus the coverage rim, which is enough to close it without
+        // the panel growing past what the ceiling allows; past that ceiling the text shrinks
+        // instead, exactly as before.
+        val coverageFloor = m.originalBoxHeight + m.coveragePadding * 2f
+        val settledHeight = minOf(maxOf(needed, coverageFloor), m.maxPanelHeight)
 
         // Centre the grown panel on the original control, then shift it back inside the screen.
         // The shift is applied to both edges at once so a panel that cannot fit above its control
@@ -656,6 +712,19 @@ class TranslationOverlayView(context: Context) : View(context) {
         val overlapX = minOf(a.right, b.right) - maxOf(a.left, b.left)
         if (overlapX <= 0f) return false
         val narrowest = minOf(a.width(), b.width())
+        val widest = maxOf(a.width(), b.width())
+
+        // Two boxes of very different widths are not two lines of one control.
+        //
+        // Lines of a paragraph differ in width, so equal widths cannot be required, but the spread
+        // is bounded: a short final line still stays well past half the longest one. Something far
+        // below that is a different kind of thing sharing a column — the `◆説明` label sitting
+        // above the body it titles, a heading above a block — and merging it is what produced one
+        // grey slab spanning a label, a paragraph and a row of effect lines instead of the three
+        // separate controls the game actually draws. The player reads those as separate regions,
+        // so the overlay has to keep them separate too.
+        if (widest > 0f && narrowest / widest < siblingWidthRatio) return false
+
         val overlapY = minOf(a.bottom, b.bottom) - maxOf(a.top, b.top)
         val verticalRun = a.top < b.top || b.top < a.top
         // Touching counts, and a small vertical gap is the normal line pitch of a control.
