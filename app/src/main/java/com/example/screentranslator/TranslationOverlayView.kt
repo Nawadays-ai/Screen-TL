@@ -262,7 +262,26 @@ class TranslationOverlayView(context: Context) : View(context) {
         textPaint.textScaleX = 1f; textPaint.color = Color.WHITE; textPaint.alpha = 255
         textPaint.style = Paint.Style.FILL
         textPaint.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
+
+        // TEMPORARY GERBANG-1 PROBE v2 — REVERT WITH drawPanel AFTER ONE DEVICE READING.
+        // The first probe reading came back as a flat 153 plateau — paintedPanelColor's exact
+        // signature over a white page — which the probe's flat 128 cannot produce. Either the
+        // screenshot was taken with the old build still installed, or the probe painted and the
+        // whole panel composites at ~0.8 alpha (0.8*128+0.2*255=153, f=0.44, text floor 31 - all
+        // three measured values fit that one model). A log line cannot settle this after the fact,
+        // so the probe draws its own build identity on every frame: a screenshot showing the
+        // magenta stamp proves the probe painted it; one without it proves the install never
+        // happened. The reading can no longer be attributed to the wrong build.
+        if (probeStamp.isNotEmpty()) {
+            textPaint.color = Color.rgb(255, 0, 255)
+            textPaint.textSize = 30f
+            canvas.drawText(probeStamp, 8f, 34f, textPaint)
+            textPaint.color = Color.WHITE
+        }
     }
+
+    /** Build identity drawn on every overlay frame while the Gerbang-1 probe is installed. */
+    var probeStamp: String = ""
 
     private fun klipStatusBarOffsetPx(): Float {
         val inset = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) rootWindowInsets?.getInsets(WindowInsets.Type.statusBars())?.top ?: 0 else {

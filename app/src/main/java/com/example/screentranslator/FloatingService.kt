@@ -405,6 +405,10 @@ class FloatingService : Service() {
             alpha = 1f
         }
         view.alpha = 1f
+        // Gerbang-1 probe v2: the overlay draws its own build identity, so a screenshot can never
+        // again be ambiguous about which build painted it. Harmless once the probe is reverted -
+        // probeStamp is only drawn while the probe code is in TranslationOverlayView.
+        view.probeStamp = "PROBE " + packageManager.getPackageInfo(packageName, 0).versionName
         Log.i(TAG, "Showing translation overlay: ${sourceWidth}x${sourceHeight} provider=${translationManager?.getProviderName()} version=${packageManager.getPackageInfo(packageName, 0).versionName}")
         overlayView = view
         windowManager.addView(view, overlayParams)
