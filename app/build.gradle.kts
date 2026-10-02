@@ -23,7 +23,7 @@ android {
         // and one signing key, so installing over an older build leaves no visible trace of which
         // build won — and a stale install was measured producing a panel opacity the current source
         // cannot generate. versionName is what Settings -> Apps shows, so put the run there.
-        versionName = if (ciRunNumber != null) "1.1 (run $ciRunNumber)" else "1.1"
+        versionName = if (ciRunNumber != null) "1.1.$ciRunNumber" else "1.1"
     }
 
     if (isCiBuild) {
