@@ -205,6 +205,10 @@ class TranslationOverlayView(context: Context) : View(context) {
         val scaleY = height.toFloat() / sourceHeight.toFloat()
         val coordinateOffsetY = if (toleranceRatio > 1.5f) klipStatusBarOffsetPx() else 0f
 
+        // Draw semi-transparent dark scrim over entire canvas first, so panel backgrounds are
+        // composited on top of it within the same layer rather than blended across window layers.
+        canvas.drawColor(Color.argb(100, 0, 0, 0))
+
         // One patch per group, not per box. A column of stacked lines is a single control, so it
         // gets a single background; drawing each line's own rounded rect left visible seams and
         // read as a stack of separate cards. The text pass below still runs per item.
