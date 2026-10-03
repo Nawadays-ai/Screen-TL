@@ -14,9 +14,6 @@ import kotlin.math.roundToInt
 
 /** Renders translated OCR blocks while keeping screenshot coordinates 1:1. */
 class TranslationOverlayView(context: Context) : View(context) {
-    init {
-        setLayerType(LAYER_TYPE_HARDWARE, null)
-    }
     private val backgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; alpha = 255 }
     private val featherPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; alpha = 255 }
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.2f }
