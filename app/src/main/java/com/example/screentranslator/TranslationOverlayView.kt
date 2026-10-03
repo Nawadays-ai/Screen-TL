@@ -205,9 +205,10 @@ class TranslationOverlayView(context: Context) : View(context) {
         val scaleY = height.toFloat() / sourceHeight.toFloat()
         val coordinateOffsetY = if (toleranceRatio > 1.5f) klipStatusBarOffsetPx() else 0f
 
-        // Draw semi-transparent dark scrim over entire canvas first, so panel backgrounds are
-        // composited on top of it within the same layer rather than blended across window layers.
-        canvas.drawColor(Color.argb(100, 0, 0, 0))
+        // Fill entire canvas with solid black background (no transparency) so PixelFormat.OPAQUE
+        // works correctly. TRANSLUCENT format causes Android compositor to force ~76% window opacity
+        // regardless of alpha settings, making panels semi-transparent even when drawn with alpha=255.
+        canvas.drawColor(Color.BLACK)
 
         // DEBUG: Log panel drawing state
         android.util.Log.d("TranslationOverlay", "onDraw: groupRects.size=${groupRects.size} groupColors.size=${groupColors.size} renderItems.size=${renderItems.size}")
