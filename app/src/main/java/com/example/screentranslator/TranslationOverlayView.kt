@@ -209,6 +209,9 @@ class TranslationOverlayView(context: Context) : View(context) {
         // composited on top of it within the same layer rather than blended across window layers.
         canvas.drawColor(Color.argb(100, 0, 0, 0))
 
+        // DEBUG: Log panel drawing state
+        android.util.Log.d("TranslationOverlay", "onDraw: groupRects.size=${groupRects.size} groupColors.size=${groupColors.size} renderItems.size=${renderItems.size}")
+
         // One patch per group, not per box. A column of stacked lines is a single control, so it
         // gets a single background; drawing each line's own rounded rect left visible seams and
         // read as a stack of separate cards. The text pass below still runs per item.
@@ -220,14 +223,22 @@ class TranslationOverlayView(context: Context) : View(context) {
         val paintedStops = arrayOfNulls<IntArray>(groupRects.size)
         this.paintedStops = paintedStops
         groupRects.forEachIndexed { index, rect ->
-            if (index >= groupColors.size) return@forEachIndexed
+            if (index >= groupColors.size) {
+                android.util.Log.w("TranslationOverlay", "Skipped group $index: index >= groupColors.size")
+                return@forEachIndexed
+            }
             val left = rect.left * scaleX
             val top = rect.top * scaleY + coordinateOffsetY
             val right = rect.right * scaleX
             val bottom = rect.bottom * scaleY + coordinateOffsetY
-            if (right <= left || bottom <= top) return@forEachIndexed
+            if (right <= left || bottom <= top) {
+                android.util.Log.w("TranslationOverlay", "Skipped group $index: invalid box left=$left top=$top right=$right bottom=$bottom")
+                return@forEachIndexed
+            }
             val box = RectF(left, top, right, bottom)
             val radius = ((bottom - top) * 0.12f).coerceIn(2f, 7f)
+            val color = groupColors[index]
+            android.util.Log.d("TranslationOverlay", "Drawing panel $index: box=$box color=${Integer.toHexString(color)}")
             paintedStops[index] = drawPanel(canvas, box, groupColors[index], radius, groupPatches.getOrNull(index))
         }
 
@@ -376,6 +387,7 @@ class TranslationOverlayView(context: Context) : View(context) {
         backgroundPaint.shader = null
         backgroundPaint.color = paintedColor
         backgroundPaint.alpha = 255
+        android.util.Log.d("TranslationOverlay", "drawPanel: box=$box color=${Integer.toHexString(paintedColor)} paint.alpha=${backgroundPaint.alpha}")
         canvas.drawRoundRect(box, radius, radius, backgroundPaint)
         return intArrayOf(paintedColor, paintedColor, paintedColor)
     }
