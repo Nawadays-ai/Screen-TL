@@ -405,6 +405,8 @@ class FloatingService : Service() {
             alpha = 1f
         }
         view.alpha = 1f
+        // Gerbang-1 probe: visual stamp to prove build and frame drawing.
+        view.probeStamp = "STAMP " + packageManager.getPackageInfo(packageName, 0).versionName
         Log.i(TAG, "Showing translation overlay: ${sourceWidth}x${sourceHeight} provider=${translationManager?.getProviderName()} version=${packageManager.getPackageInfo(packageName, 0).versionName}")
         overlayView = view
         windowManager.addView(view, overlayParams)
