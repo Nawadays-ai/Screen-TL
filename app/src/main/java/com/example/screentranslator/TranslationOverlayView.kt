@@ -263,15 +263,7 @@ class TranslationOverlayView(context: Context) : View(context) {
         textPaint.style = Paint.Style.FILL
         textPaint.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
 
-        // TEMPORARY GERBANG-1 PROBE v2 — REVERT WITH drawPanel AFTER ONE DEVICE READING.
-        // The first probe reading came back as a flat 153 plateau — paintedPanelColor's exact
-        // signature over a white page — which the probe's flat 128 cannot produce. Either the
-        // screenshot was taken with the old build still installed, or the probe painted and the
-        // whole panel composites at ~0.8 alpha (0.8*128+0.2*255=153, f=0.44, text floor 31 - all
-        // three measured values fit that one model). A log line cannot settle this after the fact,
-        // so the probe draws its own build identity on every frame: a screenshot showing the
-        // magenta stamp proves the probe painted it; one without it proves the install never
-        // happened. The reading can no longer be attributed to the wrong build.
+        // Build identity drawn on every overlay frame while probe is active (empty by default).
         if (probeStamp.isNotEmpty()) {
             textPaint.color = Color.rgb(255, 0, 255)
             textPaint.textSize = 30f
@@ -370,21 +362,18 @@ class TranslationOverlayView(context: Context) : View(context) {
      *
      * The border is only drawn when the panel would otherwise blend into what surrounds it.
      */
+    /**
+     * Draws one solid panel with the exact sampled background color of the control it covers.
+     *
+     * The boundary box is drawn completely opaque (alpha = 255) using paintedColor directly,
+     * without darkening or gradient shifts, fully concealing the underlying source text.
+     */
     private fun drawPanel(canvas: Canvas, box: RectF, paintedColor: Int, radius: Float, patch: TextLayoutAnalyzer.PatchSample?): IntArray {
-        // TEMPORARY GERBANG-1 PROBE — REVERT AFTER ONE DEVICE READING (plan Tahap 2r).
-        // The fresh-install build 1.1 (run 364) still measures a panel compositing at ~0.67
-        // opacity inside the body panel (f median 0.33 over 14k JP-ink pixels, joint364/inside364),
-        // while text in the same window reaches out=5 (fully opaque). No paint in this file can
-        // produce that split. This probe replaces the whole panel paint path with ONE flat opaque
-        // fill — no shader, no ring, no border — so the next screenshot pair answers the only
-        // open question: does the ghost come from anything this function draws (panel reads flat
-        // 128 everywhere) or from compositing above the paint (the game still shows through)?
         backgroundPaint.shader = null
-        backgroundPaint.color = Color.rgb(128, 128, 128)
+        backgroundPaint.color = paintedColor
         backgroundPaint.alpha = 255
         canvas.drawRoundRect(box, radius, radius, backgroundPaint)
-        val probe = Color.rgb(128, 128, 128)
-        return intArrayOf(probe, probe, probe)
+        return intArrayOf(paintedColor, paintedColor, paintedColor)
     }
 
     /**
@@ -441,17 +430,10 @@ class TranslationOverlayView(context: Context) : View(context) {
     /**
      * The colour the panel is actually filled with for a given sampled background.
      *
-     * Both the panel and the text are painted at full alpha — nothing in the overlay is
-     * translucent, and a Patch that let the game show through would be unreadable on top of busy
-     * art. A light control is darkened here instead of being covered with a veil, so the panel
-     * stays opaque while gaining enough contrast for the text sitting on it.
-     *
-     * Kept in one place because the text has to make the same decision: a fill colour chosen for
-     * the game's own light control turns unreadable once the panel is darkened underneath it, so
-     * both sides have to agree on the painted result rather than each re-deriving it.
+     * Returns the exact baseColor sampled from the control background directly,
+     * ensuring solid color matching (e.g. solid white on white, solid blue on blue).
      */
-    private fun paintedPanelColor(baseColor: Int): Int =
-        if (luminanceOf(baseColor) > 160f) adjustColor(baseColor, 0.62f) else adjustColor(baseColor, 0.86f)
+    private fun paintedPanelColor(baseColor: Int): Int = baseColor
 
     private fun adjustColor(color: Int, factor: Float): Int = Color.rgb((Color.red(color) * factor).roundToIntSafe(), (Color.green(color) * factor).roundToIntSafe(), (Color.blue(color) * factor).roundToIntSafe())
     private fun Float.roundToIntSafe(): Int = roundToInt().coerceIn(0, 255)
