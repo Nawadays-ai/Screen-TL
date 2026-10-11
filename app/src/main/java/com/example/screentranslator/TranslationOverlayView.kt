@@ -159,8 +159,7 @@ class TranslationOverlayView(context: Context) : View(context) {
         // a mix of large and tiny text. One shared scale is what makes a long paragraph force every
         // other paragraph down by the same amount rather than the one below it absorbing the cost.
         val measured = translations.mapNotNull { measureItem(it, this.sourceWidth, this.sourceHeight) }
-        val uniformScale = uniformScaleFor(measured)
-        renderItems = measured.mapNotNull { buildRenderItem(it, this.sourceHeight, uniformScale) }
+        renderItems = measured.mapNotNull { buildRenderItem(it, this.sourceHeight, itemScaleFor(it)) }
         buildOverlapGroups()
         visibility = if (renderItems.isEmpty()) View.GONE else View.VISIBLE
         invalidate()
@@ -175,16 +174,13 @@ class TranslationOverlayView(context: Context) : View(context) {
      * translation is allowed to run past its own panel here on purpose — the alternative is one
      * paragraph silently starving every paragraph under it.
      */
-    private fun uniformScaleFor(measured: List<MeasuredItem>): Float {
-        var worst = 1f
-        for (item in measured) {
-            val needed = item.requiredHeight
-            if (needed > item.availableHeight && needed > 0f) {
-                val scale = (item.availableHeight / needed).coerceIn(minFontScale, 1f)
-                if (scale < worst) worst = scale
-            }
+    private fun itemScaleFor(item: MeasuredItem): Float {
+        val needed = item.requiredHeight
+        return if (needed > item.availableHeight && needed > 0f) {
+            (item.availableHeight / needed).coerceIn(minFontScale, 1f)
+        } else {
+            1f
         }
-        return worst
     }
 
     fun clearTranslations() {
